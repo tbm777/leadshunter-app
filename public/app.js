@@ -22,6 +22,7 @@ function dayPT(ms) {
 }
 const P = {
   find: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   leads: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c1.8.7 3 2.5 3.5 5.2"/>',
   campaigns: '<path d="M21 3 10 14"/><path d="M21 3l-7 18-4-7-7-4z"/>',
   manual: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="m9 13 2 2 4-4"/>',
@@ -210,7 +211,8 @@ function shell() {
 }
 function renderNav(active) {
   $('#nav').innerHTML = `<div class="nav-label">Leads</div>` + NAV.map(([id, label, icon]) => `<a href="#${id}" class="${active === id ? 'on' : ''}">${ic(icon)}${label}${id === 'leads' ? `<span class="count">${ST.leads.length >= 1000 ? (ST.leads.length / 1000).toFixed(ST.leads.length >= 10000 ? 0 : 1) + 'k' : ST.leads.length}</span>` : ''}</a>`).join('')
-    + `<div class="nav-label">Outreach</div>` + SOON.map(([l, i]) => `<a class="soon" aria-disabled="true">${ic(i)}${l}<small>Next</small></a>`).join('');
+    + `<div class="nav-label">Outreach</div>` + SOON.map(([l, i]) => `<a class="soon" aria-disabled="true">${ic(i)}${l}<small>Next</small></a>`).join('')
+    + `<div class="nav-label">Workspace</div><a href="#usage" class="${active === 'usage' ? 'on' : ''}">${ic('chart')}Usage</a>`;
   const rc = $('#railcount'); if (rc) rc.textContent = `${fmt(ST.leads.length)} leads stored here, so filtering is instant and free.`;
 }
 function tickClock() { const c = $('#clock'); if (c) c.textContent = timeFmt.format(new Date()) + ' PT'; }
@@ -241,7 +243,7 @@ document.addEventListener('submit', async (e) => {
 });
 
 /* ================================================================ router */
-const TITLES = { leads: 'Leads', find: 'Find leads', industries: 'Industries' };
+const TITLES = { leads: 'Leads', find: 'Find leads', industries: 'Industries', usage: 'Usage' };
 const V = {}, MOUNT = {};
 function render() {
   const view = (location.hash || '#leads').slice(1);
@@ -320,7 +322,7 @@ V.leads = () => `
       <div class="lsum" id="lf-sum"></div>
       <div class="ltool"><button class="btn sm fbtn" data-act="fopen">${ic('filter', 14)}Filters</button>
         <div class="lsearch">${ic('find', 15)}<input id="lq" placeholder="Search by name, website or phone" value="${esc(L$.F.q)}" autocomplete="off"></div>
-        <label class="row" style="gap:6px;color:var(--muted);font-size:12.5px" for="lsort">Sort<select class="input" id="lsort" style="width:auto;padding:5px 8px">${[['reviews', 'Most reviews'], ['rating', 'Highest rating'], ['added', 'Newest first'], ['name', 'Name A–Z']].map(([v, l]) => `<option value="${v}" ${L$.sort === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <div class="row" style="gap:6px;color:var(--muted);font-size:12.5px"><span>Sort</span>${fxsHTML('sort')}</div>
         <span class="lperf" id="lperf"></span></div>
       <div id="lf-selbar"></div>
       <div class="vt" id="vt"><div class="vt-in">
@@ -376,6 +378,9 @@ function dd(key, label, allText) {
       <div class="dd-list">${list.map(o => `<div class="dd-opt ${o.n ? '' : 'zero'}" data-ddopt="${key}:${o.v}" role="checkbox" aria-checked="${sel.has(o.v)}" tabindex="0"><span class="cb ${sel.has(o.v) ? 'on' : ''}"></span><span class="dd-l">${esc(o.l)}${o.sub ? `<small>${esc(o.sub)}</small>` : ''}</span><span class="cnt">${fmt(o.n)}</span><button class="only" data-ddonly="${key}:${o.v}">Only</button></div>`).join('') || '<div class="empty" style="padding:14px">Nothing here yet</div>'}</div>
       <div class="dd-foot"><button class="btn ghost sm" data-ddclear="${key}">Clear</button><button class="btn sm" data-dd="${key}">Done</button></div></div>` : ''}</div>`;
 }
+function segF(key, label, opts, counts) {
+  return `<div class="field"><span class="flabel">${label}</span><div class="seg-c fseg" role="radiogroup" aria-label="${label}">${opts.map(([v, l, ci]) => `<button type="button" role="radio" aria-checked="${String(L$.F[key]) === String(v)}" class="${String(L$.F[key]) === String(v) ? 'on' : ''}" data-fseg="${key}:${v}">${l}${counts && ci != null ? `<span class="fseg-n">${fmt(counts[ci])}</span>` : ''}</button>`).join('')}</div></div>`;
+}
 function selF(key, label, opts, counts) {
   return `<div class="field"><label class="flabel" for="fs-${key}">${label}</label><select class="input" id="fs-${key}" data-fsel="${key}">${opts.map(([v, l, ci]) => `<option value="${v}" ${String(L$.F[key]) === String(v) ? 'selected' : ''}>${l}${counts && ci != null ? ` (${fmt(counts[ci])})` : ''}</option>`).join('')}</select></div>`;
 }
@@ -404,11 +409,11 @@ function renderPanel() {
   withFocus(() => {
     el.innerHTML = `<div class="fp-h"><b>Filters${activeCount() ? ` <span class="dd-n">${activeCount()}</span>` : ''}</b><button class="btn ghost sm" data-act="reset" ${activeCount() ? '' : 'disabled'}>Reset all</button></div>
     <div class="fp-sec"><h5>Business</h5>${dd('ind', 'Industry', 'All industries')}${dd('loc', 'Location', 'All locations')}${rngRating()}${rngReviews()}
-      ${selF('ph', 'Phone number', [['any', 'Any'], ['yes', 'Has phone', 1], ['no', 'No phone', 0]], C[8])}
+      ${segF('ph', 'Phone number', [['any', 'Any'], ['yes', 'Has', 1], ['no', 'None', 0]], C[8])}
       <label class="ck"><input type="checkbox" data-fchk="hideClosed" ${L$.F.hideClosed ? 'checked' : ''}>Hide permanently closed businesses</label></div>
-    <div class="fp-sec"><h5>Website</h5>${selF('web', 'Website', [['any', 'Any'], ['yes', 'Has a website', 1], ['no', 'No website', 0]], C[4])}${dd('site', 'Site status', 'Any status')}${dd('pf', 'Platform', 'Any platform')}</div>
-    <div class="fp-sec"><h5>Contact</h5>${dd('form', 'Contact form', 'Any')}${selF('em', 'Email address', [['any', 'Any'], ['yes', 'Email found', 1], ['no', 'No email found', 0]], C[9])}</div>
-    <div class="fp-sec" style="border-bottom:0"><h5>Pipeline</h5>${dd('st', 'Lead status', 'Any status')}${dd('src', 'Found by search', 'Any search')}${selF('add', 'Date added', [[0, 'Any time'], [1, 'Last 24 hours'], [7, 'Last 7 days'], [30, 'Last 30 days']])}</div>`;
+    <div class="fp-sec"><h5>Website</h5>${segF('web', 'Website', [['any', 'Any'], ['yes', 'Has', 1], ['no', 'None', 0]], C[4])}${dd('site', 'Site status', 'Any status')}${dd('pf', 'Platform', 'Any platform')}</div>
+    <div class="fp-sec"><h5>Contact</h5>${dd('form', 'Contact form', 'Any')}${segF('em', 'Email address', [['any', 'Any'], ['yes', 'Found', 1], ['no', 'None', 0]], C[9])}</div>
+    <div class="fp-sec" style="border-bottom:0"><h5>Pipeline</h5>${dd('st', 'Lead status', 'Any status')}${dd('src', 'Found by search', 'Any search')}${segF('add', 'Date added', [[0, 'Any'], [1, '24 h'], [7, '7 days'], [30, '30 days']])}</div>`;
   });
 }
 function summaryParts() {
@@ -724,6 +729,7 @@ const chev = '<svg class="fxs-chev" width="14" height="14" viewBox="0 0 24 24" f
 function fxsDefs(id) {
   if (id === 'ind') return { cls: 'fxs-ind', search: true, value: FS.ind, opts: ST.industries.filter(x => !x.archived).map(x => ({ v: x.id, l: x.name, sub: x.terms.join(', ') })) };
   if (id === 'limit') return { cls: 'fxs-mini', value: FS.limit, opts: [100, 250, 500, 1000, 2500, 5000, 0].map(n => ({ v: n, l: n ? fmt(n) : 'No limit', sub: n ? '' : 'Run the whole area' })), custom: true };
+  if (id === 'sort') return { cls: 'fxs-sort', value: L$.sort, opts: [['reviews', 'Most reviews'], ['rating', 'Highest rating'], ['added', 'Newest first'], ['name', 'Name A–Z']].map(([v, l]) => ({ v, l })) };
   const m = id.match(/^rad-(\d+)$/);
   if (m) { const l = FS.locs[+m[1]]; if (!l) return null; const u = unitOf(l.country); return { cls: 'fxs-chip', value: l.rad, opts: (l.type === 'postal' ? PRAD : RAD)[u].map(([, lab], k) => ({ v: k, l: lab.replace(' around', '') })) }; }
   return null;
@@ -747,6 +753,7 @@ function fxsOpen(id) {
 }
 function fxsClose() { if (!FX.open) return; const id = FX.open; FX.open = null; fxsRerender(id); }
 function fxsSet(id, raw) {
+  if (id === 'sort') { L$.sort = raw; FX.open = null; fxsRerender('sort'); leadsUpdate(false); const vt = $('#vt'); if (vt) vt.scrollTop = 0; return; }
   const v = Number(raw);
   if (id === 'ind') { FS.ind = v; FS.terms = new Set(curInd().terms.map((_, i) => i)); FS.extra = []; FX.open = null; fxsRerender('ind'); refreshFind(['what']); return; }
   if (id === 'limit') { FS.limit = v > 0 ? Math.floor(v) : 0; FX.open = null; fxsRerender('limit'); refreshFind([]); return; }
@@ -934,7 +941,8 @@ function jobsHTML() {
       <div class="job-meta">${esc(meta)}</div>
       ${active ? `<div class="job-prog"><div class="seg" style="height:6px"><i style="width:${Math.max(2, Math.min(100, pct * 100))}%;background:var(--info)"></i></div><span class="num">${progressLine}</span></div>` : ''}
       <div class="jstats num">${stats}</div>
-      ${j.status === 'failed' && j.error ? `<div class="job-err">${ic('alert', 15)}<span>${esc(j.error)}</span></div>` : ''}</div>
+      ${j.status === 'failed' && j.error ? `<div class="job-err">${ic('alert', 15)}<span>${esc(j.error)}</span></div>` : ''}
+      ${!check && j.status === 'done' && j.limit && !j.limit_reached ? `<div class="job-note">${ic('alert', 15)}<span>Searched the whole area and found ${fmt(j.form && j.form !== 'any' ? j.qualified : j.new)} of the ${fmt(j.limit)} you wanted. Try a larger area, more locations or a nearby city.</span></div>` : ''}</div>
       <div class="row job-acts">${actions}</div></div>`;
   }).join('') + (ST.searches.length > 10 ? `<div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:center"><button class="btn ghost sm" data-act="allhist">${FS.allHist ? 'Show fewer' : `Show all ${ST.searches.length} searches`}</button></div>` : '');
 }
@@ -1026,6 +1034,65 @@ async function saveIndustry() {
   } catch (err) { $('#ind-err').textContent = err.message; }
 }
 
+/* ================================================================ usage */
+let USAGE = null, USAGE_ERR = '';
+V.usage = () => `
+  <div class="head"><div><div class="eyebrow">Workspace</div><h1>Usage</h1><p>Cloudflare's free daily limits reset at 4:00 PM PT (midnight UTC). Numbers can lag a few minutes.</p></div>
+    <button class="btn" data-act="usagerefresh">${ic('retry', 14)}Refresh</button></div>
+  <div id="usage">${usageHTML()}</div>`;
+MOUNT.usage = () => loadUsage();
+async function loadUsage() {
+  USAGE_ERR = '';
+  const el = $('#usage'); if (el && !USAGE) el.innerHTML = usageHTML();
+  try { USAGE = await api('GET', '/api/usage'); } catch (e) { USAGE_ERR = e.message; }
+  const e2 = $('#usage'); if (e2) e2.innerHTML = usageHTML();
+}
+function meter(label, used, limit, note) {
+  const pct = limit ? Math.min(100, used / limit * 100) : 0;
+  const tone = pct >= 85 ? 'bad' : pct >= 60 ? 'warn' : 'ok';
+  return `<div class="um"><div class="um-top"><span>${label}</span><span class="num"><b>${fmt(Math.round(used))}</b> / ${fmt(limit)}</span></div>
+    <div class="um-bar"><i style="width:${Math.max(pct, used ? 1.5 : 0)}%;background:var(--${tone})"></i></div><div class="um-sub"><span>${pct < 1 && used ? '<1' : Math.round(pct)}% used</span>${note ? `<span>${note}</span>` : ''}</div></div>`;
+}
+const mb = b => b == null ? '—' : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
+function usageHTML() {
+  if (USAGE_ERR) return `<div class="banner">${ic('alert', 18)}<div><b>Couldn't load usage</b>${esc(USAGE_ERR)}</div></div>`;
+  if (!USAGE) return `<div class="card card-b"><span class="spin"></span>&nbsp; Loading usage…</div>`;
+  const u = USAGE, cf = u.cloudflare || {}, gh = u.github || {}, L = u.leads || {}, T = u.today || {}, lim = u.limits;
+  const cfCard = cf.connected ? `<div class="card ucard"><div class="card-h"><div><h3>Cloudflare today</h3><p>Free plan · day ${esc(cf.day || '')} (UTC)</p></div></div><div class="card-b ugrid">
+      ${cf.workerRequests != null ? meter('Worker requests', cf.workerRequests, lim.workerRequests, cf.workerErrors ? `${fmt(cf.workerErrors)} errors` : '') : ''}
+      ${cf.d1RowsWritten != null ? meter('Database rows written', cf.d1RowsWritten, lim.d1RowsWritten) : ''}
+      ${cf.d1RowsRead != null ? meter('Database rows read', cf.d1RowsRead, lim.d1RowsRead) : ''}
+      ${cf.kvWrites != null ? meter('KV writes', cf.kvWrites, lim.kvWrites) : ''}
+      ${cf.kvReads != null ? meter('KV reads', cf.kvReads, lim.kvReads) : ''}
+      ${cf.errors && cf.errors.length ? `<div class="help" style="grid-column:1/-1;color:var(--warn)">Some numbers aren't available: ${esc(cf.errors.join('; '))}</div>` : ''}</div></div>`
+    : `<div class="card ucard"><div class="card-h"><div><h3>Cloudflare today</h3><p>Live free-plan usage needs a read-only analytics token.</p></div></div><div class="card-b usetup">
+      <ol><li>Open <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">Cloudflare API tokens</a> → <b>Create Token</b> → <b>Create Custom Token</b>.</li>
+      <li>Add the permission <b>Account → Account Analytics → Read</b>, choose your account, then create it and copy the token.</li>
+      <li>Add it to GitHub as a secret named <code>CF_ANALYTICS_TOKEN</code>, then run <b>Deploy</b> again.</li></ol></div></div>`;
+  const ghCard = gh.connected ? `<div class="card ucard"><div class="card-h"><div><h3>GitHub Actions this month</h3><p>Free and unlimited on a public repository</p></div></div><div class="card-b ustats">
+      ${gh.error ? `<div class="help" style="color:var(--warn)">${esc(gh.error)}</div>` : `
+      <div><b class="num">${fmt(gh.runner.runs)}</b><span>search and check jobs</span></div>
+      <div><b class="num">${fmt(gh.runner.minutes)}</b><span>minutes of scraping</span></div>
+      <div><b class="num">${fmt(gh.runner.today)}</b><span>jobs today</span></div>
+      <div><b class="num">${fmt(gh.deploy.runs)}</b><span>deploys (${fmt(gh.deploy.minutes)} min)</span></div>`}</div></div>` : '';
+  return `<div class="ulayout">
+    ${cfCard}
+    <div class="card ucard"><div class="card-h"><div><h3>Storage</h3><p>Cloudflare D1 database</p></div></div><div class="card-b ugrid">
+      ${u.storage.bytes != null ? meter('Database size', u.storage.bytes / 1048576, u.storage.limit / 1048576, `${mb(u.storage.bytes)} of 500 MB`).replace(/<b>[^<]*<\/b> \/ [^<]*<\/span>/, `<b>${mb(u.storage.bytes)}</b> / 500 MB</span>`) : '<div class="help">Size not reported yet.</div>'}
+      <div class="um"><div class="um-top"><span>Leads in this browser</span><span class="num"><b>${fmt(ST.leads.length)}</b></span></div><div class="um-sub"><span>Filtering and export run here, using no Cloudflare quota.</span></div></div></div></div>
+    <div class="card ucard"><div class="card-h"><div><h3>Activity</h3><p>Today means since midnight PT</p></div></div><div class="card-b ustats">
+      <div><b class="num">${fmt(L.total)}</b><span>leads in total</span></div>
+      <div><b class="num">${fmt(L.today)}</b><span>added today</span></div>
+      <div><b class="num">${fmt(L.d7)}</b><span>added in 7 days</span></div>
+      <div><b class="num">${fmt(L.d30)}</b><span>added in 30 days</span></div>
+      <div><b class="num">${fmt(T.searches)}</b><span>searches today</span></div>
+      <div><b class="num">${fmt(T.checked)}</b><span>websites checked today</span></div>
+      <div><b class="num">${fmt(L.openForm)}</b><span>leads with an open form</span></div>
+      <div><b class="num">${fmt(L.captcha)}</b><span>leads with a CAPTCHA form</span></div></div></div>
+    ${ghCard}
+    <p class="help">Updated ${whenPT(u.at)}.</p></div>`;
+}
+
 /* ================================================================ events */
 document.addEventListener('click', async (e) => {
   const t = e.target, ds = k => t.closest(`[data-${k}]`)?.dataset[k];
@@ -1048,7 +1115,8 @@ document.addEventListener('click', async (e) => {
   }
   if ((v = ds('depthb')) !== undefined) { FS.depth = +v; if (FS.depth === 0) FS.emails = false; $('#fs-collect').innerHTML = collectHTML(); const em = $('#fs-emails'); if (em) em.checked = FS.emails; refreshFind([]); return; }
   if ((v = ds('copy')) !== undefined) { try { await navigator.clipboard.writeText(v); toast('Copied'); } catch { toast('Copy blocked by the browser', 'alert'); } return; }
-  if ((v = ds('sortcol')) !== undefined) { L$.sort = L$.sort === v ? 'reviews' : v; const s = $('#lsort'); if (s) s.value = L$.sort; leadsUpdate(false); $('#vt').scrollTop = 0; return; }
+  if ((v = ds('sortcol')) !== undefined) { L$.sort = L$.sort === v ? 'reviews' : v; fxsRerender('sort'); leadsUpdate(false); $('#vt').scrollTop = 0; return; }
+  if ((v = ds('fseg')) !== undefined) { const i = v.indexOf(':'), k = v.slice(0, i), val = v.slice(i + 1); L$.F[k] = k === 'add' ? +val : val; changed(); return; }
   if ((v = ds('dd')) !== undefined) { L$.openDD = L$.openDD === v ? null : v; L$.ddq = ''; renderPanel(); setTimeout(() => $('#ddq-' + v)?.focus(), 0); return; }
   if ((v = ds('ddonly')) !== undefined) { e.stopPropagation(); const [k, val] = v.split(':'); L$.F[k] = new Set([+val]); changed(); return; }
   if ((v = ds('ddopt')) !== undefined) { const [k, val] = v.split(':'); const s = L$.F[k]; s.has(+val) ? s.delete(+val) : s.add(+val); changed(); return; }
@@ -1165,6 +1233,7 @@ document.addEventListener('click', async (e) => {
       break;
     }
     case 'refreshjobs': refreshSearches(); break;
+    case 'usagerefresh': loadUsage(); break;
     case 'allhist': FS.allHist = !FS.allHist; renderJobs(); break;
     case 'indnew': EDIT = { id: null, name: IP.q.trim() && !ST.industries.some(d => d.name.toLowerCase() === IP.q.trim().toLowerCase()) ? IP.q.trim() : '', terms: [], categories: [] }; indModal(); break;
     case 'indshowrm': IP.showRemoved = !IP.showRemoved; rerenderInd(); break;

@@ -66,6 +66,7 @@ async function route(req, env, url, ctx) {
   if ((mm = p.match(/^\/api\/searches\/(\d+)\/excluded$/)) && m === 'GET') return listExcluded(env, +mm[1]);
   if (p === '/api/checks' && m === 'POST') return createCheck(env, await body(req));
 
+  if (p === '/api/usage' && m === 'GET') return usage(env);
   if (p === '/api/snapshot' && m === 'GET') return getSnapshot(env);
   if (p === '/api/changes' && m === 'GET') return getChanges(env, url);
   if ((mm = p.match(/^\/api\/leads\/(\d+)$/)) && m === 'PATCH') return patchLead(env, +mm[1], await body(req));
@@ -579,4 +580,76 @@ async function ingestChecks(env, s, params, b) {
   const reached = !!(filter && cur.limit_n && cur.qualified >= cur.limit_n);
   if (reached) await env.DB.prepare('UPDATE searches SET limit_reached = 1 WHERE id = ?').bind(s.id).run();
   return json({ ok: true, stop: cur.status === 'cancelled' || reached });
+}
+
+/* ------------------------------------------------------------------ usage */
+/** Midnight in Los Angeles, as a timestamp, for "today" in the app's time zone. */
+function ptMidnight(at = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(at).map(x => [x.type, x.value]));
+  const sinceMidnight = ((+parts.hour * 60 + +parts.minute) * 60 + +parts.second) * 1000;
+  return at.getTime() - sinceMidnight - at.getMilliseconds();
+}
+async function cfGraphQL(env, query, variables) {
+  const res = await fetch('https://api.cloudflare.com/client/v4/graphql', {
+    method: 'POST', headers: { authorization: `Bearer ${env.CF_ANALYTICS_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ query, variables }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || (data.errors && data.errors.length)) throw new Error((data.errors && data.errors[0] && data.errors[0].message) || `HTTP ${res.status}`);
+  return data.data?.viewer?.accounts?.[0] || {};
+}
+async function cloudflareUsage(env) {
+  if (!env.CF_ANALYTICS_TOKEN || !env.CF_ACCOUNT_ID || env.CF_ACCOUNT_ID.startsWith('__')) return { connected: false };
+  const day = new Date().toISOString().slice(0, 10); // Cloudflare's free limits reset at midnight UTC
+  const vars = { a: env.CF_ACCOUNT_ID, d: day };
+  const out = { connected: true, day, errors: [] };
+  const run = async (key, q) => { try { out[key] = await cfGraphQL(env, q, vars); } catch (e) { out.errors.push(`${key}: ${e.message}`); } };
+  await Promise.all([
+    run('workers', 'query($a:String!,$d:Date!){viewer{accounts(filter:{accountTag:$a}){rows:workersInvocationsAdaptive(limit:1000,filter:{date_geq:$d,date_leq:$d}){sum{requests errors}}}}}'),
+    run('d1', 'query($a:String!,$d:Date!){viewer{accounts(filter:{accountTag:$a}){rows:d1AnalyticsAdaptiveGroups(limit:1000,filter:{date_geq:$d,date_leq:$d}){sum{rowsRead rowsWritten readQueries writeQueries}}}}}'),
+    run('kv', 'query($a:String!,$d:Date!){viewer{accounts(filter:{accountTag:$a}){rows:kvOperationsAdaptiveGroups(limit:1000,filter:{date_geq:$d,date_leq:$d}){sum{requests} dimensions{actionType}}}}}'),
+  ]);
+  const sum = (rows, f) => (rows || []).reduce((a, r) => a + (+r.sum?.[f] || 0), 0);
+  const res = { connected: true, day, errors: out.errors };
+  if (out.workers) res.workerRequests = sum(out.workers.rows, 'requests'), res.workerErrors = sum(out.workers.rows, 'errors');
+  if (out.d1) res.d1RowsRead = sum(out.d1.rows, 'rowsRead'), res.d1RowsWritten = sum(out.d1.rows, 'rowsWritten');
+  if (out.kv) {
+    const by = {}; for (const r of out.kv.rows || []) { const k = String(r.dimensions?.actionType || 'other').toLowerCase(); by[k] = (by[k] || 0) + (+r.sum?.requests || 0); }
+    res.kvReads = by.read || 0; res.kvWrites = by.write || 0; res.kvOther = Object.entries(by).filter(([k]) => k !== 'read' && k !== 'write').reduce((a, [, v]) => a + v, 0);
+  }
+  return res;
+}
+async function githubUsage(env) {
+  if (!configCheck(env).github) return { connected: false };
+  const monthStart = new Date().toISOString().slice(0, 8) + '01';
+  try {
+    const res = await fetch(`https://api.github.com/repos/${env.GH_REPO}/actions/runs?per_page=100&created=%3E%3D${monthStart}`, { headers: { authorization: `Bearer ${env.GH_TOKEN}`, accept: 'application/vnd.github+json', 'user-agent': 'leadshunter-worker', 'x-github-api-version': '2022-11-28' } });
+    if (!res.ok) return { connected: true, error: `GitHub said ${res.status}` };
+    const data = await res.json();
+    const today = ptMidnight();
+    const out = { connected: true, runner: { runs: 0, minutes: 0, today: 0 }, deploy: { runs: 0, minutes: 0 }, total: data.total_count || 0 };
+    for (const r of data.workflow_runs || []) {
+      const mins = r.run_started_at && r.updated_at && r.status === 'completed' ? Math.max(0, (Date.parse(r.updated_at) - Date.parse(r.run_started_at)) / 60000) : 0;
+      const bucket = r.name === 'Runner' ? out.runner : r.name === 'Deploy' ? out.deploy : null;
+      if (!bucket) continue;
+      bucket.runs++; bucket.minutes += mins;
+      if (r.name === 'Runner' && Date.parse(r.created_at) >= today) out.runner.today++;
+    }
+    out.runner.minutes = Math.round(out.runner.minutes); out.deploy.minutes = Math.round(out.deploy.minutes);
+    return out;
+  } catch (e) { return { connected: true, error: e.message }; }
+}
+async function usage(env) {
+  const today = ptMidnight(), t = now();
+  const [leadsQ, searchQ] = await env.DB.batch([
+    env.DB.prepare(`SELECT COUNT(*) AS total, SUM(created_at >= ?) AS today, SUM(created_at >= ?) AS d7, SUM(created_at >= ?) AS d30,
+      SUM(website IS NOT NULL) AS withSite, SUM(form_status = 0) AS openForm, SUM(form_status = 1) AS captcha, SUM(email IS NOT NULL) AS emails FROM leads WHERE deleted = 0`).bind(today, t - 7 * 864e5, t - 30 * 864e5),
+    env.DB.prepare("SELECT COUNT(*) AS searches, SUM(kind = 'check') AS checkJobs, COALESCE(SUM(checked), 0) AS checked, COALESCE(SUM(new_count), 0) AS added FROM searches WHERE created_at >= ?").bind(today),
+  ]);
+  const [cloudflare, github] = await Promise.all([cloudflareUsage(env), githubUsage(env)]);
+  return json({
+    at: t, leads: leadsQ.results[0], today: searchQ.results[0],
+    storage: { bytes: leadsQ.meta?.size_after || searchQ.meta?.size_after || null, limit: 500 * 1024 * 1024 },
+    cloudflare, github,
+    limits: { workerRequests: 100000, d1RowsRead: 5000000, d1RowsWritten: 100000, kvReads: 100000, kvWrites: 1000 },
+  });
 }

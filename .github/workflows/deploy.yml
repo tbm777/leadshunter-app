@@ -62,7 +62,8 @@ jobs:
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
           RUNNER_SECRET: ${{ secrets.RUNNER_SECRET }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          CF_ANALYTICS_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN }}
         run: |
-          node -e 'require("fs").writeFileSync("/tmp/secrets.json", JSON.stringify({APP_PASSWORD:process.env.APP_PASSWORD,RUNNER_SECRET:process.env.RUNNER_SECRET,GH_TOKEN:process.env.GH_TOKEN}))'
+          node -e 'const e=process.env,o={APP_PASSWORD:e.APP_PASSWORD,RUNNER_SECRET:e.RUNNER_SECRET,GH_TOKEN:e.GH_TOKEN};if(e.CF_ANALYTICS_TOKEN)o.CF_ANALYTICS_TOKEN=e.CF_ANALYTICS_TOKEN;require("fs").writeFileSync("/tmp/secrets.json",JSON.stringify(o))'
           npx wrangler secret bulk /tmp/secrets.json
           rm -f /tmp/secrets.json

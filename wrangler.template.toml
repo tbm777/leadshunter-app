@@ -22,6 +22,7 @@ id = "__KV_ID__"
 [vars]
 GH_REPO = "__GH_REPO__"
 GH_REF = "main"
+CF_ACCOUNT_ID = "__CF_ACCOUNT__"
 
 [triggers]
 crons = ["*/10 * * * *"]

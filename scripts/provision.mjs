@@ -25,6 +25,6 @@ let kv = (kvs || []).find(k => k.title === 'leadshunter');
 if (!kv) { kv = await cf('POST', '/storage/kv/namespaces', { title: 'leadshunter' }); console.log('Created KV namespace leadshunter'); }
 
 const toml = readFileSync('wrangler.template.toml', 'utf8')
-  .replace('__D1_ID__', db.uuid).replace('__KV_ID__', kv.id).replace('__GH_REPO__', REPO);
+  .replace('__D1_ID__', db.uuid).replace('__KV_ID__', kv.id).replace('__GH_REPO__', REPO).replace('__CF_ACCOUNT__', ACCOUNT);
 writeFileSync('wrangler.toml', toml);
 console.log(`wrangler.toml ready (D1 ${db.uuid.slice(0, 8)}…, KV ${kv.id.slice(0, 8)}…, repo ${REPO || 'unknown'}).`);
