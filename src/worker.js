@@ -1,6 +1,6 @@
 // LeadsHunter API Worker. Serves the app (static assets), the JSON API and the runner endpoints.
 import { buildCells } from '../public/shared/grid.js';
-import { cleanWebsite, domainOf, isSharedDomain, phoneE164, countryCode, categoryAccepted } from '../public/shared/normalize.js';
+import { cleanWebsite, domainOf, isSharedDomain, isSocialHost, phoneE164, countryCode, categoryAccepted } from '../public/shared/normalize.js';
 
 const MAX_TASKS = 6000;              // map searches per search job
 const STALE_MS = 15 * 60 * 1000;     // a running job with no heartbeat for this long is marked failed
@@ -155,7 +155,7 @@ function searchOut(r) {
     total: r.total_tasks, done: r.done_tasks, found: r.found, new: r.new_count, dup: r.dup, excluded: r.excluded, filtered: r.filtered || 0,
     to_check: r.to_check, checked: r.checked, limit_reached: !!r.limit_reached, error: r.error, run_url: r.run_url,
     created_at: r.created_at, started_at: r.started_at, finished_at: r.finished_at, heartbeat_at: r.heartbeat_at,
-    depth: params.depth ?? 0, emails: !!params.emails, minReviews: params.minReviews || 0, maxReviews: params.maxReviews ?? null, locations: params.locationLabels || [], terms: params.terms || [],
+    depth: params.depth ?? 0, emails: !!params.emails, minReviews: params.minReviews || 0, maxReviews: params.maxReviews ?? null, website: params.website || 'any', locations: params.locationLabels || [], terms: params.terms || [],
   };
 }
 const SEARCH_COLS = 'id, kind, name, industry_id, params, status, limit_n, total_tasks, done_tasks, found, new_count, dup, excluded, filtered, to_check, checked, limit_reached, error, run_url, created_at, started_at, finished_at, heartbeat_at';
@@ -235,7 +235,7 @@ async function createSearch(env, b) {
   const maxReviews = b.maxReviews === null || b.maxReviews === undefined || b.maxReviews === '' ? null : Math.max(0, Math.floor(+b.maxReviews));
   if (maxReviews !== null && maxReviews < minReviews) throw new HttpError(400, 'Max reviews is lower than min reviews.');
   const params = {
-    terms, depth, emails: !!b.emails, minReviews, maxReviews, countries: [...new Set(circles.map(c => c.country))],
+    terms, depth: b.website === 'no' ? 0 : depth, emails: b.website === 'no' ? false : !!b.emails, minReviews, maxReviews, website: ['yes', 'no'].includes(b.website) ? b.website : 'any', countries: [...new Set(circles.map(c => c.country))],
     locationLabels: cleanList(b.locationLabels, 50),
   };
   const name = String(b.name || '').trim().slice(0, 80) || `${ind.name} search`;
@@ -419,6 +419,9 @@ function bitsFrom(b64, n) {
   return out;
 }
 
+/** A business website, not just a Facebook, Instagram or Yelp page. */
+function realSite(url) { if (!url) return false; try { return !isSocialHost(new URL(url).hostname); } catch { return false; } }
+
 /** Save the places found in one map search. Called once per cell by the runner, in order. */
 async function ingestCell(env, s, params, b) {
   const cellIdx = Math.floor(+b.cell);
@@ -454,6 +457,8 @@ async function ingestCell(env, s, params, b) {
     };
     if (!categoryAccepted(accepted, p.category, p.categories)) excluded.push(lead);
     else if (lead.reviews < (params.minReviews || 0) || (params.maxReviews != null && lead.reviews > params.maxReviews)) filtered++;
+    else if (params.website === 'yes' && !realSite(website)) filtered++;
+    else if (params.website === 'no' && realSite(website)) filtered++;
     else keep.push(lead);
   }
 

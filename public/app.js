@@ -634,7 +634,7 @@ const RAD = { mi: [[0, 'City only'], [10, '+ 10 mi'], [25, '+ 25 mi'], [50, '+ 5
 const PRAD = { mi: [[5, '5 mi around'], [10, '10 mi around'], [25, '25 mi around']], km: [[8, '8 km around'], [15, '15 km around'], [40, '40 km around']] };
 const COUNTRY = { US: { name: 'United States', unit: 'mi', rw: 'state', ph: 'City, state or ZIP code' }, CA: { name: 'Canada', unit: 'km', rw: 'province', ph: 'City, province or postal code' }, AU: { name: 'Australia', unit: 'km', rw: 'state', ph: 'City, state or postcode' }, AE: { name: 'UAE', unit: 'km', rw: 'emirate', ph: 'City or emirate' } };
 const LIMITS = [100, 250, 500, 1000, 0];
-const FS = { ind: null, terms: new Set(), extra: [], country: 'US', locs: [], q: '', open: false, hi: 0, items: [], name: '', nameEdited: false, paste: false, pasteMsg: '', limit: 500, depth: 2, emails: false, showTerms: false, busy: false, allHist: false, minRev: 0, maxRev: null, countryMenu: false, editName: false };
+const FS = { ind: null, terms: new Set(), extra: [], country: 'US', locs: [], q: '', open: false, hi: 0, items: [], name: '', nameEdited: false, paste: false, pasteMsg: '', limit: 500, depth: 2, emails: false, showTerms: false, busy: false, allHist: false, minRev: 0, maxRev: null, countryMenu: false, editName: false, website: 'any' };
 const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 async function loadPlaces() {
   if (ST.places) return ST.places;
@@ -711,6 +711,41 @@ function addLoc(it) {
   FS.locs.push({ ...it, grp: undefined, rad: it.type === 'region' ? 0 : 1 }); return true;
 }
 
+/* ---------- modern dropdowns (Find leads) ---------- */
+const FX = { open: null, q: '', hi: 0 };
+const chev = '<svg class="fxs-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>';
+function fxsDefs(id) {
+  if (id === 'ind') return { cls: 'fxs-ind', search: true, value: FS.ind, opts: ST.industries.filter(x => !x.archived).map(x => ({ v: x.id, l: x.name, sub: x.terms.join(', ') })) };
+  if (id === 'limit') return { cls: 'fxs-mini', value: FS.limit, opts: [100, 250, 500, 1000, 2500, 5000, 0].map(n => ({ v: n, l: n ? fmt(n) : 'No limit', sub: n ? '' : 'Run the whole area' })), custom: true };
+  const m = id.match(/^rad-(\d+)$/);
+  if (m) { const l = FS.locs[+m[1]]; if (!l) return null; const u = unitOf(l.country); return { cls: 'fxs-chip', value: l.rad, opts: (l.type === 'postal' ? PRAD : RAD)[u].map(([, lab], k) => ({ v: k, l: lab.replace(' around', '') })) }; }
+  return null;
+}
+function fxsHTML(id) {
+  const d = fxsDefs(id); if (!d) return '';
+  const cur = d.opts.find(o => o.v === d.value) || (id === 'limit' ? { l: fmt(FS.limit) } : d.opts[0]);
+  const open = FX.open === id, q = FX.q.toLowerCase();
+  const list = d.opts.filter(o => !q || o.l.toLowerCase().includes(q) || (o.sub || '').toLowerCase().includes(q));
+  return `<div class="fxs ${d.cls}" data-fxs="${id}"><button type="button" class="fxs-btn" data-fxsopen="${id}" aria-haspopup="listbox" aria-expanded="${open}"><span>${esc(cur.l)}</span>${chev}</button>${open ? `<div class="fxs-pop" role="listbox">
+    ${d.search ? `<div class="fxs-search">${ic('find', 14)}<input id="fxs-q" placeholder="Search" value="${esc(FX.q)}" autocomplete="off"></div>` : ''}
+    <div class="fxs-list">${list.map((o, i) => `<button type="button" role="option" aria-selected="${o.v === d.value}" class="fxs-opt ${o.v === d.value ? 'sel' : ''} ${i === FX.hi ? 'hi' : ''}" data-fxsval="${id}" data-v="${o.v}"><span class="fxs-ol"><b>${esc(o.l)}</b>${o.sub ? `<small>${esc(o.sub)}</small>` : ''}</span>${o.v === d.value ? ic('check', 15) : ''}</button>`).join('') || '<div class="fxs-empty">No matches</div>'}</div>
+    ${d.custom ? `<div class="fxs-custom"><label for="fxs-num">Custom</label><input id="fxs-num" type="number" min="1" step="50" placeholder="e.g. 750" inputmode="numeric"><button type="button" class="btn sm" data-fxscustom="${id}">Set</button></div>` : ''}</div>` : ''}</div>`;
+}
+function fxsRerender(id) { const el = document.querySelector(`[data-fxs="${id}"]`); if (el) el.outerHTML = fxsHTML(id); }
+function fxsOpen(id) {
+  const prev = FX.open; FX.open = FX.open === id ? null : id; FX.q = ''; FX.hi = Math.max(0, (fxsDefs(id)?.opts || []).findIndex(o => o.v === fxsDefs(id).value));
+  if (prev && prev !== id) fxsRerender(prev);
+  fxsRerender(id);
+  if (FX.open) { const sq = $('#fxs-q'); if (sq) sq.focus(); else document.querySelector(`[data-fxs="${id}"] .fxs-opt.hi`)?.focus(); document.querySelector(`[data-fxs="${id}"] .fxs-opt.hi`)?.scrollIntoView({ block: 'nearest' }); }
+}
+function fxsClose() { if (!FX.open) return; const id = FX.open; FX.open = null; fxsRerender(id); }
+function fxsSet(id, raw) {
+  const v = Number(raw);
+  if (id === 'ind') { FS.ind = v; FS.terms = new Set(curInd().terms.map((_, i) => i)); FS.extra = []; FX.open = null; fxsRerender('ind'); refreshFind(['what']); return; }
+  if (id === 'limit') { FS.limit = v > 0 ? Math.floor(v) : 0; FX.open = null; fxsRerender('limit'); refreshFind([]); return; }
+  const m = id.match(/^rad-(\d+)$/); if (m) { FS.locs[+m[1]].rad = v; FX.open = null; refreshFind(['where']); }
+}
+
 V.find = () => {
   if (FS.ind == null || !ST.industries.find(i => i.id === FS.ind && !i.archived)) { const d = ST.industries.find(i => !i.archived); FS.ind = d ? d.id : null; FS.terms = new Set(d ? d.terms.map((_, i) => i) : []); }
   const cfg = ST.config || {};
@@ -719,8 +754,7 @@ V.find = () => {
   ${!cfg.github ? `<div class="banner">${ic('alert', 18)}<div><b>Searches can't start yet</b>Add the <code>GH_TOKEN</code> secret in GitHub and run Deploy again.</div></div>` : ''}
   <div class="card fx">
     <div class="fx-bar">
-      <div class="fx-field fx-ind"><label class="fx-lbl" for="fs-ind">Industry</label>
-        <select id="fs-ind" class="fx-sel">${ST.industries.filter(x => !x.archived).map(x => `<option value="${x.id}" ${x.id === FS.ind ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
+      <div class="fx-field fx-ind"><span class="fx-lbl">Industry</span>${fxsHTML('ind')}</div>
       <div class="fx-field fx-loc combo" id="combo"><label class="fx-lbl" for="fs-loc">Location</label>
         <div class="fx-locin">
           <button class="fx-flag" data-fsx="cmenu" aria-label="Country: ${COUNTRY[FS.country].name}" aria-haspopup="true">${flag(FS.country, 20)}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg></button>
@@ -732,13 +766,11 @@ V.find = () => {
     </div>
     <div id="fs-where">${whereHTML()}</div>
     <div class="fx-opts">
-      <div class="fx-opt"><label class="fx-lbl" for="fs-limit">Leads</label>
-        <select id="fs-limit" class="fx-mini">${[100, 250, 500, 1000, 2500, 5000, 0].map(n => `<option value="${n}" ${FS.limit === n ? 'selected' : ''}>${n ? fmt(n) : 'No limit'}</option>`).join('')}${LIMITS.concat([2500, 5000]).includes(FS.limit) ? '' : `<option value="${FS.limit}" selected>${fmt(FS.limit)}</option>`}</select></div>
+      <div class="fx-opt"><span class="fx-lbl">Leads</span>${fxsHTML('limit')}</div>
       <div class="fx-opt"><span class="fx-lbl">Reviews</span>
         <div class="fx-range"><input id="fs-rmin" class="fx-mini num" type="number" min="0" inputmode="numeric" placeholder="Min" aria-label="Minimum reviews" value="${FS.minRev || ''}"><span>–</span><input id="fs-rmax" class="fx-mini num" type="number" min="0" inputmode="numeric" placeholder="Max" aria-label="Maximum reviews" value="${FS.maxRev ?? ''}"></div></div>
-      <div class="fx-opt fx-grow"><span class="fx-lbl">Collect</span>
-        <div class="seg-c fx-seg" role="radiogroup" aria-label="What to collect" id="fs-collect">${collectHTML()}</div></div>
-      <label class="fx-opt fx-check" title="Look for an email on each website"><input type="checkbox" id="fs-emails" ${FS.emails ? 'checked' : ''}>Emails</label>
+      <div class="fx-opt"><span class="fx-lbl">Website</span><div class="seg-c fx-seg3" role="radiogroup" aria-label="Website" id="fs-web">${webHTML()}</div></div>
+      <div class="fx-opt fx-grow"><span class="fx-lbl">Also check</span><div class="fx-pills" id="fs-collect">${collectHTML()}</div></div>
     </div>
     <div class="fx-foot"><div id="fs-termhelp" class="fx-terms">${termHelp()}</div><div id="fs-sum" class="fx-est">${sumHTML()}</div></div>
     <div id="fs-what">${FS.showTerms ? termsBox() : ''}</div>
@@ -765,12 +797,19 @@ function termsBox() {
 function whereHTML() {
   const chips = FS.locs.map((l, i) => {
     const u = unitOf(l.country), n = l.type === 'region' ? circlesFor(l).length : 0;
-    return `<span class="fx-chip">${flag(l.country, 16)}<b>${esc(locTitle(l))}</b>${l.type === 'region' ? `<span class="fx-chipnote">${n ? `${fmt(n)} ${n === 1 ? 'city' : 'cities'}` : 'whole ' + COUNTRY[l.country].rw}</span>` : `<select data-locrad="${i}" aria-label="Area around ${esc(l.label)}">${(l.type === 'postal' ? PRAD : RAD)[u].map(([, lab], k) => `<option value="${k}" ${l.rad === k ? 'selected' : ''}>${lab.replace(' around', '')}</option>`).join('')}</select>`}<button data-fsx="rmloc" data-i="${l.type ? i : i}" aria-label="Remove ${esc(l.label)}">${ic('x', 12)}</button></span>`;
+    return `<span class="fx-chip">${flag(l.country, 16)}<b>${esc(locTitle(l))}</b>${l.type === 'region' ? `<span class="fx-chipnote">${n ? `${fmt(n)} ${n === 1 ? 'city' : 'cities'}` : 'whole ' + COUNTRY[l.country].rw}</span>` : fxsHTML('rad-' + i)}<button data-fsx="rmloc" data-i="${l.type ? i : i}" aria-label="Remove ${esc(l.label)}">${ic('x', 12)}</button></span>`;
   }).join('');
   return `<div class="fx-chips">${chips}${FS.locs.length ? '' : '<span class="fx-hint">Add one or more cities, states or postcodes.</span>'}<button class="linkbtn muted" data-fsx="pastetoggle">${ic('plus', 12)} Paste a list</button>${FS.locs.length > 1 ? '<button class="linkbtn muted" data-fsx="clearlocs">Clear</button>' : ''}</div>`;
 }
-const COLLECT = [['Basic info', 'Name, phone, website link, address, rating and reviews. No website visits.'], ['+ Website', 'Also checks that each website loads, and how fast.'], ['+ Contact form', 'Also finds the contact form, CAPTCHA and platform. Best for outreach.']];
-function collectHTML() { return COLLECT.map(([l, tip], i) => `<button role="radio" aria-checked="${FS.depth === i}" class="${FS.depth === i ? 'on' : ''}" data-depthb="${i}" title="${tip}">${l}</button>`).join(''); }
+const WEB = [['any', 'Any'], ['yes', 'Has website'], ['no', 'No website']];
+function webHTML() { return WEB.map(([k, l]) => `<button type="button" role="radio" aria-checked="${FS.website === k}" class="${FS.website === k ? 'on' : ''}" data-web="${k}">${l}</button>`).join(''); }
+function collectHTML() {
+  if (FS.website === 'no') return `<span class="fx-pillnote">Nothing to check for businesses without a website.</span>`;
+  const pill = (k, label, on, tip, locked) => `<button type="button" class="fx-pill ${on ? 'on' : ''}" data-chk="${k}" aria-pressed="${on}" title="${tip}" ${locked ? 'data-locked="1"' : ''}><span class="fx-tick">${on ? ic('check', 12) : ''}</span>${label}</button>`;
+  return pill('site', 'Website loads', FS.depth >= 1, 'Checks that each website is up, and how fast it loads.', FS.depth === 2)
+    + pill('form', 'Contact form', FS.depth === 2, 'Finds the contact form, CAPTCHA and platform. Best for outreach.')
+    + pill('email', 'Emails', FS.emails, 'Looks for an email address on each website.');
+}
 const dur = s => !s ? '—' : s < 60 ? `${s} s` : s < 3600 ? `${Math.ceil(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
 function startProblem() {
   const terms = activeTerms(), { n } = estimate();
@@ -841,7 +880,7 @@ async function startSearch() {
   const name = FS.nameEdited && FS.name.trim() ? FS.name.trim() : autoName();
   FS.busy = true; updateStart();
   try {
-    const r = await api('POST', '/api/searches', { name, industry_id: FS.ind, terms, circles, limit: FS.limit, depth: FS.depth, emails: FS.emails, minReviews: FS.minRev || 0, maxReviews: FS.maxRev, locationLabels: FS.locs.map(locTitle) });
+    const r = await api('POST', '/api/searches', { name, industry_id: FS.ind, terms, circles, limit: FS.limit, depth: FS.depth, emails: FS.emails, minReviews: FS.minRev || 0, maxReviews: FS.maxRev, website: FS.website, locationLabels: FS.locs.map(locTitle) });
     upsertSearch(r.search); toast(`“${name}” started`); FS.nameEdited = false; FS.name = ''; startPolling();
   } catch (e) {
     toast(e.message, 'alert');
@@ -867,14 +906,14 @@ function jobsHTML() {
     const progressLine = j.status === 'queued' ? 'Waiting for GitHub to start the runner…'
       : checking ? `${fmt(j.checked)} of ${fmt(j.to_check)} websites checked`
       : `${fmt(j.done)} of ${fmt(j.total)} map searches${etaText(j) ? ' · ' + etaText(j) : ''}`;
-    const meta = [whenPT(j.created_at), check ? '' : (j.locations || []).slice(0, 3).join(', ') + ((j.locations || []).length > 3 ? ` +${j.locations.length - 3}` : ''), check ? '' : (['Business info', 'Website check', 'Contact form check'][j.depth] || '') + (j.emails ? ' + emails' : ''), check || (!j.minReviews && j.maxReviews == null) ? '' : `${fmt(j.minReviews || 0)}–${j.maxReviews == null ? 'any' : fmt(j.maxReviews)} reviews`].filter(Boolean).join(' · ');
+    const meta = [whenPT(j.created_at), check ? '' : (j.locations || []).slice(0, 3).join(', ') + ((j.locations || []).length > 3 ? ` +${j.locations.length - 3}` : ''), check ? '' : (['Business info', 'Website check', 'Contact form check'][j.depth] || '') + (j.emails ? ' + emails' : ''), check || (!j.minReviews && j.maxReviews == null) ? '' : `${fmt(j.minReviews || 0)}–${j.maxReviews == null ? 'any' : fmt(j.maxReviews)} reviews`, check || !j.website || j.website === 'any' ? '' : j.website === 'yes' ? 'with website' : 'no website'].filter(Boolean).join(' · ');
     const stats = check
       ? `<span><b>${fmt(j.checked)}</b> of ${fmt(j.to_check)} checked</span>`
-      : `<span><b>${fmt(j.new)}</b> new lead${j.new === 1 ? '' : 's'}</span><span>${fmt(j.found)} found</span><span>${fmt(j.dup)} already in Leads</span>${j.excluded ? `<button class="linkbtn muted" data-excl="${j.id}">${fmt(j.excluded)} excluded</button>` : ''}${j.filtered ? `<span>${fmt(j.filtered)} outside review range</span>` : ''}${!active && j.to_check ? `<span>${fmt(j.checked)} websites checked</span>` : ''}${j.limit_reached ? `<span class="okline">${ic('check', 13)}Reached your limit of ${fmt(j.limit)}</span>` : ''}`;
+      : `<span><b>${fmt(j.new)}</b> new lead${j.new === 1 ? '' : 's'}</span><span>${fmt(j.found)} found</span><span>${fmt(j.dup)} already in Leads</span>${j.excluded ? `<button class="linkbtn muted" data-excl="${j.id}">${fmt(j.excluded)} excluded</button>` : ''}${j.filtered ? `<span>${fmt(j.filtered)} skipped by your filters</span>` : ''}${!active && j.to_check ? `<span>${fmt(j.checked)} websites checked</span>` : ''}${j.limit_reached ? `<span class="okline">${ic('check', 13)}Reached your limit of ${fmt(j.limit)}</span>` : ''}`;
     const actions = active
       ? `${j.run_url ? `<a class="btn sm ghost" href="${esc(j.run_url)}" target="_blank" rel="noopener">${ic('ext', 13)}Log</a>` : ''}${stuck ? `<button class="btn sm" data-jact="retry" data-id="${j.id}">${ic('retry', 13)}Retry</button>` : ''}<button class="btn sm ghost" data-jact="cancel" data-id="${j.id}">Cancel</button>`
       : `${j.status === 'failed' || j.status === 'cancelled' ? `<button class="btn sm" data-jact="retry" data-id="${j.id}" title="Continue where it stopped">${ic('retry', 13)}${j.done ? 'Resume' : 'Retry'}</button>` : ''}
-         ${!check && j.new ? `<button class="btn sm" data-jact="view" data-id="${j.id}">View leads ${ic('arrow', 13)}</button>` : ''}
+         ${!check && j.new ? `<button class="btn sm btn-soft" data-jact="view" data-id="${j.id}">View ${fmt(j.new)} lead${j.new === 1 ? '' : 's'} ${ic('arrow', 13)}</button>` : ''}
          <div class="kebab"><button class="iconbtn sm" data-menu="${j.id}" aria-label="More actions" aria-haspopup="true">⋯</button>${OPENMENU === j.id ? `<div class="menu" role="menu">
            ${!check && j.new ? `<button role="menuitem" data-jact="export" data-id="${j.id}">${ic('download', 14)}Export leads</button>` : ''}
            ${!check ? `<button role="menuitem" data-jact="again" data-id="${j.id}">${ic('play', 13)}Run again</button>` : ''}
@@ -904,7 +943,7 @@ async function excludedModal(id) {
 function loadIntoForm(j) {
   FS.ind = j.industry_id; const d = curInd();
   FS.terms = new Set((d?.terms || []).map((t, i) => (!j.terms.length || j.terms.includes(t)) ? i : -1).filter(i => i >= 0));
-  FS.extra = j.terms.filter(t => !d?.terms.includes(t)); FS.limit = j.limit; FS.depth = j.depth; FS.emails = j.emails; FS.minRev = j.minReviews || 0; FS.maxRev = j.maxReviews ?? null;
+  FS.extra = j.terms.filter(t => !d?.terms.includes(t)); FS.limit = j.limit; FS.depth = j.depth; FS.emails = j.emails; FS.minRev = j.minReviews || 0; FS.maxRev = j.maxReviews ?? null; FS.website = j.website || 'any';
   FS.name = j.name; FS.nameEdited = true; render(); window.scrollTo({ top: 0, behavior: 'smooth' });
   toast('Settings loaded. Add the locations again, then press Start search');
 }
@@ -957,6 +996,17 @@ document.addEventListener('click', async (e) => {
   if (L$.openDD && !t.closest('.dd')) { L$.openDD = null; L$.ddq = ''; renderPanel(); }
   if (FS.open && !t.closest('#combo')) { FS.open = false; renderPop(); }
   if (FS.countryMenu && !t.closest('[data-fsx="cmenu"]') && !t.closest('.fx-cmenu')) { FS.countryMenu = false; render(); }
+  if ((v = ds('fxsopen')) !== undefined) { e.stopPropagation(); fxsOpen(v); return; }
+  if ((v = ds('fxsval')) !== undefined) { fxsSet(v, t.closest('[data-fxsval]').dataset.v); return; }
+  if ((v = ds('fxscustom')) !== undefined) { const n = parseInt($('#fxs-num').value, 10); if (n > 0) fxsSet(v, n); return; }
+  if (FX.open && !t.closest('.fxs')) fxsClose();
+  if ((v = ds('web')) !== undefined) { FS.website = v; if (v === 'no') { FS.depth = 0; FS.emails = false; } $('#fs-web').innerHTML = webHTML(); $('#fs-collect').innerHTML = collectHTML(); refreshFind([]); return; }
+  if ((v = ds('chk')) !== undefined) {
+    if (v === 'site') { if (FS.depth === 2) { toast('The contact form check includes the website check', 'alert'); return; } FS.depth = FS.depth >= 1 ? 0 : 1; if (FS.depth === 0) FS.emails = false; }
+    if (v === 'form') FS.depth = FS.depth === 2 ? 1 : 2;
+    if (v === 'email') { FS.emails = !FS.emails; if (FS.emails && FS.depth === 0) FS.depth = 1; }
+    $('#fs-collect').innerHTML = collectHTML(); refreshFind([]); return;
+  }
   if ((v = ds('depthb')) !== undefined) { FS.depth = +v; if (FS.depth === 0) FS.emails = false; $('#fs-collect').innerHTML = collectHTML(); const em = $('#fs-emails'); if (em) em.checked = FS.emails; refreshFind([]); return; }
   if ((v = ds('copy')) !== undefined) { try { await navigator.clipboard.writeText(v); toast('Copied'); } catch { toast('Copy blocked by the browser', 'alert'); } return; }
   if ((v = ds('sortcol')) !== undefined) { L$.sort = L$.sort === v ? 'reviews' : v; const s = $('#lsort'); if (s) s.value = L$.sort; leadsUpdate(false); $('#vt').scrollTop = 0; return; }
@@ -1099,6 +1149,13 @@ document.addEventListener('keydown', (e) => {
     else if (e.key === 'Backspace' && !t.value && FS.locs.length) { FS.locs.pop(); refreshFind(['where']); }
     return;
   }
+  if (FX.open && (t.id === 'fxs-q' || t.closest?.('.fxs'))) {
+    const opts = [...document.querySelectorAll(`[data-fxs="${FX.open}"] .fxs-opt`)];
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); FX.hi = Math.max(0, Math.min(opts.length - 1, FX.hi + (e.key === 'ArrowDown' ? 1 : -1))); opts.forEach((o, i) => o.classList.toggle('hi', i === FX.hi)); opts[FX.hi]?.scrollIntoView({ block: 'nearest' }); if (t.id !== 'fxs-q') opts[FX.hi]?.focus(); return; }
+    if (e.key === 'Enter' && t.id === 'fxs-q') { e.preventDefault(); const o = opts[FX.hi]; if (o) fxsSet(FX.open, o.dataset.v); return; }
+    if (e.key === 'Enter' && t.id === 'fxs-num') { e.preventDefault(); const n = parseInt(t.value, 10); if (n > 0) fxsSet(FX.open, n); return; }
+    if (e.key === 'Escape') { e.preventDefault(); const id = FX.open; fxsClose(); document.querySelector(`[data-fxs="${id}"] .fxs-btn`)?.focus(); return; }
+  }
   if (t.id === 'fs-name' && (e.key === 'Enter' || e.key === 'Escape')) { e.preventDefault(); FS.editName = false; t.blur(); $('#fs-sum').innerHTML = sumHTML(); return; }
   if (t.id === 'fs-extra' && e.key === 'Enter') { e.preventDefault(); const v = t.value.trim(); if (v && !activeTerms().includes(v)) { FS.extra.push(v); refreshFind(['what']); setTimeout(() => $('#fs-extra')?.focus(), 0); } return; }
   if (e.key === 'Escape') { if (L$.openDD) { L$.openDD = null; renderPanel(); } else closeOverlay(); }
@@ -1109,6 +1166,7 @@ document.addEventListener('input', (e) => {
   if (t.id === 'lq') { L$.F.q = t.value; changed(); return; }
   if (t.id && t.id.startsWith('ddq-')) { L$.ddq = t.value; renderPanel(); return; }
   if (t.id === 'fs-loc') { FS.q = t.value; FS.hi = 0; FS.open = true; renderPop(); return; }
+  if (t.id === 'fxs-q') { FX.q = t.value; FX.hi = 0; const id = FX.open; const pos = t.selectionStart; fxsRerender(id); const n = $('#fxs-q'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
   if (t.id === 'fs-name') { FS.name = t.value; FS.nameEdited = !!t.value.trim(); return; }
   if (t.id === 'fs-rmin' || t.id === 'fs-rmax') { const v = t.value === '' ? null : Math.max(0, parseInt(t.value, 10) || 0); if (t.id === 'fs-rmin') FS.minRev = v || 0; else FS.maxRev = v; refreshFind([]); return; }
   if (t.id === 'fs-limit') { const v = parseInt(t.value, 10); FS.limit = v > 0 ? v : 0; refreshFind([]); return; }
