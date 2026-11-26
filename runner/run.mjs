@@ -195,6 +195,9 @@ async function main() {
   const wantChecks = (job.params.depth || 0) >= 1 || job.params.emails;
   let error = null;
 
+  // Tell the app we're alive every minute for the whole job (map searches and website checks).
+  let cancelled = false;
+  const heartbeat = setInterval(() => api('POST', `/api/runner/jobs/${JOB}/heartbeat`).then(r => { if (r.status === 'cancelled') { cancelled = true; stopChecks = true; stopMaps = true; } }).catch(() => {}), 60000);
   if (wantChecks) startCheckWorkers(); else mapsDone = true;
 
   if (job.kind === 'search') {
@@ -205,7 +208,6 @@ async function main() {
     log(`${todo.length} of ${cells.length} map searches left.`);
     const dir = await mkdtemp(join(tmpdir(), 'lh-'));
     let stop = false, next = 0, posted = 0, chain = Promise.resolve();
-    const heartbeat = setInterval(() => api('POST', `/api/runner/jobs/${JOB}/heartbeat`).then(r => { if (r.status === 'cancelled') stop = true; }).catch(() => {}), 60000);
     await Promise.all(Array.from({ length: MAP_CONCURRENCY }, async () => {
       while (!stop && !stopMaps && next < todo.length) {
         // Don't run far ahead of the website checks (matters when the limit counts leads with a form).
@@ -229,7 +231,6 @@ async function main() {
       }
     }));
     await chain;
-    clearInterval(heartbeat);
     rm(dir, { recursive: true, force: true });
   }
 
@@ -245,6 +246,7 @@ async function main() {
   await closeBrowser();
   if (wantChecks) log(`${checksPosted} websites checked.`);
 
+  clearInterval(heartbeat);
   await api('POST', `/api/runner/jobs/${JOB}/finish`, { error });
   try { await rebuildSnapshot(); } catch (e) { log('Snapshot failed (the app still syncs changes):', e.message); }
   if (error) { log(error); process.exitCode = 1; }

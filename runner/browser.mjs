@@ -15,7 +15,13 @@ async function getBrowser() {
         execSync('npx playwright install --with-deps chromium', { cwd: new URL('.', import.meta.url).pathname, stdio: 'inherit' });
         pw = await import('playwright');
       }
-      return pw.chromium.launch({ args: ['--no-sandbox'] });
+      try { return await pw.chromium.launch({ args: ['--no-sandbox'] }); }
+      catch {
+        // Cached install but missing browser or system libraries: install them once, then retry.
+        console.log('Installing the browser for Playwright…');
+        execSync('npx playwright install --with-deps chromium', { cwd: new URL('.', import.meta.url).pathname, stdio: 'inherit' });
+        return pw.chromium.launch({ args: ['--no-sandbox'] });
+      }
     })();
   }
   return browserPromise;

@@ -168,7 +168,7 @@ async function bootstrap(env) {
   const [ind, srch, hid, seq] = await env.DB.batch([
     env.DB.prepare('SELECT * FROM industries ORDER BY name COLLATE NOCASE'),
     env.DB.prepare(`SELECT ${SEARCH_COLS} FROM searches WHERE hidden = 0 ORDER BY id DESC LIMIT 60`),
-    env.DB.prepare('SELECT id, name FROM searches WHERE hidden = 1'),
+    env.DB.prepare('SELECT id, name FROM searches WHERE hidden = 1 OR id <= (SELECT COALESCE(MIN(id), 0) FROM (SELECT id FROM searches WHERE hidden = 0 ORDER BY id DESC LIMIT 60))'),
     env.DB.prepare("SELECT CAST(v AS INTEGER) AS v FROM meta WHERE k = 'seq'"),
   ]);
   return json({ industries: ind.results.map(industryOut), searches: srch.results.map(searchOut), hiddenNames: Object.fromEntries(hid.results.map(r => [r.id, r.name])), seq: seq.results[0]?.v || 0, config: configCheck(env), cols: LEAD_COLS });
@@ -401,7 +401,7 @@ async function runnerRoute(req, env, url) {
         rows.push(...r.results);
       }
     } else {
-      rows = (await env.DB.prepare('SELECT id, website, site_status, form_status FROM leads WHERE search_id = ? AND checked_at IS NULL AND website IS NOT NULL LIMIT 20000').bind(id).all()).results;
+      rows = (await env.DB.prepare('SELECT id, website, site_status, form_status FROM leads WHERE search_id = ? AND checked_at IS NULL AND website IS NOT NULL AND deleted = 0 LIMIT 20000').bind(id).all()).results;
     }
     return json({ leads: rows.map(r => [r.id, r.website]) });
   }
@@ -433,6 +433,9 @@ function bitsFrom(b64, n) {
   if (b64) { const raw = unb64u(b64); out.set(raw.subarray(0, out.length)); }
   return out;
 }
+
+/** US/Canada toll-free numbers are often shared by every location of a franchise, so they don't identify one business. */
+const isTollFree = e164 => !!e164 && /^\+1(800|833|844|855|866|877|888)\d{7}$/.test(e164);
 
 /** A business website, not just a Facebook, Instagram or Yelp page. */
 function realSite(url) { if (!url) return false; try { return !isSocialHost(new URL(url).hostname); } catch { return false; } }
@@ -469,9 +472,10 @@ async function ingestCell(env, s, params, b) {
       address: p.address ? String(p.address).slice(0, 300) : null, city: parsed.city || null, region: parsed.region || null, postal: parsed.postal || null, country,
       lat: Number.isFinite(+p.lat) ? +p.lat : null, lon: Number.isFinite(+p.lon) ? +p.lon : null,
       phone: p.phone ? prettyPhone(String(p.phone)).slice(0, 40) : null, phone_e164: phoneE164(p.phone, country),
+      sharedPhone: isTollFree(phoneE164(p.phone, country)),
       website, domain: domain && !isSharedDomain(domain) ? domain : null,
       rating: Number.isFinite(+p.rating) && +p.rating > 0 ? Math.round(+p.rating * 10) / 10 : null,
-      reviews: Math.max(0, Math.floor(+p.reviews || 0)), maps_url: p.maps_url ? String(p.maps_url).slice(0, 500) : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name + (p.address ? ', ' + p.address : ''))}`, closed: p.closed ? 1 : 0,
+      reviews: Math.max(0, Math.floor(+p.reviews || 0)), maps_url: p.maps_url && /^https:\/\//i.test(String(p.maps_url)) ? String(p.maps_url).slice(0, 500) : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name + (p.address ? ', ' + p.address : ''))}`, closed: p.closed ? 1 : 0,
     };
     if (!categoryAccepted(accepted, p.category, p.categories)) excluded.push(lead);
     else if (lead.reviews < (params.minReviews || 0) || (params.maxReviews != null && lead.reviews > params.maxReviews)) filtered++;
@@ -482,7 +486,7 @@ async function ingestCell(env, s, params, b) {
 
   // Find existing leads by place id, domain or phone.
   const byPid = new Map(), domains = new Set(), phones = new Set();
-  const pids = keep.map(l => l.place_id), doms = [...new Set(keep.map(l => l.domain).filter(Boolean))], phs = [...new Set(keep.map(l => l.phone_e164).filter(Boolean))];
+  const pids = keep.map(l => l.place_id), doms = [...new Set(keep.map(l => l.domain).filter(Boolean))], phs = [...new Set(keep.filter(l => !l.sharedPhone).map(l => l.phone_e164).filter(Boolean))];
   for (const part of chunk(pids, 90)) {
     const r = await env.DB.prepare(`SELECT id, place_id, deleted FROM leads WHERE place_id IN (${inList(part.length)})`).bind(...part).all();
     for (const x of r.results) byPid.set(x.place_id, x);
@@ -505,10 +509,10 @@ async function ingestCell(env, s, params, b) {
     const ex = byPid.get(l.place_id);
     if (ex && ex.deleted && inserts.length + revives.length < remaining) { revives.push(l); continue; }
     if (ex) { updates.push(l); dup++; continue; }
-    if ((l.domain && domains.has(l.domain)) || (l.phone_e164 && phones.has(l.phone_e164))) { dup++; continue; }
+    if ((l.domain && domains.has(l.domain)) || (l.phone_e164 && !l.sharedPhone && phones.has(l.phone_e164))) { dup++; continue; }
     if (inserts.length + revives.length >= remaining) continue;
     if (l.domain) domains.add(l.domain);
-    if (l.phone_e164) phones.add(l.phone_e164);
+    if (l.phone_e164 && !l.sharedPhone) phones.add(l.phone_e164);
     inserts.push(l);
   }
 

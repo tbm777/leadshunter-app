@@ -38,6 +38,13 @@ jobs:
         run: |
           curl -fsSL --retry 4 -o gmaps https://github.com/gosom/google-maps-scraper/releases/download/v1.9.2/google_maps_scraper-1.9.2-linux-amd64
           chmod +x gmaps
+      - name: Restore browser for form checks
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.cache/ms-playwright
+          key: playwright-1.48.2-v1
       - name: Run job
         env:
           LH_API: ${{ vars.LH_API || inputs.api }}
