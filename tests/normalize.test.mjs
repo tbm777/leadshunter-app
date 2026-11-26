@@ -36,3 +36,18 @@ test('countries and categories', () => {
   assert.ok(categoryAccepted(['Roofer'], 'Construction company', ['Roofer']));
   assert.ok(!categoryAccepted(['Roofing contractor'], 'Hardware store', ['Home improvement store']));
 });
+
+import { parseAddress, prettyPhone } from '../public/shared/normalize.js';
+test('one-line addresses split into city, region and postal code', () => {
+  assert.deepEqual(parseAddress('123 Main St, Brooklyn, NY 11201', 'US'), { city: 'Brooklyn', region: 'NY', postal: '11201' });
+  assert.deepEqual(parseAddress('55 Water St, New York, NY 10041, United States', 'US'), { city: 'New York', region: 'NY', postal: '10041' });
+  assert.deepEqual(parseAddress('100 Queen St W, Toronto, ON M5H 2N2', 'CA'), { city: 'Toronto', region: 'ON', postal: 'M5H 2N2' });
+  assert.deepEqual(parseAddress('1 George St, Sydney NSW 2000', 'AU'), { city: 'Sydney', region: 'NSW', postal: '2000' });
+  assert.deepEqual(parseAddress('Shop 4 - Al Quoz - Dubai - United Arab Emirates', 'AE'), { city: 'Dubai', region: 'Dubai', postal: null });
+  assert.deepEqual(parseAddress('', 'US'), { city: null, region: null, postal: null });
+});
+test('phones are made readable', () => {
+  assert.equal(prettyPhone('(973)538-3910'), '(973) 538-3910');
+  assert.equal(prettyPhone('+12125550101'), '+1 (212) 555-0101');
+  assert.equal(prettyPhone('04 123 4567'), '04 123 4567');
+});

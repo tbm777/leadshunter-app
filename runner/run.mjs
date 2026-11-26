@@ -86,7 +86,7 @@ function toPlace(o) {
   const ca = o.complete_address || o.completeAddress || {};
   const status = String(o.status || '');
   return {
-    place_id: pick(o, 'place_id', 'data_id', 'cid'), name: pick(o, 'title', 'name'), category: pick(o, 'category'),
+    place_id: pick(o, 'place_id', 'data_id', 'cid'), name: pick(o, 'title', 'name'), category: pick(o, 'category') || (Array.isArray(o.categories) && o.categories[0]) || null,
     categories: Array.isArray(o.categories) ? o.categories : [], address: pick(o, 'address'),
     city: pick(ca, 'city', 'locality'), region: pick(ca, 'state', 'region'), postal: pick(ca, 'postal_code', 'postalCode', 'zip'), country: pick(ca, 'country'),
     lat: pick(o, 'latitude', 'lat'), lon: pick(o, 'longitude', 'longtitude', 'lng'),
@@ -125,18 +125,21 @@ async function searchCell(cell, term, dir, level = 0) {
 const checkResults = [];
 let checkOpts = { form: false, email: false };
 let stopChecks = false;
+let stopMaps = false;   // set when the form-filter limit is reached during checks
 let checksPosted = 0;
 const checkQueue = [];
 const everQueued = new Set();
 const enqueueCheck = (lead) => { if (lead && lead[1] && !everQueued.has(lead[0])) { everQueued.add(lead[0]); checkQueue.push(lead); } };
 let checkWorkers = [];
 
-async function flushChecks(force = false) {
+let flushing = Promise.resolve();
+function flushChecks(force = false) { flushing = flushing.then(() => flushChecksNow(force)); return flushing; }
+async function flushChecksNow(force = false) {
   while (checkResults.length && (force || checkResults.length >= 25)) {
     const batch = checkResults.splice(0, 50);
     const r = await api('POST', `/api/runner/jobs/${JOB}/checks`, { results: batch });
     checksPosted += batch.length;
-    if (r.stop) stopChecks = true;
+    if (r.stop) { stopChecks = true; stopMaps = true; }
   }
 }
 async function checkOne([id, website]) {
@@ -204,7 +207,10 @@ async function main() {
     let stop = false, next = 0, posted = 0, chain = Promise.resolve();
     const heartbeat = setInterval(() => api('POST', `/api/runner/jobs/${JOB}/heartbeat`).then(r => { if (r.status === 'cancelled') stop = true; }).catch(() => {}), 60000);
     await Promise.all(Array.from({ length: MAP_CONCURRENCY }, async () => {
-      while (!stop && next < todo.length) {
+      while (!stop && !stopMaps && next < todo.length) {
+        // Don't run far ahead of the website checks (matters when the limit counts leads with a form).
+        while (wantChecks && checkQueue.length > 80 && !stop && !stopMaps) await sleep(500);
+        if (stop || stopMaps) break;
         const idx = todo[next++];
         const cell = cells[idx];
         const term = job.params.terms[cell[4]];
@@ -212,7 +218,7 @@ async function main() {
         if (res.blocked) { stop = true; error = 'Google is limiting requests right now. Leads found so far are saved. Press Retry in an hour to continue.'; break; }
         // Post results in order, one at a time, so the server's counters stay exact.
         chain = chain.then(async () => {
-          if (stop) return;
+          if (stop || stopMaps) return;
           const r = await api('POST', `/api/runner/jobs/${JOB}/cell`, { cell: idx, country: cell[5], places: res.places, extra: res.extra });
           posted++;
           for (const lead of r.new_leads || []) enqueueCheck(lead);

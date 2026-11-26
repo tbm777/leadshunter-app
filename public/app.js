@@ -1,5 +1,6 @@
 // LeadsHunter web app (phase 1: leads). Plain ES modules, no build step.
 import { buildCells, cityRadiusKm } from './shared/grid.js';
+import { parseAddress, prettyPhone } from './shared/normalize.js';
 
 /* ================================================================ basics */
 const $ = s => document.querySelector(s);
@@ -82,6 +83,9 @@ function locKey(l) { const k = [l.city, l.region].filter(Boolean).join(', ') || 
 function rowToLead(row) {
   const o = {};
   ST.cols.forEach((c, i) => { o[c] = row[i]; });
+  if (!o.city && o.address) { const a = parseAddress(o.address, o.country); o.city = a.city; o.region = o.region || a.region; o.postal = o.postal || a.postal; }
+  if (o.phone) o.phone = prettyPhone(o.phone);
+  if (!o.maps_url && o.name) o.maps_url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(o.name + (o.address ? ', ' + o.address : ''))}`;
   o.k = ((o.name || '') + ' ' + (o.website || '') + ' ' + (o.phone || '').replace(/\D/g, '')).toLowerCase();
   o.li = locKey(o);
   o.pf = o.platform ? Math.max(0, PF.indexOf(o.platform)) : 10;
@@ -634,7 +638,7 @@ const RAD = { mi: [[0, 'City only'], [10, '+ 10 mi'], [25, '+ 25 mi'], [50, '+ 5
 const PRAD = { mi: [[5, '5 mi around'], [10, '10 mi around'], [25, '25 mi around']], km: [[8, '8 km around'], [15, '15 km around'], [40, '40 km around']] };
 const COUNTRY = { US: { name: 'United States', unit: 'mi', rw: 'state', ph: 'City, state or ZIP code' }, CA: { name: 'Canada', unit: 'km', rw: 'province', ph: 'City, province or postal code' }, AU: { name: 'Australia', unit: 'km', rw: 'state', ph: 'City, state or postcode' }, AE: { name: 'UAE', unit: 'km', rw: 'emirate', ph: 'City or emirate' } };
 const LIMITS = [100, 250, 500, 1000, 0];
-const FS = { ind: null, terms: new Set(), extra: [], country: 'US', locs: [], q: '', open: false, hi: 0, items: [], name: '', nameEdited: false, paste: false, pasteMsg: '', limit: 500, depth: 2, emails: false, showTerms: false, busy: false, allHist: false, minRev: 0, maxRev: null, countryMenu: false, editName: false, website: 'any' };
+const FS = { ind: null, terms: new Set(), extra: [], country: 'US', locs: [], q: '', open: false, hi: 0, items: [], name: '', nameEdited: false, paste: false, pasteMsg: '', limit: 500, depth: 2, emails: false, showTerms: false, busy: false, allHist: false, minRev: 0, maxRev: null, countryMenu: false, editName: false, website: 'any', form: 'any' };
 const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 async function loadPlaces() {
   if (ST.places) return ST.places;
@@ -808,8 +812,10 @@ function collectHTML() {
   const pill = (k, label, on, tip, locked) => `<button type="button" class="fx-pill ${on ? 'on' : ''}" data-chk="${k}" aria-pressed="${on}" title="${tip}" ${locked ? 'data-locked="1"' : ''}><span class="fx-tick">${on ? ic('check', 12) : ''}</span>${label}</button>`;
   return pill('site', 'Website loads', FS.depth >= 1, 'Checks that each website is up, and how fast it loads.', FS.depth === 2)
     + pill('form', 'Contact form', FS.depth === 2, 'Finds the contact form, CAPTCHA and platform. Best for outreach.')
-    + pill('email', 'Emails', FS.emails, 'Looks for an email address on each website.');
+    + pill('email', 'Emails', FS.emails, 'Looks for an email address on each website.')
+    + (FS.depth === 2 ? `<div class="fx-keep"><span class="fx-k">Keep</span><div class="seg-c fx-seg4" role="radiogroup" aria-label="Which businesses to keep">${KEEP.map(([k, l, tip]) => `<button type="button" role="radio" aria-checked="${FS.form === k}" class="${FS.form === k ? 'on' : ''}" data-keep="${k}" title="${tip}">${l}</button>`).join('')}</div></div>` : '');
 }
+const KEEP = [['any', 'All', 'Keep every business, with or without a form'], ['form', 'Has a form', 'Only businesses with a contact form'], ['open', 'No CAPTCHA', 'Only businesses whose form has no CAPTCHA'], ['captcha', 'CAPTCHA only', 'Only businesses whose form has a CAPTCHA']];
 const dur = s => !s ? '—' : s < 60 ? `${s} s` : s < 3600 ? `${Math.ceil(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
 function startProblem() {
   const terms = activeTerms(), { n } = estimate();
@@ -829,7 +835,7 @@ function sumHTML() {
   const name = FS.nameEdited ? FS.name : autoName();
   const nameHTML = FS.editName ? `<input id="fs-name" class="input fx-nameinput" value="${esc(name)}" maxlength="80" aria-label="Search name">` : `<button class="fx-name" data-fsx="name" title="Rename this search">${esc(name)} ${ic('edit', 12)}</button>`;
   const p = startProblem();
-  return `${nameHTML}<span class="fx-dot">·</span>${p ? `<span class="fx-warn">${esc(p)}</span>` : `<span>up to <b class="num">${fmt(est)}</b> leads</span><span class="fx-dot">·</span><span>about <b class="num">${dur(maps + site + 45)}</b></span>`}`;
+  return `${nameHTML}<span class="fx-dot">·</span>${p ? `<span class="fx-warn">${esc(p)}</span>` : `<span>up to <b class="num">${fmt(est)}</b> ${FS.depth === 2 && FS.form !== 'any' ? { form: 'with a form', open: 'with an open form', captcha: 'with a CAPTCHA form' }[FS.form] : 'leads'}</span><span class="fx-dot">·</span><span>about <b class="num">${dur(maps + site + 45)}</b></span>`}`;
 }
 function updateStart() { const b = $('#fs-go'); if (!b) return; const p = startProblem(); b.disabled = !!p || FS.busy; b.title = p; b.innerHTML = FS.busy ? '<span class="spin"></span>Starting…' : ic('find') + 'Start search'; }
 function refreshFind(parts) {
@@ -880,7 +886,7 @@ async function startSearch() {
   const name = FS.nameEdited && FS.name.trim() ? FS.name.trim() : autoName();
   FS.busy = true; updateStart();
   try {
-    const r = await api('POST', '/api/searches', { name, industry_id: FS.ind, terms, circles, limit: FS.limit, depth: FS.depth, emails: FS.emails, minReviews: FS.minRev || 0, maxReviews: FS.maxRev, website: FS.website, locationLabels: FS.locs.map(locTitle) });
+    const r = await api('POST', '/api/searches', { name, industry_id: FS.ind, terms, circles, limit: FS.limit, depth: FS.depth, emails: FS.emails, minReviews: FS.minRev || 0, maxReviews: FS.maxRev, website: FS.website, form: FS.depth === 2 ? FS.form : 'any', locationLabels: FS.locs.map(locTitle) });
     upsertSearch(r.search); toast(`“${name}” started`); FS.nameEdited = false; FS.name = ''; startPolling();
   } catch (e) {
     toast(e.message, 'alert');
@@ -906,14 +912,15 @@ function jobsHTML() {
     const progressLine = j.status === 'queued' ? 'Waiting for GitHub to start the runner…'
       : checking ? `${fmt(j.checked)} of ${fmt(j.to_check)} websites checked`
       : `${fmt(j.done)} of ${fmt(j.total)} map searches${etaText(j) ? ' · ' + etaText(j) : ''}`;
-    const meta = [whenPT(j.created_at), check ? '' : (j.locations || []).slice(0, 3).join(', ') + ((j.locations || []).length > 3 ? ` +${j.locations.length - 3}` : ''), check ? '' : (['Business info', 'Website check', 'Contact form check'][j.depth] || '') + (j.emails ? ' + emails' : ''), check || (!j.minReviews && j.maxReviews == null) ? '' : `${fmt(j.minReviews || 0)}–${j.maxReviews == null ? 'any' : fmt(j.maxReviews)} reviews`, check || !j.website || j.website === 'any' ? '' : j.website === 'yes' ? 'with website' : 'no website'].filter(Boolean).join(' · ');
+    const meta = [whenPT(j.created_at), check ? '' : (j.locations || []).slice(0, 3).join(', ') + ((j.locations || []).length > 3 ? ` +${j.locations.length - 3}` : ''), check ? '' : (['Business info', 'Website check', 'Contact form check'][j.depth] || '') + (j.emails ? ' + emails' : ''), check || (!j.minReviews && j.maxReviews == null) ? '' : `${fmt(j.minReviews || 0)}–${j.maxReviews == null ? 'any' : fmt(j.maxReviews)} reviews`, check || !j.website || j.website === 'any' ? '' : j.website === 'yes' ? 'with website' : 'no website', check || !j.form || j.form === 'any' ? '' : { form: 'has a form', open: 'no CAPTCHA', captcha: 'CAPTCHA only' }[j.form]].filter(Boolean).join(' · ');
     const stats = check
       ? `<span><b>${fmt(j.checked)}</b> of ${fmt(j.to_check)} checked</span>`
+      : j.form && j.form !== 'any' ? `<span><b>${fmt(j.qualified)}</b> ${{ form: 'with a form', open: 'with an open form', captcha: 'with a CAPTCHA form' }[j.form]}</span><span>${fmt(j.checked)} websites checked</span><span>${fmt(Math.max(0, j.checked - j.qualified))} didn't match</span>${j.limit_reached ? `<span class="okline">${ic('check', 13)}Reached your limit of ${fmt(j.limit)}</span>` : ''}`
       : `<span><b>${fmt(j.new)}</b> new lead${j.new === 1 ? '' : 's'}</span><span>${fmt(j.found)} found</span><span>${fmt(j.dup)} already in Leads</span>${j.excluded ? `<button class="linkbtn muted" data-excl="${j.id}">${fmt(j.excluded)} excluded</button>` : ''}${j.filtered ? `<span>${fmt(j.filtered)} skipped by your filters</span>` : ''}${!active && j.to_check ? `<span>${fmt(j.checked)} websites checked</span>` : ''}${j.limit_reached ? `<span class="okline">${ic('check', 13)}Reached your limit of ${fmt(j.limit)}</span>` : ''}`;
     const actions = active
       ? `${j.run_url ? `<a class="btn sm ghost" href="${esc(j.run_url)}" target="_blank" rel="noopener">${ic('ext', 13)}Log</a>` : ''}${stuck ? `<button class="btn sm" data-jact="retry" data-id="${j.id}">${ic('retry', 13)}Retry</button>` : ''}<button class="btn sm ghost" data-jact="cancel" data-id="${j.id}">Cancel</button>`
       : `${j.status === 'failed' || j.status === 'cancelled' ? `<button class="btn sm" data-jact="retry" data-id="${j.id}" title="Continue where it stopped">${ic('retry', 13)}${j.done ? 'Resume' : 'Retry'}</button>` : ''}
-         ${!check && j.new ? `<button class="btn sm btn-soft" data-jact="view" data-id="${j.id}">View ${fmt(j.new)} lead${j.new === 1 ? '' : 's'} ${ic('arrow', 13)}</button>` : ''}
+         ${!check && (j.form && j.form !== 'any' ? j.qualified : j.new) ? `<button class="btn sm btn-soft" data-jact="view" data-id="${j.id}">View ${fmt(j.form && j.form !== 'any' ? j.qualified : j.new)} lead${(j.form && j.form !== 'any' ? j.qualified : j.new) === 1 ? '' : 's'} ${ic('arrow', 13)}</button>` : ''}
          <div class="kebab"><button class="iconbtn sm" data-menu="${j.id}" aria-label="More actions" aria-haspopup="true">⋯</button>${OPENMENU === j.id ? `<div class="menu" role="menu">
            ${!check && j.new ? `<button role="menuitem" data-jact="export" data-id="${j.id}">${ic('download', 14)}Export leads</button>` : ''}
            ${!check ? `<button role="menuitem" data-jact="again" data-id="${j.id}">${ic('play', 13)}Run again</button>` : ''}
@@ -943,7 +950,7 @@ async function excludedModal(id) {
 function loadIntoForm(j) {
   FS.ind = j.industry_id; const d = curInd();
   FS.terms = new Set((d?.terms || []).map((t, i) => (!j.terms.length || j.terms.includes(t)) ? i : -1).filter(i => i >= 0));
-  FS.extra = j.terms.filter(t => !d?.terms.includes(t)); FS.limit = j.limit; FS.depth = j.depth; FS.emails = j.emails; FS.minRev = j.minReviews || 0; FS.maxRev = j.maxReviews ?? null; FS.website = j.website || 'any';
+  FS.extra = j.terms.filter(t => !d?.terms.includes(t)); FS.limit = j.limit; FS.depth = j.depth; FS.emails = j.emails; FS.minRev = j.minReviews || 0; FS.maxRev = j.maxReviews ?? null; FS.website = j.website || 'any'; FS.form = j.form || 'any';
   FS.name = j.name; FS.nameEdited = true; render(); window.scrollTo({ top: 0, behavior: 'smooth' });
   toast('Settings loaded. Add the locations again, then press Start search');
 }
@@ -1028,10 +1035,11 @@ document.addEventListener('click', async (e) => {
   if ((v = ds('fxsval')) !== undefined) { fxsSet(v, t.closest('[data-fxsval]').dataset.v); return; }
   if ((v = ds('fxscustom')) !== undefined) { const n = parseInt($('#fxs-num').value, 10); if (n > 0) fxsSet(v, n); return; }
   if (FX.open && !t.closest('.fxs')) fxsClose();
-  if ((v = ds('web')) !== undefined) { FS.website = v; if (v === 'no') { FS.depth = 0; FS.emails = false; } $('#fs-web').innerHTML = webHTML(); $('#fs-collect').innerHTML = collectHTML(); refreshFind([]); return; }
+  if ((v = ds('web')) !== undefined) { FS.website = v; if (v === 'no') { FS.depth = 0; FS.emails = false; FS.form = 'any'; } if (v === 'any' && FS.form !== 'any') FS.form = 'any'; $('#fs-web').innerHTML = webHTML(); $('#fs-collect').innerHTML = collectHTML(); refreshFind([]); return; }
+  if ((v = ds('keep')) !== undefined) { FS.form = v; if (v !== 'any' && FS.website !== 'yes') { FS.website = 'yes'; $('#fs-web').innerHTML = webHTML(); } $('#fs-collect').innerHTML = collectHTML(); refreshFind([]); return; }
   if ((v = ds('chk')) !== undefined) {
     if (v === 'site') { if (FS.depth === 2) { toast('The contact form check includes the website check', 'alert'); return; } FS.depth = FS.depth >= 1 ? 0 : 1; if (FS.depth === 0) FS.emails = false; }
-    if (v === 'form') FS.depth = FS.depth === 2 ? 1 : 2;
+    if (v === 'form') { FS.depth = FS.depth === 2 ? 1 : 2; if (FS.depth !== 2) FS.form = 'any'; }
     if (v === 'email') { FS.emails = !FS.emails; if (FS.emails && FS.depth === 0) FS.depth = 1; }
     $('#fs-collect').innerHTML = collectHTML(); refreshFind([]); return;
   }

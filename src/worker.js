@@ -1,6 +1,6 @@
 // LeadsHunter API Worker. Serves the app (static assets), the JSON API and the runner endpoints.
 import { buildCells } from '../public/shared/grid.js';
-import { cleanWebsite, domainOf, isSharedDomain, isSocialHost, phoneE164, countryCode, categoryAccepted } from '../public/shared/normalize.js';
+import { cleanWebsite, domainOf, isSharedDomain, isSocialHost, phoneE164, countryCode, categoryAccepted, parseAddress, prettyPhone } from '../public/shared/normalize.js';
 
 const MAX_TASKS = 6000;              // map searches per search job
 const STALE_MS = 15 * 60 * 1000;     // a running job with no heartbeat for this long is marked failed
@@ -152,13 +152,13 @@ function searchOut(r) {
   const params = parse(r.params, {});
   return {
     id: r.id, kind: r.kind, name: r.name, industry_id: r.industry_id, status: r.status, limit: r.limit_n,
-    total: r.total_tasks, done: r.done_tasks, found: r.found, new: r.new_count, dup: r.dup, excluded: r.excluded, filtered: r.filtered || 0,
+    total: r.total_tasks, done: r.done_tasks, found: r.found, new: r.new_count, dup: r.dup, excluded: r.excluded, filtered: r.filtered || 0, qualified: r.qualified || 0,
     to_check: r.to_check, checked: r.checked, limit_reached: !!r.limit_reached, error: r.error, run_url: r.run_url,
     created_at: r.created_at, started_at: r.started_at, finished_at: r.finished_at, heartbeat_at: r.heartbeat_at,
-    depth: params.depth ?? 0, emails: !!params.emails, minReviews: params.minReviews || 0, maxReviews: params.maxReviews ?? null, website: params.website || 'any', locations: params.locationLabels || [], terms: params.terms || [],
+    depth: params.depth ?? 0, emails: !!params.emails, minReviews: params.minReviews || 0, maxReviews: params.maxReviews ?? null, website: params.website || 'any', form: params.form || 'any', locations: params.locationLabels || [], terms: params.terms || [],
   };
 }
-const SEARCH_COLS = 'id, kind, name, industry_id, params, status, limit_n, total_tasks, done_tasks, found, new_count, dup, excluded, filtered, to_check, checked, limit_reached, error, run_url, created_at, started_at, finished_at, heartbeat_at';
+const SEARCH_COLS = 'id, kind, name, industry_id, params, status, limit_n, total_tasks, done_tasks, found, new_count, dup, excluded, filtered, qualified, to_check, checked, limit_reached, error, run_url, created_at, started_at, finished_at, heartbeat_at';
 const inList = (n) => Array(n).fill('?').join(',');
 function chunk(arr, n) { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; }
 
@@ -230,12 +230,15 @@ async function createSearch(env, b) {
   if (!circles.length) throw new HttpError(400, 'Add at least one location.');
   const cells = buildCells(circles, terms.length);
   if (cells.length > MAX_TASKS) throw new HttpError(400, `This search needs ${cells.length.toLocaleString('en-US')} map searches, more than the ${MAX_TASKS.toLocaleString('en-US')} allowed in one go. Use fewer locations, a smaller area or fewer search terms.`);
+  // Keeping only businesses with a (certain kind of) contact form needs a website and the form check.
+  const form = ['form', 'open', 'captcha'].includes(b.form) ? b.form : 'any';
+  if (form !== 'any') { b.website = 'yes'; b.depth = 2; }
   const depth = [0, 1, 2].includes(+b.depth) ? +b.depth : 2;
   const minReviews = Math.max(0, Math.floor(+b.minReviews || 0));
   const maxReviews = b.maxReviews === null || b.maxReviews === undefined || b.maxReviews === '' ? null : Math.max(0, Math.floor(+b.maxReviews));
   if (maxReviews !== null && maxReviews < minReviews) throw new HttpError(400, 'Max reviews is lower than min reviews.');
   const params = {
-    terms, depth: b.website === 'no' ? 0 : depth, emails: b.website === 'no' ? false : !!b.emails, minReviews, maxReviews, website: ['yes', 'no'].includes(b.website) ? b.website : 'any', countries: [...new Set(circles.map(c => c.country))],
+    terms, depth: b.website === 'no' ? 0 : depth, emails: b.website === 'no' ? false : !!b.emails, minReviews, maxReviews, website: ['yes', 'no'].includes(b.website) ? b.website : 'any', form, countries: [...new Set(circles.map(c => c.country))],
     locationLabels: cleanList(b.locationLabels, 50), nCells: 0,
   };
   params.nCells = cells.length;
@@ -371,7 +374,7 @@ async function runnerRoute(req, env, url) {
   if (!(mm = p.match(/^\/api\/runner\/jobs\/(\d+)(\/[a-z-]+)?$/))) throw new HttpError(404, 'Not found.');
   const id = +mm[1], action = mm[2] || '';
   const wantCells = action === '' && m === 'GET';
-  const s = await env.DB.prepare(`SELECT id, kind, industry_id, params, done_bits, status, limit_n, new_count, created_at${wantCells ? ', cells' : ''} FROM searches WHERE id = ?`).bind(id).first();
+  const s = await env.DB.prepare(`SELECT id, kind, industry_id, params, done_bits, status, limit_n, new_count, qualified, created_at${wantCells ? ', cells' : ''} FROM searches WHERE id = ?`).bind(id).first();
   if (!s) throw new HttpError(404, 'Job not found.');
   const params = parse(s.params, {});
 
@@ -386,7 +389,7 @@ async function runnerRoute(req, env, url) {
     return json({ proceed: true });
   }
   if (action === '/cell' && m === 'POST') return ingestCell(env, s, params, await body(req));
-  if (action === '/checks' && m === 'POST') return ingestChecks(env, s, await body(req));
+  if (action === '/checks' && m === 'POST') return ingestChecks(env, s, params, await body(req));
   if (action === '/pending-checks' && m === 'GET') {
     let rows;
     if (s.kind === 'check') {
@@ -407,6 +410,15 @@ async function runnerRoute(req, env, url) {
   }
   if (action === '/finish' && m === 'POST') {
     const b = await body(req);
+    if (s.kind === 'search' && params.form && params.form !== 'any') {
+      // Candidates that were never checked can't be shown as matching the form filter.
+      const left = (await env.DB.prepare('SELECT id FROM leads WHERE search_id = ? AND checked_at IS NULL AND deleted = 0 LIMIT 5000').bind(id).all()).results;
+      if (left.length) {
+        let sq = await reserveSeq(env, left.length);
+        const t = now();
+        for (const part of chunk(left.map(r => env.DB.prepare('UPDATE leads SET deleted = 1, seq = ?, updated_at = ? WHERE id = ?').bind(sq++, t, r.id)), 400)) await env.DB.batch(part);
+      }
+    }
     const status = s.status === 'cancelled' ? 'cancelled' : b.error ? 'failed' : 'done';
     await env.DB.prepare(`UPDATE searches SET status = ?, error = ?, finished_at = ?, heartbeat_at = ?${status === 'done' ? ", cells = '[]', done_bits = ''" : ''} WHERE id = ?`).bind(status, b.error ? String(b.error).slice(0, 500) : null, now(), now(), id).run();
     return json({ status });
@@ -449,14 +461,16 @@ async function ingestCell(env, s, params, b) {
     const website = cleanWebsite(p.website);
     const domain = domainOf(website);
     const country = countryCode(p.country, fallbackCountry);
+    const parsed = p.city ? { city: p.city, region: p.region, postal: p.postal } : parseAddress(p.address, country);
+    const category = p.category || (Array.isArray(p.categories) && p.categories[0]) || null;
     const lead = {
-      place_id: pid.slice(0, 200), name: name.slice(0, 200), category: p.category ? String(p.category).slice(0, 100) : null,
-      address: p.address ? String(p.address).slice(0, 300) : null, city: p.city || null, region: p.region || null, postal: p.postal || null, country,
+      place_id: pid.slice(0, 200), name: name.slice(0, 200), category: category ? String(category).slice(0, 100) : null,
+      address: p.address ? String(p.address).slice(0, 300) : null, city: parsed.city || null, region: parsed.region || null, postal: parsed.postal || null, country,
       lat: Number.isFinite(+p.lat) ? +p.lat : null, lon: Number.isFinite(+p.lon) ? +p.lon : null,
-      phone: p.phone ? String(p.phone).slice(0, 40) : null, phone_e164: phoneE164(p.phone, country),
+      phone: p.phone ? prettyPhone(String(p.phone)).slice(0, 40) : null, phone_e164: phoneE164(p.phone, country),
       website, domain: domain && !isSharedDomain(domain) ? domain : null,
       rating: Number.isFinite(+p.rating) && +p.rating > 0 ? Math.round(+p.rating * 10) / 10 : null,
-      reviews: Math.max(0, Math.floor(+p.reviews || 0)), maps_url: p.maps_url ? String(p.maps_url).slice(0, 500) : null, closed: p.closed ? 1 : 0,
+      reviews: Math.max(0, Math.floor(+p.reviews || 0)), maps_url: p.maps_url ? String(p.maps_url).slice(0, 500) : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name + (p.address ? ', ' + p.address : ''))}`, closed: p.closed ? 1 : 0,
     };
     if (!categoryAccepted(accepted, p.category, p.categories)) excluded.push(lead);
     else if (lead.reviews < (params.minReviews || 0) || (params.maxReviews != null && lead.reviews > params.maxReviews)) filtered++;
@@ -469,8 +483,8 @@ async function ingestCell(env, s, params, b) {
   const byPid = new Map(), domains = new Set(), phones = new Set();
   const pids = keep.map(l => l.place_id), doms = [...new Set(keep.map(l => l.domain).filter(Boolean))], phs = [...new Set(keep.map(l => l.phone_e164).filter(Boolean))];
   for (const part of chunk(pids, 90)) {
-    const r = await env.DB.prepare(`SELECT id, place_id FROM leads WHERE place_id IN (${inList(part.length)})`).bind(...part).all();
-    for (const x of r.results) byPid.set(x.place_id, x.id);
+    const r = await env.DB.prepare(`SELECT id, place_id, deleted FROM leads WHERE place_id IN (${inList(part.length)})`).bind(...part).all();
+    for (const x of r.results) byPid.set(x.place_id, x);
   }
   for (const part of chunk(doms, 90)) {
     const r = await env.DB.prepare(`SELECT domain FROM leads WHERE domain IN (${inList(part.length)})`).bind(...part).all();
@@ -481,26 +495,36 @@ async function ingestCell(env, s, params, b) {
     for (const x of r.results) phones.add(x.phone_e164);
   }
 
-  const remaining = s.limit_n ? Math.max(0, s.limit_n - s.new_count) : Infinity;
-  const inserts = [], updates = [];
+  const formFilter = params.form && params.form !== 'any';
+  // With a form filter the limit counts leads that pass the form check, so candidates aren't capped here.
+  const remaining = !s.limit_n || formFilter ? Infinity : Math.max(0, s.limit_n - s.new_count);
+  const inserts = [], updates = [], revives = [];
   let dup = 0;
   for (const l of keep) {
-    if (byPid.has(l.place_id)) { updates.push(l); dup++; continue; }
+    const ex = byPid.get(l.place_id);
+    if (ex && ex.deleted && inserts.length + revives.length < remaining) { revives.push(l); continue; }
+    if (ex) { updates.push(l); dup++; continue; }
     if ((l.domain && domains.has(l.domain)) || (l.phone_e164 && phones.has(l.phone_e164))) { dup++; continue; }
-    if (inserts.length >= remaining) continue;
+    if (inserts.length + revives.length >= remaining) continue;
     if (l.domain) domains.add(l.domain);
     if (l.phone_e164) phones.add(l.phone_e164);
     inserts.push(l);
   }
 
   const stmts = [];
-  let seq = (inserts.length + updates.length) ? await reserveSeq(env, inserts.length + updates.length) : 0;
+  const nSeq = inserts.length + updates.length + revives.length;
+  let seq = nSeq ? await reserveSeq(env, nSeq) : 0;
   const depth = params.depth || 0;
   for (const l of inserts) {
     const site = l.website ? 3 : 4;
     stmts.push(env.DB.prepare(`INSERT INTO leads (seq, place_id, name, category, industry_id, address, city, region, postal, country, lat, lon, phone, phone_e164, website, domain, rating, reviews, maps_url, closed, site_status, form_status, search_id, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(place_id) DO NOTHING RETURNING id, website`)
       .bind(seq++, l.place_id, l.name, l.category, s.industry_id, l.address, l.city, l.region, l.postal, l.country, l.lat, l.lon, l.phone, l.phone_e164, l.website, l.domain, l.rating, l.reviews, l.maps_url, l.closed, site, l.website ? 3 : 2, s.id, t, t));
+  }
+  // Leads hidden by an earlier search's form filter come back as new for this search and get checked again.
+  for (const l of revives) {
+    stmts.push(env.DB.prepare('UPDATE leads SET deleted = 0, search_id = ?, industry_id = ?, rating = COALESCE(?, rating), reviews = MAX(reviews, ?), checked_at = NULL, seq = ?, updated_at = ? WHERE place_id = ? RETURNING id, website')
+      .bind(s.id, s.industry_id, l.rating, l.reviews, seq++, t, l.place_id));
   }
   for (const l of updates) {
     stmts.push(env.DB.prepare('UPDATE leads SET rating = COALESCE(?, rating), reviews = MAX(reviews, ?), closed = ?, phone = COALESCE(phone, ?), phone_e164 = COALESCE(phone_e164, ?), seq = ?, updated_at = ? WHERE place_id = ?')
@@ -511,7 +535,7 @@ async function ingestCell(env, s, params, b) {
   }
   const results = stmts.length ? await env.DB.batch(stmts) : [];
   const newLeads = [];
-  for (let i = 0; i < inserts.length; i++) {
+  for (let i = 0; i < inserts.length + revives.length; i++) {
     const r = results[i] && results[i].results && results[i].results[0];
     if (r) newLeads.push([r.id, r.website]);
   }
@@ -519,7 +543,7 @@ async function ingestCell(env, s, params, b) {
   const extra = Math.max(0, Math.floor(+b.extra || 0));
   bits[cellIdx >> 3] |= (1 << (cellIdx & 7));
   const newTotal = s.new_count + newLeads.length;
-  const limitReached = s.limit_n && newTotal >= s.limit_n ? 1 : 0;
+  const limitReached = !s.limit_n ? 0 : formFilter ? (s.qualified >= s.limit_n ? 1 : 0) : (newTotal >= s.limit_n ? 1 : 0);
   const toCheck = depth > 0 || params.emails ? newLeads.filter(x => x[1]).length : 0;
   await env.DB.prepare(`UPDATE searches SET found = found + ?, new_count = new_count + ?, dup = dup + ?, excluded = excluded + ?, filtered = filtered + ?,
       done_tasks = done_tasks + ?, total_tasks = total_tasks + ?, to_check = to_check + ?, done_bits = ?, limit_reached = MAX(limit_reached, ?), heartbeat_at = ? WHERE id = ?`)
@@ -529,22 +553,30 @@ async function ingestCell(env, s, params, b) {
 }
 
 const SITE = [0, 1, 2, 3, 4, 5, 6, 7], FORM = [0, 1, 2, 3, 4];
-async function ingestChecks(env, s, b) {
+async function ingestChecks(env, s, params, b) {
   const items = (Array.isArray(b.results) ? b.results : []).filter(r => Number.isInteger(+r.id)).slice(0, 200);
   if (!items.length) return json({ ok: true });
   let seq = await reserveSeq(env, items.length);
   const t = now();
+  const filter = s.kind === 'search' && params.form && params.form !== 'any' ? params.form : null;
+  let qualified = 0;
+  // Keep the count exact: matches past the limit stay hidden (a later search can bring them back).
+  let room = filter && s.limit_n ? Math.max(0, s.limit_n - ((await env.DB.prepare('SELECT qualified FROM searches WHERE id = ?').bind(s.id).first()).qualified || 0)) : Infinity;
   const stmts = items.map(r => {
     const site = SITE.includes(+r.site) ? +r.site : 3;
     const form = r.form === null || r.form === undefined ? null : (FORM.includes(+r.form) ? +r.form : 3);
+    let ok = !filter || (filter === 'form' && (form === 0 || form === 1)) || (filter === 'open' && form === 0) || (filter === 'captcha' && form === 1);
+    if (filter && ok) { if (room > 0) { room--; qualified++; } else ok = false; }
     return env.DB.prepare(`UPDATE leads SET site_status = ?, site_ms = ?, form_status = COALESCE(?, form_status), form_url = COALESCE(?, form_url), captcha = ?,
-        platform = COALESCE(?, platform), email = COALESCE(?, email), checked_at = ?, seq = ?, updated_at = ? WHERE id = ?`)
+        platform = COALESCE(?, platform), email = COALESCE(?, email), checked_at = ?, deleted = ?, seq = ?, updated_at = ? WHERE id = ?`)
       .bind(site, Number.isFinite(+r.ms) ? Math.round(+r.ms) : null, form, r.form_url ? String(r.form_url).slice(0, 500) : null,
         r.captcha ? String(r.captcha).slice(0, 40) : null, r.platform ? String(r.platform).slice(0, 40) : null,
-        r.email ? String(r.email).slice(0, 200) : null, t, seq++, t, +r.id);
+        r.email ? String(r.email).slice(0, 200) : null, t, ok ? 0 : 1, seq++, t, +r.id);
   });
-  stmts.push(env.DB.prepare('UPDATE searches SET checked = checked + ?, heartbeat_at = ? WHERE id = ?').bind(items.length, t, s.id));
+  stmts.push(env.DB.prepare('UPDATE searches SET checked = checked + ?, qualified = qualified + ?, heartbeat_at = ? WHERE id = ?').bind(items.length, qualified, t, s.id));
   await env.DB.batch(stmts);
-  const st = (await env.DB.prepare('SELECT status FROM searches WHERE id = ?').bind(s.id).first()).status;
-  return json({ ok: true, stop: st === 'cancelled' });
+  const cur = await env.DB.prepare('SELECT status, qualified, limit_n FROM searches WHERE id = ?').bind(s.id).first();
+  const reached = !!(filter && cur.limit_n && cur.qualified >= cur.limit_n);
+  if (reached) await env.DB.prepare('UPDATE searches SET limit_reached = 1 WHERE id = ?').bind(s.id).run();
+  return json({ ok: true, stop: cur.status === 'cancelled' || reached });
 }

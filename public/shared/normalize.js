@@ -86,3 +86,44 @@ export function categoryAccepted(accepted, category, categories) {
   const have = [category, ...(Array.isArray(categories) ? categories : [])].filter(Boolean).map(c => String(c).trim().toLowerCase());
   return have.some(c => want.has(c));
 }
+
+const COUNTRY_WORDS = /^(united states|usa|us|canada|australia|united arab emirates|uae)$/i;
+const AU_STATES = 'NSW|VIC|QLD|SA|WA|TAS|NT|ACT';
+const AE_CITIES = ['Abu Dhabi', 'Dubai', 'Sharjah', 'Ajman', 'Ras Al Khaimah', 'Fujairah', 'Umm Al Quwain', 'Al Ain'];
+
+/** Split a one-line Google address into city, region and postal code. Country is a two-letter hint. */
+export function parseAddress(address, country) {
+  const out = { city: null, region: null, postal: null };
+  if (!address || typeof address !== 'string') return out;
+  let parts = address.split(',').map(s => s.trim()).filter(Boolean);
+  while (parts.length && COUNTRY_WORDS.test(parts[parts.length - 1])) parts.pop();
+  if (!parts.length) return out;
+  const last = parts[parts.length - 1];
+  if (country === 'AE' || / - /.test(last)) {
+    const segs = parts.join(' - ').split(/\s+-\s+/).map(s => s.trim()).filter(s => s && !COUNTRY_WORDS.test(s));
+    const hit = [...segs].reverse().find(s => AE_CITIES.some(c => c.toLowerCase() === s.toLowerCase()));
+    out.city = hit || segs[segs.length - 1] || null;
+    out.region = hit || null;
+    return out;
+  }
+  let m;
+  if ((m = last.match(new RegExp(`^(.*?)\\s+(${AU_STATES})\\s*(\\d{4})?$`)))) {
+    out.city = m[1] || (parts.length > 1 ? parts[parts.length - 2] : null); out.region = m[2]; out.postal = m[3] || null; return out;
+  }
+  if ((m = last.match(/^([A-Z]{2})(?:\s+([0-9]{5}(?:-[0-9]{4})?|[A-Z][0-9][A-Z]\s?[0-9][A-Z][0-9]))?$/))) {
+    out.region = m[1]; out.postal = m[2] || null; out.city = parts.length > 1 ? parts[parts.length - 2] : null; return out;
+  }
+  if ((m = last.match(new RegExp(`^(${AU_STATES})\\s+(\\d{4})$`)))) { out.region = m[1]; out.postal = m[2]; out.city = parts.length > 1 ? parts[parts.length - 2] : null; return out; }
+  out.city = parts.length > 1 ? last : null;
+  return out;
+}
+
+/** Make phone numbers readable: (973)538-3910 → (973) 538-3910. Leaves other formats alone. */
+export function prettyPhone(raw) {
+  if (!raw) return raw;
+  const s = String(raw).trim();
+  const d = s.replace(/\D/g, '');
+  if (/^\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}$/.test(s) && d.length === 10) return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+  if (/^\+1/.test(s) && d.length === 11) return `+1 (${d.slice(1, 4)}) ${d.slice(4, 7)}-${d.slice(7)}`;
+  return s.replace(/\s{2,}/g, ' ');
+}
