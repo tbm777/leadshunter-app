@@ -33,7 +33,7 @@ const P = {
   alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5v.5"/>', globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>',
   shield: '<path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"/>', filter: '<path d="M4 5h16l-6 8v6l-4-2v-4z"/>',
   download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>', arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
-  back: '<path d="M19 12H5M11 6l-6 6 6 6"/>', play: '<path d="M7 4v16l13-8z"/>', logout: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h11"/>',
+  back: '<path d="M19 12H5M11 6l-6 6 6 6"/>', trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>', retry: '<path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v4h4"/>', play: '<path d="M7 4v16l13-8z"/>', logout: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h11"/>',
 };
 const ic = (n, s = 16) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n] || ''}</svg>`;
 const FLAGS = {
@@ -350,7 +350,7 @@ function withFocus(fn) {
   if (id) { const n = document.getElementById(id); if (n && n !== document.activeElement) { n.focus(); try { if (ss != null) n.setSelectionRange(ss, ss); } catch { /* not a text field */ } } }
 }
 function industryName(id) { return ST.industries.find(i => i.id === id)?.name || 'Other'; }
-function searchName(id) { const s = ST.searches.find(x => x.id === id); return s ? s.name : `Search #${id}`; }
+function searchName(id) { const s = ST.searches.find(x => x.id === id); return s ? s.name : (ST.hiddenNames && ST.hiddenNames[id]) || `Search #${id}`; }
 function ddOpts(key) {
   const C = L$.C;
   if (key === 'ind') { const ids = new Set([...ST.industries.map(i => i.id), ...C[0].keys()]); return [...ids].map(id => ({ v: id, l: industryName(id), n: C[0].get(id) || 0 })).filter(o => o.n || !ST.industries.find(i => i.id === o.v)?.archived).sort((a, b) => a.l.localeCompare(b.l)); }
@@ -846,31 +846,48 @@ async function startSearch() {
     if (e.status === 502) refreshSearches();
   } finally { FS.busy = false; refreshFind([]); renderJobs(); $('#jobs')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 }
+function etaText(j) {
+  if (j.status !== 'running' || !j.started_at || !j.total || !j.done) return '';
+  const el = Date.now() - j.started_at, left = (el / j.done) * (j.total - j.done);
+  if (left < 60e3) return 'less than a minute left';
+  return `about ${Math.round(left / 60e3)} min left`;
+}
 function jobsHTML() {
   if (!ST.searches.length) return `<div class="empty"><b>No searches yet</b>Your searches and their progress show up here.</div>`;
   const list = FS.allHist ? ST.searches : ST.searches.slice(0, 10);
   return list.map(j => {
-    const active = ACTIVE(j), check = j.kind === 'check';
-    const mapPct = j.total ? j.done / j.total : 0, chkPct = j.to_check ? j.checked / j.to_check : 0;
-    const pct = check ? chkPct * 100 : j.status === 'done' ? 100 : (j.depth > 0 || j.emails) ? (mapPct * 70 + chkPct * 30) : mapPct * 100;
-    const stage = j.status === 'queued' ? 'Waiting for GitHub to start' : j.status === 'running' ? (check || (j.total && j.done >= j.total) || j.limit_reached ? 'Checking websites' : 'Searching Google Maps') : '';
-    const pill = active ? `<span class="pill c-info">${stage}</span>` : j.status === 'done' ? '' : j.status === 'failed' ? '<span class="pill c-bad">Stopped</span>' : j.status === 'cancelled' ? '<span class="pill c-idle">Cancelled</span>' : '';
-    const depthLbl = check ? '' : `<span class="pill plain c-idle">${['Business info', 'Website check', 'Contact form check'][j.depth] || ''}${j.emails ? ' + emails' : ''}</span>`;
+    const active = ACTIVE(j), check = j.kind === 'check', stuck = active && Date.now() - (j.heartbeat_at || j.started_at || j.created_at) > 5 * 60 * 1000;
+    const mapsDone = !j.total || j.done >= j.total || j.limit_reached;
+    const checking = j.status === 'running' && (check || (mapsDone && j.to_check > j.checked));
+    const stage = j.status === 'queued' ? 'Starting' : checking ? 'Checking websites' : j.status === 'running' ? 'Searching Google Maps' : '';
+    const pill = stuck ? '<span class="pill c-warn">Not responding</span>' : active ? `<span class="pill c-info">${stage}</span>` : j.status === 'failed' ? '<span class="pill c-bad">Stopped</span>' : j.status === 'cancelled' ? '<span class="pill c-idle">Cancelled</span>' : '<span class="pill c-ok">Done</span>';
+    const pct = check ? (j.to_check ? j.checked / j.to_check : 0) : checking ? (j.to_check ? j.checked / j.to_check : 1) : (j.total ? j.done / j.total : 0);
+    const progressLine = j.status === 'queued' ? 'Waiting for GitHub to start the runner…'
+      : checking ? `${fmt(j.checked)} of ${fmt(j.to_check)} websites checked`
+      : `${fmt(j.done)} of ${fmt(j.total)} map searches${etaText(j) ? ' · ' + etaText(j) : ''}`;
+    const meta = [whenPT(j.created_at), check ? '' : (j.locations || []).slice(0, 3).join(', ') + ((j.locations || []).length > 3 ? ` +${j.locations.length - 3}` : ''), check ? '' : (['Business info', 'Website check', 'Contact form check'][j.depth] || '') + (j.emails ? ' + emails' : '')].filter(Boolean).join(' · ');
     const stats = check
       ? `<span><b>${fmt(j.checked)}</b> of ${fmt(j.to_check)} checked</span>`
-      : `<span><b>${fmt(j.new)}</b> new leads</span><span>${fmt(j.found)} found</span><span>${fmt(j.dup)} duplicates</span>${j.excluded ? `<button class="linkbtn muted" data-excl="${j.id}">${fmt(j.excluded)} excluded</button>` : ''}${j.to_check ? `<span>${fmt(j.checked)} / ${fmt(j.to_check)} websites checked</span>` : ''}${j.limit_reached ? `<span style="color:var(--ok);font-weight:550">Reached your limit of ${fmt(j.limit)}</span>` : ''}${active && j.total ? `<span>${fmt(j.done)} / ${fmt(j.total)} map searches</span>` : ''}`;
-    return `<div class="job"><div style="display:flex;flex-direction:column;gap:6px;min-width:0">
-      <div class="row"><b>${esc(j.name)}</b><span class="sub">${whenPT(j.created_at)}</span>${depthLbl}${pill}</div>
-      ${active ? `<div class="seg" style="height:6px"><i style="width:${Math.max(2, pct)}%;background:var(--info)"></i></div>` : ''}
+      : `<span><b>${fmt(j.new)}</b> new lead${j.new === 1 ? '' : 's'}</span><span>${fmt(j.found)} found</span><span>${fmt(j.dup)} already in Leads</span>${j.excluded ? `<button class="linkbtn muted" data-excl="${j.id}">${fmt(j.excluded)} excluded</button>` : ''}${!active && j.to_check ? `<span>${fmt(j.checked)} websites checked</span>` : ''}${j.limit_reached ? `<span class="okline">${ic('check', 13)}Reached your limit of ${fmt(j.limit)}</span>` : ''}`;
+    const actions = active
+      ? `${j.run_url ? `<a class="btn sm ghost" href="${esc(j.run_url)}" target="_blank" rel="noopener">${ic('ext', 13)}Log</a>` : ''}${stuck ? `<button class="btn sm" data-jact="retry" data-id="${j.id}">${ic('retry', 13)}Retry</button>` : ''}<button class="btn sm ghost" data-jact="cancel" data-id="${j.id}">Cancel</button>`
+      : `${j.status === 'failed' || j.status === 'cancelled' ? `<button class="btn sm" data-jact="retry" data-id="${j.id}" title="Continue where it stopped">${ic('retry', 13)}${j.done ? 'Resume' : 'Retry'}</button>` : ''}
+         ${!check && j.new ? `<button class="btn sm" data-jact="view" data-id="${j.id}">View leads ${ic('arrow', 13)}</button>` : ''}
+         <div class="kebab"><button class="iconbtn sm" data-menu="${j.id}" aria-label="More actions" aria-haspopup="true">⋯</button>${OPENMENU === j.id ? `<div class="menu" role="menu">
+           ${!check && j.new ? `<button role="menuitem" data-jact="export" data-id="${j.id}">${ic('download', 14)}Export leads</button>` : ''}
+           ${!check ? `<button role="menuitem" data-jact="again" data-id="${j.id}">${ic('play', 13)}Run again</button>` : ''}
+           ${j.run_url ? `<a role="menuitem" href="${esc(j.run_url)}" target="_blank" rel="noopener">${ic('ext', 13)}Open log</a>` : ''}
+           <button role="menuitem" class="danger" data-jact="delete" data-id="${j.id}">${ic('trash', 14)}Delete from history</button></div>` : ''}</div>`;
+    return `<div class="job ${active ? 'live' : ''}"><div class="job-main">
+      <div class="row job-title"><b>${esc(j.name)}</b>${pill}</div>
+      <div class="job-meta">${esc(meta)}</div>
+      ${active ? `<div class="job-prog"><div class="seg" style="height:6px"><i style="width:${Math.max(2, Math.min(100, pct * 100))}%;background:var(--info)"></i></div><span class="num">${progressLine}</span></div>` : ''}
       <div class="jstats num">${stats}</div>
-      ${j.status === 'failed' && j.error ? `<div class="help" style="color:var(--bad)">${esc(j.error)}</div>` : ''}</div>
-      <div class="row" style="gap:4px">${j.run_url ? `<a class="btn sm ghost" href="${esc(j.run_url)}" target="_blank" rel="noopener" title="Open the run on GitHub">${ic('ext', 13)}Log</a>` : ''}
-        ${active ? `<button class="btn sm ghost" data-jact="cancel" data-id="${j.id}">Cancel</button>` : ''}
-        ${j.status === 'failed' || j.status === 'cancelled' || (active && Date.now() - (j.heartbeat_at || j.started_at || j.created_at) > 5 * 60 * 1000) ? `<button class="btn sm" data-jact="retry" data-id="${j.id}">${ic('play', 12)}Retry</button>` : ''}
-        ${!check && !active ? `<button class="btn sm ghost" data-jact="again" data-id="${j.id}">Run again</button>` : ''}
-        ${!check && j.new ? `<button class="btn sm ghost" data-jact="export" data-id="${j.id}">${ic('download', 14)}Export</button><button class="btn sm" data-jact="view" data-id="${j.id}">View leads ${ic('arrow', 13)}</button>` : ''}</div></div>`;
+      ${j.status === 'failed' && j.error ? `<div class="job-err">${ic('alert', 15)}<span>${esc(j.error)}</span></div>` : ''}</div>
+      <div class="row job-acts">${actions}</div></div>`;
   }).join('') + (ST.searches.length > 10 ? `<div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:center"><button class="btn ghost sm" data-act="allhist">${FS.allHist ? 'Show fewer' : `Show all ${ST.searches.length} searches`}</button></div>` : '');
 }
+let OPENMENU = null;
 function renderJobs() { const el = $('#jobs'); if (el) el.innerHTML = jobsHTML(); }
 async function excludedModal(id) {
   $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop><div class="card-b"><span class="spin"></span> Loading…</div></div></div>`;
@@ -957,8 +974,16 @@ document.addEventListener('click', async (e) => {
     try { const r = await api('POST', `/api/industries/${indId}/categories`, { category: v }); const i = ST.industries.findIndex(x => x.id === indId); if (i >= 0) ST.industries[i] = r.industry; t.closest('button').outerHTML = '<span class="pill c-ok">Accepted</span>'; } catch (err) { toast(err.message, 'alert'); }
     return;
   }
+  if ((v = ds('menu')) !== undefined) { e.stopPropagation(); OPENMENU = OPENMENU === +v ? null : +v; renderJobs(); return; }
+  if (OPENMENU !== null && !t.closest('.menu')) { OPENMENU = null; renderJobs(); }
   if ((v = ds('jact')) !== undefined) {
     const id = +t.closest('[data-id]').dataset.id, j = ST.searches.find(x => x.id === id);
+    OPENMENU = null;
+    if (v === 'delete') {
+      $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Delete search"><div class="card-h"><div><h2>Delete “${esc(j.name)}”?</h2></div></div><div class="card-b"><p style="margin:0">It's removed from Search history.${j.new ? ` The <b>${fmt(j.new)} leads</b> it found stay in Leads.` : ''}</p></div>
+        <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-jdel="${id}" style="background:var(--bad);border-color:var(--bad);color:#fff">${ic('trash', 14)}Delete</button></div></div></div>`;
+      return;
+    }
     if (v === 'view') { L$.F = defaultF(); L$.F.src = new Set([id]); L$.view = null; location.hash = '#leads'; }
     else if (v === 'export') openExport('search', id);
     else if (v === 'again') loadIntoForm(j);
@@ -966,6 +991,12 @@ document.addEventListener('click', async (e) => {
       try { const r = await api('POST', `/api/searches/${id}/${v}`); upsertSearch(r.search); renderJobs(); if (v === 'retry') { toast('Search restarted'); startPolling(); } else toast('Search cancelled. Leads found so far were kept'); }
       catch (err) { toast(err.message, 'alert'); if (err.status === 502) refreshSearches(); }
     }
+    return;
+  }
+  if ((v = ds('jdel')) !== undefined) {
+    const id = +v, j = ST.searches.find(x => x.id === id);
+    try { await api('DELETE', `/api/searches/${id}`); ST.hiddenNames[id] = j?.name; ST.searches = ST.searches.filter(x => x.id !== id); closeOverlay(); renderJobs(); toast('Search deleted'); }
+    catch (err) { toast(err.message, 'alert'); }
     return;
   }
   if ((v = ds('indedit')) !== undefined) { const d = ST.industries.find(x => x.id === +v); EDIT = { id: d.id, orig: d.name, name: d.name, terms: [...d.terms], categories: [...d.categories] }; indModal(); return; }
@@ -1121,7 +1152,7 @@ async function saveLead(id, patch, done) {
 async function boot() {
   let data;
   try { data = await api('GET', '/api/bootstrap'); } catch (e) { if (e.status !== 401) $('#root').innerHTML = `<div class="boot"><div class="banner">${ic('alert', 18)}<div><b>LeadsHunter could not load</b>${esc(e.message)} <button class="linkbtn" onclick="location.reload()">Try again</button></div></div></div>`; return; }
-  ST.industries = data.industries; ST.searches = data.searches; ST.config = data.config; ST.cols = data.cols;
+  ST.industries = data.industries; ST.searches = data.searches; ST.hiddenNames = data.hiddenNames || {}; ST.config = data.config; ST.cols = data.cols;
   try { ST.views = (await api('GET', '/api/views')).views; } catch { ST.views = []; }
   shell(); render();
   await initLeads();

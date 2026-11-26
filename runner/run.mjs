@@ -64,11 +64,16 @@ function runGosom(cell, term, dir) {
       let places = [];
       try {
         const text = await readFile(out, 'utf8');
-        for (const line of text.split('\n')) { if (line.trim()) { try { places.push(toPlace(JSON.parse(line))); } catch { /* skip bad line */ } } }
+        // gosom writes one JSON value per line: a single place, or (in fast mode) a list of places.
+        for (const line of text.split('\n')) {
+          if (!line.trim()) continue;
+          let v; try { v = JSON.parse(line); } catch { continue; }
+          for (const o of (Array.isArray(v) ? v : [v])) if (o && typeof o === 'object') places.push(toPlace(o));
+        }
       } catch { /* no output file */ }
       rm(qfile, { force: true }); rm(out, { force: true });
       const blocked = /429|unusual traffic|captcha|sorry\/index|rate limit/i.test(stderr);
-      resolve({ places: places.filter(Boolean), code, blocked, stderr });
+      resolve({ places: places.filter(p => p.place_id && p.name), code, blocked, stderr });
     });
   });
 }

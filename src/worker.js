@@ -60,6 +60,7 @@ async function route(req, env, url, ctx) {
   if (p === '/api/searches' && m === 'GET') return listSearches(env, url);
   if (p === '/api/searches' && m === 'POST') return createSearch(env, await body(req));
   if ((mm = p.match(/^\/api\/searches\/(\d+)$/)) && m === 'GET') return getSearch(env, +mm[1]);
+  if ((mm = p.match(/^\/api\/searches\/(\d+)$/)) && m === 'DELETE') return deleteSearch(env, +mm[1]);
   if ((mm = p.match(/^\/api\/searches\/(\d+)\/cancel$/)) && m === 'POST') return cancelSearch(env, +mm[1]);
   if ((mm = p.match(/^\/api\/searches\/(\d+)\/retry$/)) && m === 'POST') return retrySearch(env, +mm[1]);
   if ((mm = p.match(/^\/api\/searches\/(\d+)\/excluded$/)) && m === 'GET') return listExcluded(env, +mm[1]);
@@ -163,12 +164,13 @@ function chunk(arr, n) { const out = []; for (let i = 0; i < arr.length; i += n)
 
 /* ------------------------------------------------------------------ bootstrap, industries, views */
 async function bootstrap(env) {
-  const [ind, srch, seq] = await env.DB.batch([
+  const [ind, srch, hid, seq] = await env.DB.batch([
     env.DB.prepare('SELECT * FROM industries ORDER BY name COLLATE NOCASE'),
-    env.DB.prepare(`SELECT ${SEARCH_COLS} FROM searches ORDER BY id DESC LIMIT 60`),
+    env.DB.prepare(`SELECT ${SEARCH_COLS} FROM searches WHERE hidden = 0 ORDER BY id DESC LIMIT 60`),
+    env.DB.prepare('SELECT id, name FROM searches WHERE hidden = 1'),
     env.DB.prepare("SELECT CAST(v AS INTEGER) AS v FROM meta WHERE k = 'seq'"),
   ]);
-  return json({ industries: ind.results.map(industryOut), searches: srch.results.map(searchOut), seq: seq.results[0]?.v || 0, config: configCheck(env), cols: LEAD_COLS });
+  return json({ industries: ind.results.map(industryOut), searches: srch.results.map(searchOut), hiddenNames: Object.fromEntries(hid.results.map(r => [r.id, r.name])), seq: seq.results[0]?.v || 0, config: configCheck(env), cols: LEAD_COLS });
 }
 function cleanList(v, max = 30) {
   if (!Array.isArray(v)) return [];
@@ -209,7 +211,7 @@ async function saveView(env, b) {
 /* ------------------------------------------------------------------ searches */
 async function listSearches(env, url) {
   const limit = Math.min(200, +url.searchParams.get('limit') || 60);
-  const r = await env.DB.prepare(`SELECT ${SEARCH_COLS} FROM searches ORDER BY id DESC LIMIT ?`).bind(limit).all();
+  const r = await env.DB.prepare(`SELECT ${SEARCH_COLS} FROM searches WHERE hidden = 0 ORDER BY id DESC LIMIT ?`).bind(limit).all();
   return json({ searches: r.results.map(searchOut) });
 }
 async function getSearch(env, id) {
@@ -288,6 +290,16 @@ async function retrySearch(env, id) {
   await env.DB.prepare("UPDATE searches SET status = 'queued', error = NULL, finished_at = NULL, heartbeat_at = NULL, created_at = ? WHERE id = ?").bind(now(), id).run();
   row.status = 'queued'; row.error = null;
   return dispatchAndReturn(env, row);
+}
+async function deleteSearch(env, id) {
+  const row = await env.DB.prepare('SELECT status FROM searches WHERE id = ?').bind(id).first();
+  if (!row) throw new HttpError(404, 'Search not found.');
+  if (['queued', 'running'].includes(row.status)) throw new HttpError(409, 'Cancel this search before deleting it.');
+  await env.DB.batch([
+    env.DB.prepare('UPDATE searches SET hidden = 1, cells = \'[]\', done_bits = \'\' WHERE id = ?').bind(id),
+    env.DB.prepare('DELETE FROM excluded WHERE search_id = ?').bind(id),
+  ]);
+  return json({ ok: true });
 }
 async function listExcluded(env, id) {
   const r = await env.DB.prepare('SELECT place_id, name, category, address FROM excluded WHERE search_id = ? LIMIT 500').bind(id).all();
