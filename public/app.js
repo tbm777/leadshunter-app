@@ -331,7 +331,7 @@ function runFilter() {
 
 V.leads = () => `
   <div class="head"><div><div class="eyebrow">CRM</div><h1>Leads</h1><p>Every business you've found and checked. Filtering runs in your browser, so it's instant and doesn't touch your Cloudflare limits.</p></div>
-    <div class="row"><button class="syncbtn" data-act="sync" id="syncbtn"><i></i><span>Synced</span></button><button class="btn" data-act="export">${ic('download')}Export</button><a class="btn" href="#find">${ic('find')}Find leads</a></div></div>
+    <div class="row"><button class="syncbtn" data-act="sync" id="syncbtn"><i></i><span>Synced</span></button><button class="btn" data-act="export">${ic('download')}Export</button></div></div>
   <div class="views" id="lv-views"></div>
   <div class="lgrid">
     <aside class="card fpanel ${L$.fopen ? 'open' : ''}" id="lf-panel"></aside>
