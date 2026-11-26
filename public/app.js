@@ -251,7 +251,7 @@ window.addEventListener('hashchange', () => { closeOverlay(); render(); window.s
 function onLeadsChanged() {
   renderNav((location.hash || '#leads').slice(1));
   if ($('#vt')) { L$.viewCounts = null; leadsUpdate(); }
-  if ($('#ind-table')) $('#ind-table').outerHTML = industriesTable();
+  rerenderInd();
 }
 
 /* ================================================================ leads page */
@@ -949,32 +949,60 @@ function loadIntoForm(j) {
 }
 
 /* ================================================================ industries */
+const IP = { q: '', sort: 'name', showRemoved: false, menu: null };
 V.industries = () => `
-  <div class="head"><div><div class="eyebrow">Setup</div><h1>Industries</h1><p>Each industry has the search terms used on Google Maps and the Google categories that count as a match. Results in other categories are set aside, which keeps your leads accurate.</p></div>
+  <div class="head"><div><div class="eyebrow">Setup</div><h1>Industries</h1><p>What to search for, and which Google categories count as a match.</p></div>
     <button class="btn primary" data-act="indnew">${ic('plus')}Add industry</button></div>
-  ${industriesTable()}`;
-function industriesTable() {
-  const counts = new Map(); for (const L of ST.leads) counts.set(L.industry_id, (counts.get(L.industry_id) || 0) + 1);
-  const last = new Map(); for (const s of ST.searches) if (s.industry_id && !last.has(s.industry_id)) last.set(s.industry_id, s.created_at);
-  const act = ST.industries.filter(d => !d.archived), arc = ST.industries.filter(d => d.archived);
-  return `<div id="ind-table" style="display:flex;flex-direction:column;gap:16px"><div class="card"><div class="tbl-wrap"><table><thead><tr><th>Industry</th><th>Search terms</th><th>Accepted Google categories</th><th style="text-align:right">Leads</th><th>Last searched</th><th></th></tr></thead><tbody>
-    ${act.map(d => `<tr><td class="biz">${esc(d.name)}</td><td style="white-space:normal;min-width:220px">${d.terms.map(t => `<span class="term">${esc(t)}</span>`).join('')}</td><td class="sub" style="white-space:normal;min-width:200px">${esc(d.categories.join(', ') || 'Any category')}</td><td class="num" style="text-align:right">${fmt(counts.get(d.id) || 0)}</td><td class="sub">${last.has(d.id) ? dayPT(last.get(d.id)) : 'Never'}</td>
-      <td><div class="row" style="gap:4px;flex-wrap:nowrap"><button class="btn sm ghost" data-indedit="${d.id}">${ic('edit', 14)}Edit</button><button class="btn sm ghost" data-indrm="${d.id}">Remove</button></div></td></tr>`).join('')}
-  </tbody></table></div><div class="card-h" style="border-top:1px solid var(--line);border-bottom:0"><p>${act.length} industries · ${fmt(act.reduce((a, d) => a + d.terms.length, 0))} search terms</p></div></div>
-  ${arc.length ? `<div class="card"><div class="card-h"><div><h3>Removed</h3><p>Their leads stay in your workspace and keep the industry label.</p></div></div><div class="tbl-wrap"><table><tbody>${arc.map(d => `<tr><td class="biz">${esc(d.name)}</td><td class="sub">${fmt(counts.get(d.id) || 0)} leads</td><td style="text-align:right"><button class="btn sm" data-indrestore="${d.id}">Restore</button></td></tr>`).join('')}</tbody></table></div></div>` : ''}</div>`;
+  <div class="indtools">
+    <div class="lsearch">${ic('find', 15)}<input id="ind-q" placeholder="Search industries or terms" value="${esc(IP.q)}" autocomplete="off"></div>
+    <div class="seg-c" role="radiogroup" aria-label="Sort">${[['name', 'A–Z'], ['leads', 'Most leads'], ['recent', 'Recently searched']].map(([k, l]) => `<button role="radio" aria-checked="${IP.sort === k}" class="${IP.sort === k ? 'on' : ''}" data-indsort="${k}">${l}</button>`).join('')}</div>
+  </div>
+  <div id="indgrid">${industriesGrid()}</div>`;
+function industryStats() {
+  const counts = new Map(), cats = new Map();
+  for (const L of ST.leads) {
+    counts.set(L.industry_id, (counts.get(L.industry_id) || 0) + 1);
+    if (L.category) { let m = cats.get(L.industry_id); if (!m) cats.set(L.industry_id, m = new Map()); m.set(L.category, (m.get(L.category) || 0) + 1); }
+  }
+  const last = new Map(); for (const s of ST.searches) if (s.industry_id && (!last.has(s.industry_id) || s.created_at > last.get(s.industry_id))) last.set(s.industry_id, s.created_at);
+  return { counts, cats, last };
 }
+function industriesGrid() {
+  const { counts, last } = industryStats(), q = IP.q.trim().toLowerCase();
+  let act = ST.industries.filter(d => !d.archived && (!q || d.name.toLowerCase().includes(q) || d.terms.some(t => t.toLowerCase().includes(q))));
+  act.sort(IP.sort === 'leads' ? (a, b) => (counts.get(b.id) || 0) - (counts.get(a.id) || 0) || a.name.localeCompare(b.name) : IP.sort === 'recent' ? (a, b) => (last.get(b.id) || 0) - (last.get(a.id) || 0) || a.name.localeCompare(b.name) : (a, b) => a.name.localeCompare(b.name));
+  const arc = ST.industries.filter(d => d.archived);
+  const card = d => {
+    const n = counts.get(d.id) || 0, ls = last.get(d.id);
+    return `<article class="indcard">
+      <div class="indcard-top"><h3>${esc(d.name)}</h3>
+        <div class="kebab"><button class="iconbtn sm" data-indmenu="${d.id}" aria-label="More actions for ${esc(d.name)}" aria-haspopup="true">⋯</button>${IP.menu === d.id ? `<div class="menu" role="menu"><button role="menuitem" data-indedit="${d.id}">${ic('edit', 14)}Edit</button><button role="menuitem" class="danger" data-indrm="${d.id}">${ic('trash', 14)}Remove</button></div>` : ''}</div></div>
+      <div class="indcard-stats"><span><b class="num">${fmt(n)}</b> lead${n === 1 ? '' : 's'}</span><span class="dotsep">·</span><span>${ls ? 'Searched ' + dayPT(ls).toLowerCase().replace(/^(\w)/, (m) => /\d/.test(m) ? m : m) : 'Never searched'}</span></div>
+      <div class="indcard-terms">${d.terms.slice(0, 4).map(t => `<span class="fx-term">${esc(t)}</span>`).join('')}${d.terms.length > 4 ? `<span class="fx-term">+${d.terms.length - 4}</span>` : ''}</div>
+      <div class="indcard-cats" title="${esc(d.categories.join(', '))}">${d.categories.length ? `Accepts ${esc(d.categories.slice(0, 2).join(', '))}${d.categories.length > 2 ? ` and ${d.categories.length - 2} more` : ''}` : 'Accepts any Google category'}</div>
+      <div class="indcard-acts"><button class="btn sm" data-indfind="${d.id}">${ic('find', 13)}Find leads</button><button class="btn sm ghost" data-indedit="${d.id}">Edit</button>${n ? `<button class="btn sm ghost" data-indleads="${d.id}">View leads</button>` : ''}</div>
+    </article>`;
+  };
+  return `<div class="indgrid">${act.map(card).join('')}${!q ? `<button class="indcard indadd" data-act="indnew">${ic('plus', 20)}<b>Add industry</b><span>Any trade you want to find</span></button>` : ''}</div>
+    ${!act.length && q ? `<div class="empty"><b>No industry matches “${esc(IP.q)}”</b><button class="linkbtn" data-act="indnew">Add it as a new industry</button></div>` : ''}
+    ${arc.length ? `<div class="indremoved"><button class="linkbtn muted" data-act="indshowrm">${IP.showRemoved ? 'Hide' : 'Show'} ${arc.length} removed industr${arc.length === 1 ? 'y' : 'ies'}</button>
+      ${IP.showRemoved ? `<div class="card">${arc.map(d => `<div class="indrm-row"><b>${esc(d.name)}</b><span class="sub">${fmt(counts.get(d.id) || 0)} leads kept</span><button class="btn sm" data-indrestore="${d.id}">Restore</button></div>`).join('')}</div>` : ''}</div>` : ''}`;
+}
+function rerenderInd() { const g = $('#indgrid'); if (g) g.innerHTML = industriesGrid(); }
 let EDIT = null;
 function indModal() {
-  const e = EDIT;
+  const e = EDIT, { cats } = industryStats();
+  const found = e.id == null ? [] : [...(cats.get(e.id) || new Map()).entries()].filter(([c]) => !e.categories.some(x => x.toLowerCase() === c.toLowerCase())).sort((a, b) => b[1] - a[1]).slice(0, 8);
   const tok = (k, ph) => `<div class="tok" data-tokbox="${k}">${e[k].map((t, i) => `<span class="term">${esc(t)}<button data-tokdel="${k}:${i}" aria-label="Remove ${esc(t)}">×</button></span>`).join('')}<input id="tok-${k}" data-tok="${k}" placeholder="${ph}" autocomplete="off"></div>`;
-  $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Industry">
-    <div class="card-h"><div><h2>${e.id == null ? 'Add industry' : 'Edit ' + esc(e.orig)}</h2><p>Press Enter after each term.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
-    <div class="card-b" style="display:flex;flex-direction:column;gap:14px">
-      <div class="field"><label for="ind-name">Name</label><input class="input" id="ind-name" value="${esc(e.name)}" placeholder="e.g. Fence Installers"></div>
-      <div class="field"><span class="flabel">Search terms</span>${tok('terms', 'e.g. fence contractor')}<span class="help">What you'd type into Google Maps. Each term runs as its own search.</span></div>
-      <div class="field"><span class="flabel">Accepted Google categories</span>${tok('categories', 'e.g. Fence contractor')}<span class="help">Leave empty to accept every category. You can add categories later from a search's excluded list.</span></div>
-      <div id="ind-err" class="help" style="color:var(--bad)"></div></div>
-    <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="indsave">${e.id == null ? 'Add industry' : 'Save changes'}</button></div></div></div>`;
+  $('#overlay').innerHTML = `<div class="scrim" data-act="close"><div class="drawer inddrawer" data-stop role="dialog" aria-label="${e.id == null ? 'Add industry' : 'Edit industry'}">
+    <div class="drawer-h"><div><div class="eyebrow" style="margin:0 0 4px">${e.id == null ? 'New industry' : 'Edit industry'}</div><h2>${esc(e.name || 'Untitled')}</h2></div><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
+    <section><label class="flabel" for="ind-name">Name</label><input class="input big" id="ind-name" value="${esc(e.name)}" placeholder="e.g. Fence Installers"></section>
+    <section><span class="flabel">Search terms</span>${tok('terms', 'Type a term, press Enter')}<span class="help">Each term runs as its own Google Maps search.</span></section>
+    <section><span class="flabel">Accepted Google categories</span>${tok('categories', 'Type a category, press Enter')}<span class="help">${e.categories.length ? 'Results in other categories go to “excluded”.' : 'Empty means every category is accepted.'}</span>
+      ${found.length ? `<div class="catsug"><span class="flabel" style="font-size:11.5px">Found in your leads</span><div class="catsug-list">${found.map(([c, n]) => `<button class="catsug-btn" data-addcat="${esc(c)}">${ic('plus', 12)}${esc(c)}<span>${fmt(n)}</span></button>`).join('')}</div></div>` : ''}</section>
+    <div id="ind-err" class="help" style="color:var(--bad);padding:0 20px"></div>
+    <div class="drawer-foot"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="indsave">${e.id == null ? 'Add industry' : 'Save changes'}</button></div>
+  </div></div>`;
   setTimeout(() => $(e.id == null ? '#ind-name' : '#tok-terms')?.focus(), 0);
 }
 async function saveIndustry() {
@@ -984,7 +1012,7 @@ async function saveIndustry() {
     const r = e.id == null ? await api('POST', '/api/industries', e) : await api('PUT', `/api/industries/${e.id}`, e);
     const i = ST.industries.findIndex(x => x.id === r.industry.id); if (i >= 0) ST.industries[i] = r.industry; else ST.industries.push(r.industry);
     ST.industries.sort((a, b) => a.name.localeCompare(b.name));
-    closeOverlay(); render(); toast(e.id == null ? `${r.industry.name} added` : 'Changes saved');
+    closeOverlay(); if ($('#indgrid')) rerenderInd(); else render(); toast(e.id == null ? `${r.industry.name} added` : 'Changes saved');
   } catch (err) { $('#ind-err').textContent = err.message; }
 }
 
@@ -1053,7 +1081,13 @@ document.addEventListener('click', async (e) => {
     catch (err) { toast(err.message, 'alert'); }
     return;
   }
-  if ((v = ds('indedit')) !== undefined) { const d = ST.industries.find(x => x.id === +v); EDIT = { id: d.id, orig: d.name, name: d.name, terms: [...d.terms], categories: [...d.categories] }; indModal(); return; }
+  if ((v = ds('indmenu')) !== undefined) { e.stopPropagation(); IP.menu = IP.menu === +v ? null : +v; rerenderInd(); return; }
+  if (IP.menu !== null && !t.closest('.menu')) { IP.menu = null; rerenderInd(); }
+  if ((v = ds('indsort')) !== undefined) { IP.sort = v; document.querySelectorAll('[data-indsort]').forEach(b => { b.classList.toggle('on', b.dataset.indsort === v); b.setAttribute('aria-checked', b.dataset.indsort === v); }); rerenderInd(); return; }
+  if ((v = ds('indfind')) !== undefined) { const d = ST.industries.find(x => x.id === +v); FS.ind = d.id; FS.terms = new Set(d.terms.map((_, i) => i)); FS.extra = []; location.hash = '#find'; return; }
+  if ((v = ds('indleads')) !== undefined) { L$.F = defaultF(); L$.F.ind = new Set([+v]); L$.view = null; location.hash = '#leads'; return; }
+  if ((v = ds('addcat')) !== undefined) { EDIT.name = $('#ind-name').value; for (const k of ['terms', 'categories']) { const x = $('#tok-' + k)?.value.trim(); if (x) EDIT[k].push(x); } EDIT.categories.push(v); indModal(); return; }
+  if ((v = ds('indedit')) !== undefined) { IP.menu = null; const d = ST.industries.find(x => x.id === +v); EDIT = { id: d.id, orig: d.name, name: d.name, terms: [...d.terms], categories: [...d.categories] }; indModal(); return; }
   if ((v = ds('indrm')) !== undefined) {
     const d = ST.industries.find(x => x.id === +v), n = ST.leads.filter(L => L.industry_id === d.id).length;
     $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop><div class="card-h"><div><h2>Remove ${esc(d.name)}?</h2></div></div><div class="card-b"><p style="margin:0">It won't appear in Find leads anymore. Its <b>${fmt(n)} leads</b> stay in your workspace with the same label, and you can restore it later.</p></div>
@@ -1062,7 +1096,7 @@ document.addEventListener('click', async (e) => {
   }
   if ((v = ds('indrmok')) !== undefined || (v = ds('indrestore')) !== undefined) {
     const restore = t.closest('[data-indrestore]'), id = +v;
-    try { await api(restore ? 'POST' : 'DELETE', restore ? `/api/industries/${id}/restore` : `/api/industries/${id}`); ST.industries.find(x => x.id === id).archived = !restore; closeOverlay(); render(); toast(restore ? 'Industry restored' : 'Industry removed'); } catch (err) { toast(err.message, 'alert'); }
+    try { await api(restore ? 'POST' : 'DELETE', restore ? `/api/industries/${id}/restore` : `/api/industries/${id}`); ST.industries.find(x => x.id === id).archived = !restore; closeOverlay(); if ($('#indgrid')) rerenderInd(); else render(); toast(restore ? 'Industry restored' : 'Industry removed'); } catch (err) { toast(err.message, 'alert'); }
     return;
   }
   if ((v = ds('tokdel')) !== undefined) { const [k, i] = v.split(':'); EDIT.name = $('#ind-name').value; EDIT[k].splice(+i, 1); indModal(); return; }
@@ -1117,7 +1151,8 @@ document.addEventListener('click', async (e) => {
     }
     case 'refreshjobs': refreshSearches(); break;
     case 'allhist': FS.allHist = !FS.allHist; renderJobs(); break;
-    case 'indnew': EDIT = { id: null, name: '', terms: [], categories: [] }; indModal(); break;
+    case 'indnew': EDIT = { id: null, name: IP.q.trim() && !ST.industries.some(d => d.name.toLowerCase() === IP.q.trim().toLowerCase()) ? IP.q.trim() : '', terms: [], categories: [] }; indModal(); break;
+    case 'indshowrm': IP.showRemoved = !IP.showRemoved; rerenderInd(); break;
     case 'indsave': saveIndustry(); break;
   }
 });
@@ -1164,6 +1199,8 @@ let noteTimer = 0;
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.id === 'lq') { L$.F.q = t.value; changed(); return; }
+  if (t.id === 'ind-q') { IP.q = t.value; rerenderInd(); return; }
+  if (t.id === 'ind-name' && $('.inddrawer h2')) { $('.inddrawer h2').textContent = t.value || 'Untitled'; }
   if (t.id && t.id.startsWith('ddq-')) { L$.ddq = t.value; renderPanel(); return; }
   if (t.id === 'fs-loc') { FS.q = t.value; FS.hi = 0; FS.open = true; renderPop(); return; }
   if (t.id === 'fxs-q') { FX.q = t.value; FX.hi = 0; const id = FX.open; const pos = t.selectionStart; fxsRerender(id); const n = $('#fxs-q'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
