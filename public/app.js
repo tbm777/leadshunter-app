@@ -218,11 +218,21 @@ function renderNav(active) {
 function tickClock() { const c = $('#clock'); if (c) c.textContent = timeFmt.format(new Date()) + ' PT'; }
 setInterval(tickClock, 30000);
 const themeGet = () => { try { return localStorage.getItem('lh-theme') || 'system'; } catch { return 'system'; } };
+const prefersDark = () => window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+const effectiveTheme = () => document.documentElement.dataset.theme || (prefersDark() ? 'dark' : 'light');
 function applyTheme(t) {
   const r = document.documentElement;
   if (t === 'system') delete r.dataset.theme; else r.dataset.theme = t;
-  const b = $('#themebtn'); if (b) { b.textContent = t === 'dark' ? '☾' : t === 'light' ? '☀' : '◐'; b.title = 'Theme: ' + t; }
+  const b = $('#themebtn'); if (!b) return;
+  const dark = effectiveTheme() === 'dark';
+  // Show what a click will switch to.
+  b.innerHTML = dark
+    ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
+    : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  b.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
+  b.setAttribute('aria-label', b.title);
 }
+window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (themeGet() === 'system') applyTheme('system'); });
 
 function showLogin(msg) {
   stopPolling();
@@ -1209,7 +1219,7 @@ document.addEventListener('click', async (e) => {
   const a = ds('act'); if (!a) return;
   switch (a) {
     case 'logout': await api('POST', '/api/logout').catch(() => {}); showLogin(); break;
-    case 'theme': { const order = ['system', 'light', 'dark'], n = order[(order.indexOf(themeGet()) + 1) % 3]; try { localStorage.setItem('lh-theme', n); } catch { /* ignore */ } applyTheme(n); break; }
+    case 'theme': { const n = effectiveTheme() === 'dark' ? 'light' : 'dark'; try { localStorage.setItem('lh-theme', n); } catch { /* ignore */ } applyTheme(n); break; }
     case 'sync': sync({ quiet: false }); break;
     case 'reset': L$.F = defaultF(); L$.view = null; if ($('#lq')) $('#lq').value = ''; leadsUpdate(); break;
     case 'fopen': L$.fopen = !L$.fopen; $('#lf-panel').classList.toggle('open', L$.fopen); break;
