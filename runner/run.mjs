@@ -72,8 +72,11 @@ function runGosom(cell, term, dir) {
         }
       } catch { /* no output file */ }
       rm(qfile, { force: true }); rm(out, { force: true });
-      const blocked = /429|unusual traffic|captcha|sorry\/index|rate limit/i.test(stderr);
-      resolve({ places: places.filter(p => p.place_id && p.name), code, blocked, stderr });
+      // Only treat it as a block when nothing came back AND the output clearly shows Google refusing.
+      const valid = places.filter(p => p.place_id && p.name);
+      const blocked = !valid.length && /(status(?: code)?[: ]+429|HTTP\/\d(?:\.\d)? 429|\b429 Too Many|unusual traffic|google\.com\/sorry|recaptcha)/i.test(stderr);
+      if (blocked && !runGosom.loggedBlock) { runGosom.loggedBlock = true; console.log('Block signal from gosom:', stderr.split('\n').filter(l => /429|unusual|sorry|captcha/i.test(l)).slice(-2).join(' | ').slice(0, 300)); }
+      resolve({ places: valid, code, blocked, stderr });
     });
   });
 }
