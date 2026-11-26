@@ -842,3 +842,26 @@ select.fx-mini{min-width:120px;cursor:pointer}
 @media (max-width:960px){.ulayout{grid-template-columns:1fr}}
 .fseg.seg-c{display:grid!important;width:100%;box-sizing:border-box}
 .fxs-ph{color:var(--faint);font-weight:500}
+
+/* ---------- leads layout: filter panel scrolls with the page, table fills the row ---------- */
+.lgrid{align-items:stretch}
+.fpanel{position:relative;top:auto;max-height:none;overflow:visible}
+.fp-h{position:static}
+.lmain{display:flex;flex-direction:column}
+.lmain .vt{flex:1 1 auto;height:auto;min-height:max(440px,calc(100vh - 340px))}
+
+/* ---------- phone fixes ---------- */
+@media (max-width:760px){
+  .fx-range{width:100%}
+  .fx-range input{flex:1 1 0;width:auto;min-width:0}
+  .fx-opts>.fx-opt{min-width:0}
+  .fxs-mini .fxs-btn{min-width:0}
+  .ltool .lsearch{min-width:0;flex:1 1 100%;max-width:none}
+}
+/* Narrow lists: business and form status only (details are in the side panel) */
+@container (max-width:560px){
+  .vt-in{min-width:0}
+  .vrow{grid-template-columns:32px minmax(0,1fr) auto;padding:0 6px;gap:0}
+  .vrow>:nth-child(3),.vrow>:nth-child(4),.vrow .c-ph,.vrow .c-st{display:none}
+  .vrow>:nth-child(5){text-align:right;padding-right:6px}
+}
