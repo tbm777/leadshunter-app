@@ -236,8 +236,9 @@ async function createSearch(env, b) {
   if (maxReviews !== null && maxReviews < minReviews) throw new HttpError(400, 'Max reviews is lower than min reviews.');
   const params = {
     terms, depth: b.website === 'no' ? 0 : depth, emails: b.website === 'no' ? false : !!b.emails, minReviews, maxReviews, website: ['yes', 'no'].includes(b.website) ? b.website : 'any', countries: [...new Set(circles.map(c => c.country))],
-    locationLabels: cleanList(b.locationLabels, 50),
+    locationLabels: cleanList(b.locationLabels, 50), nCells: 0,
   };
+  params.nCells = cells.length;
   const name = String(b.name || '').trim().slice(0, 80) || `${ind.name} search`;
   const limit = Math.max(0, Math.min(100000, Math.floor(+b.limit || 0)));
   const row = await env.DB.prepare(`INSERT INTO searches (kind, name, industry_id, params, cells, status, limit_n, total_tasks, created_at)
@@ -369,7 +370,8 @@ async function runnerRoute(req, env, url) {
   }
   if (!(mm = p.match(/^\/api\/runner\/jobs\/(\d+)(\/[a-z-]+)?$/))) throw new HttpError(404, 'Not found.');
   const id = +mm[1], action = mm[2] || '';
-  const s = await env.DB.prepare('SELECT * FROM searches WHERE id = ?').bind(id).first();
+  const wantCells = action === '' && m === 'GET';
+  const s = await env.DB.prepare(`SELECT id, kind, industry_id, params, done_bits, status, limit_n, new_count, created_at${wantCells ? ', cells' : ''} FROM searches WHERE id = ?`).bind(id).first();
   if (!s) throw new HttpError(404, 'Job not found.');
   const params = parse(s.params, {});
 
@@ -406,7 +408,7 @@ async function runnerRoute(req, env, url) {
   if (action === '/finish' && m === 'POST') {
     const b = await body(req);
     const status = s.status === 'cancelled' ? 'cancelled' : b.error ? 'failed' : 'done';
-    await env.DB.prepare('UPDATE searches SET status = ?, error = ?, finished_at = ?, heartbeat_at = ? WHERE id = ?').bind(status, b.error ? String(b.error).slice(0, 500) : null, now(), now(), id).run();
+    await env.DB.prepare(`UPDATE searches SET status = ?, error = ?, finished_at = ?, heartbeat_at = ?${status === 'done' ? ", cells = '[]', done_bits = ''" : ''} WHERE id = ?`).bind(status, b.error ? String(b.error).slice(0, 500) : null, now(), now(), id).run();
     return json({ status });
   }
   throw new HttpError(404, 'Not found.');
@@ -425,14 +427,15 @@ function realSite(url) { if (!url) return false; try { return !isSocialHost(new 
 /** Save the places found in one map search. Called once per cell by the runner, in order. */
 async function ingestCell(env, s, params, b) {
   const cellIdx = Math.floor(+b.cell);
-  const cells = parse(s.cells, []);
-  if (!(cellIdx >= 0 && cellIdx < cells.length)) throw new HttpError(400, 'Unknown cell.');
-  const bits = bitsFrom(s.done_bits, cells.length);
+  let nCells = params.nCells;
+  if (!nCells) nCells = parse((await env.DB.prepare('SELECT cells FROM searches WHERE id = ?').bind(s.id).first()).cells, []).length;
+  if (!(cellIdx >= 0 && cellIdx < nCells)) throw new HttpError(400, 'Unknown cell.');
+  const bits = bitsFrom(s.done_bits, nCells);
   const already = bits[cellIdx >> 3] & (1 << (cellIdx & 7));
   const t = now();
   const ind = s.industry_id ? await env.DB.prepare('SELECT categories FROM industries WHERE id = ?').bind(s.industry_id).first() : null;
   const accepted = ind ? parse(ind.categories, []) : [];
-  const fallbackCountry = cells[cellIdx][5] || (params.countries || ['US'])[0] || 'US';
+  const fallbackCountry = countryCode(b.country, null) || (params.countries || ['US'])[0] || 'US';
 
   // Normalise and split accepted / excluded, dedupe inside the batch.
   const seenPid = new Set();

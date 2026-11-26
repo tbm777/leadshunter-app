@@ -213,7 +213,7 @@ async function main() {
         // Post results in order, one at a time, so the server's counters stay exact.
         chain = chain.then(async () => {
           if (stop) return;
-          const r = await api('POST', `/api/runner/jobs/${JOB}/cell`, { cell: idx, places: res.places, extra: res.extra });
+          const r = await api('POST', `/api/runner/jobs/${JOB}/cell`, { cell: idx, country: cell[5], places: res.places, extra: res.extra });
           posted++;
           for (const lead of r.new_leads || []) enqueueCheck(lead);
           if (posted % 10 === 0) log(`${posted}/${todo.length} map searches, last: ${res.places.length} results, ${r.new} new.`);
