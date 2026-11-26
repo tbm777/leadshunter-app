@@ -494,24 +494,58 @@ function checksHTML(L, running) {
     + row(L.platform ? 'ok' : 'idle', 'Platform', L.platform || 'Not checked yet')
     + row(L.email ? 'ok' : 'idle', 'Email', L.email || (L.checked_at ? 'None found' : 'Not checked yet'));
 }
-const pathOf = u => { try { const x = new URL(u); return x.pathname === '/' ? 'home page' : x.pathname; } catch { return u; } };
+const pathOf = u => { try { const x = new URL(u); return x.pathname === '/' ? 'Home page' : decodeURIComponent(x.pathname).replace(/\/$/, ''); } catch { return u; } };
+const hostOf = u => { try { return new URL(u).host.replace(/^www\./, ''); } catch { return u; } };
+let DRAWER_ID = null;
 function leadDrawer(id) {
   const L = ST.byId.get(id); if (!L) return;
-  $('#overlay').innerHTML = `<div class="scrim" data-act="close"><div class="drawer" data-stop role="dialog" aria-label="${esc(L.name)}">
-    <div class="drawer-h"><div><div class="row" style="margin-bottom:6px">${L.status ? `<span class="stxt st-${LS_C[L.status]}"><i class="sdot"></i>${LS[L.status]}</span>` : ''}${L.closed ? '<span class="pill c-bad">Permanently closed</span>' : ''}</div><h2>${esc(L.name)}</h2><div style="color:var(--muted);font-size:13px">${esc(industryName(L.industry_id))} · ${esc(LOCS[L.li])}</div></div><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
-    <section><h5>Business</h5><dl class="kv" style="margin:0">
-      <dt>Rating</dt><dd>${L.rating == null ? 'No reviews yet' : `<span class="stars">★ ${L.rating.toFixed(1)}</span> · ${fmt(L.reviews)} reviews`}</dd>
-      <dt>Phone</dt><dd class="num">${L.phone ? `${esc(L.phone)} <button class="linkbtn muted" data-copy="${esc(L.phone)}">Copy</button>` : 'Not listed'}</dd>
-      <dt>Website</dt><dd>${L.website ? `<a href="${esc(L.website)}" target="_blank" rel="noopener noreferrer">${esc(L.dom)}</a>` : 'Not listed'}</dd>
-      <dt>Address</dt><dd>${esc(L.address || '—')}</dd>
-      <dt>Google category</dt><dd>${esc(L.category || '—')}</dd>
-      <dt>Found by</dt><dd>${esc(searchName(L.search_id))}, ${dayPT(L.created_at)}</dd>
-      ${L.maps_url ? `<dt>Google Maps</dt><dd><a href="${esc(L.maps_url)}" target="_blank" rel="noopener noreferrer">Open listing</a></dd>` : ''}</dl></section>
-    <section><div class="row" style="justify-content:space-between"><h5>Website check</h5><button class="btn sm" data-act="checkone" data-id="${L.id}" ${L.website ? '' : 'disabled'}>${ic('globe', 14)}Check again</button></div><div class="checks" id="dchecks">${checksHTML(L)}</div>
-      <span class="help">${L.checked_at ? `Checked ${whenPT(L.checked_at)}.` : 'Not checked yet.'}</span></section>
-    <section><h5>Status</h5><select class="input" id="dstatus" data-lstatus="${L.id}">${LS.map((s, i) => `<option value="${i}" ${L.status === i ? 'selected' : ''}>${s}</option>`).join('')}</select></section>
-    <section style="border-bottom:0"><h5>Notes</h5><textarea class="input" id="dnote" data-lnote="${L.id}" style="min-height:90px" placeholder="Add a note about this business">${esc(L.notes || '')}</textarea><span class="help" id="dnote-h">Saved automatically.</span></section>
+  DRAWER_ID = id;
+  const idx = L$.res.findIndex(x => x.id === id), total = L$.res.length;
+  const fs = L.form_status, ss = L.site_status;
+  const formPill = fs === 0 ? '<span class="pill c-ok">Open form</span>' : fs === 1 ? `<span class="pill c-manual">${esc(L.captcha || 'CAPTCHA')}</span>` : fs === 4 ? '<span class="pill c-warn">Needs browser check</span>' : fs === 3 ? '<span class="pill c-idle">Not checked</span>' : '<span class="pill c-idle">No form found</span>';
+  const siteTxt = !L.website ? 'No website' : ss === 0 || ss === 1 ? `${SS_SHORT[ss]} · ${((L.site_ms || 0) / 1000).toFixed(1)} s` : SS[ss];
+  const formHelp = fs === 0 ? 'No CAPTCHA detected.' : fs === 1 ? 'The form uses a CAPTCHA, so it needs a person to send it.' : fs === 4 ? 'The form is built with JavaScript and couldn’t be confirmed.' : fs === 3 ? (L.website ? 'Run a check to look for a contact form.' : 'This business has no website.') : 'No contact form was found on the home page or contact pages.';
+  const row = (k, v) => `<div class="dk"><dt>${k}</dt><dd>${v}</dd></div>`;
+  const copyBtn = (v, label = 'Copy') => `<button class="dcopy" data-copy="${esc(v)}" title="Copy">${ic('copy', 13)}<span>${label}</span></button>`;
+  $('#overlay').innerHTML = `<div class="scrim" data-act="close"><div class="drawer ld" data-stop role="dialog" aria-label="${esc(L.name)}">
+    <div class="ld-top">
+      <div class="ld-nav"><button class="iconbtn sm" data-lnav="-1" ${idx <= 0 ? 'disabled' : ''} aria-label="Previous lead" title="Previous (↑)">${ic('back', 14)}</button><span class="num">${idx >= 0 ? `${fmt(idx + 1)} of ${fmt(total)}` : ''}</span><button class="iconbtn sm" data-lnav="1" ${idx < 0 || idx >= total - 1 ? 'disabled' : ''} aria-label="Next lead" title="Next (↓)">${ic('arrow', 14)}</button></div>
+      <button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
+    <div class="ld-head">
+      <h2>${esc(L.name)}</h2>
+      <div class="ld-sub">${esc(LOCS[L.li])} · ${esc(industryName(L.industry_id))}${L.rating != null ? ` · <span class="stars">★</span> ${L.rating.toFixed(1)} <span class="ld-muted">(${fmt(L.reviews)})</span>` : ''}${L.closed ? ' · <span class="pill c-bad">Permanently closed</span>' : ''}</div>
+      <div class="ld-actions">
+        ${L.form_url && (fs === 0 || fs === 1 || fs === 4) ? `<a class="btn sm primary" href="${esc(L.form_url)}" target="_blank" rel="noopener noreferrer">${ic('ext', 13)}Open form</a>` : ''}
+        ${L.website ? `<a class="btn sm" href="${esc(L.website)}" target="_blank" rel="noopener noreferrer">${ic('globe', 13)}Website</a>` : ''}
+        ${L.maps_url ? `<a class="btn sm" href="${esc(L.maps_url)}" target="_blank" rel="noopener noreferrer">${ic('find', 13)}Google Maps</a>` : ''}
+        ${L.phone ? `<button class="btn sm" data-copy="${esc(L.phone)}">${ic('copy', 13)}${esc(L.phone)}</button>` : ''}
+      </div>
+    </div>
+    <section class="ld-sec ld-form">
+      <div class="ld-sech"><h5>Contact form</h5>${formPill}</div>
+      ${L.form_url && (fs === 0 || fs === 1 || fs === 4) ? `<div class="ld-url"><a href="${esc(L.form_url)}" target="_blank" rel="noopener noreferrer" title="${esc(L.form_url)}">${ic('ext', 13)}<span>${esc(hostOf(L.form_url))}<b>${esc(pathOf(L.form_url) === 'Home page' ? '' : pathOf(L.form_url))}</b></span></a>${copyBtn(L.form_url)}</div>` : ''}
+      <p class="ld-help">${formHelp}${L.form_url && pathOf(L.form_url) === 'Home page' && fs !== 3 ? ' Found on the home page.' : ''}</p>
+      <dl class="ld-dl">${row('Website', L.website ? `<span class="st-${SS_C[ss]}"><i class="sdot"></i>${esc(siteTxt)}</span>` : '<span class="ld-muted">No website</span>')}${row('Platform', esc(L.platform || '—'))}${row('Email', L.email ? `${esc(L.email)} ${copyBtn(L.email, '')}` : `<span class="ld-muted">${L.checked_at ? 'None found' : 'Not checked'}</span>`)}</dl>
+      <div class="ld-foot"><span class="ld-muted">${L.checked_at ? `Checked ${whenPT(L.checked_at)}` : 'Not checked yet'}</span><button class="btn sm ghost" data-act="checkone" data-id="${L.id}" ${L.website ? '' : 'disabled'}>${ic('retry', 13)}Check again</button></div>
+    </section>
+    <section class="ld-sec"><h5>Business</h5><dl class="ld-dl">
+      ${row('Phone', L.phone ? `${esc(L.phone)} ${copyBtn(L.phone, '')}` : '<span class="ld-muted">Not listed</span>')}
+      ${row('Website', L.website ? `<a href="${esc(L.website)}" target="_blank" rel="noopener noreferrer">${esc(L.dom)}</a>` : '<span class="ld-muted">Not listed</span>')}
+      ${row('Address', L.address ? `${esc(L.address)} ${copyBtn(L.address, '')}` : '—')}
+      ${row('Category', esc(L.category || '—'))}
+      ${row('Found by', `${esc(searchName(L.search_id))} · ${dayPT(L.created_at)}`)}</dl></section>
+    <section class="ld-sec"><h5>Status</h5><div class="seg-c ld-status" role="radiogroup" aria-label="Lead status">${LS.map((s, i) => `<button type="button" role="radio" aria-checked="${L.status === i}" class="${L.status === i ? 'on' : ''}" data-lstat="${L.id}:${i}">${s}</button>`).join('')}</div></section>
+    <section class="ld-sec" style="border-bottom:0"><h5>Notes</h5><textarea class="input" id="dnote" data-lnote="${L.id}" style="min-height:84px" placeholder="Add a note about this business">${esc(L.notes || '')}</textarea><span class="help" id="dnote-h">Saved automatically.</span></section>
   </div></div>`;
+}
+function navDrawer(step) {
+  const idx = L$.res.findIndex(x => x.id === DRAWER_ID); const next = L$.res[idx + step];
+  if (!next) return;
+  const keepScroll = document.querySelector('.ld')?.scrollTop || 0;
+  leadDrawer(next.id);
+  const d = document.querySelector('.ld'); if (d) d.scrollTop = Math.min(keepScroll, 0);
+  // keep the table in step with the panel
+  const vt = $('#vt'); const ri = idx + step; if (vt) { const top = ri * ROWH; if (top < vt.scrollTop || top > vt.scrollTop + vt.clientHeight - ROWH) vt.scrollTop = Math.max(0, top - vt.clientHeight / 2); }
 }
 
 /* ---------- export */
@@ -1136,6 +1170,8 @@ document.addEventListener('click', async (e) => {
   if ((v = ds('viewdel')) !== undefined) { try { await api('DELETE', `/api/views/${v}`); ST.views = ST.views.filter(x => String(x.id) !== v); renderViews(); toast('View deleted'); } catch (err) { toast(err.message, 'alert'); } return; }
   if ((v = ds('lsel')) !== undefined) { e.stopPropagation(); const id = +v; L$.sel.has(id) ? L$.sel.delete(id) : L$.sel.add(id); renderSel(); renderRows(); return; }
   if ((v = ds('lead')) !== undefined) { leadDrawer(+v); return; }
+  if ((v = ds('lnav')) !== undefined) { navDrawer(+v); return; }
+  if ((v = ds('lstat')) !== undefined) { const [lid, st] = v.split(':').map(Number); saveLead(lid, { status: st }, () => { toast('Status saved'); if (DRAWER_ID === lid) { document.querySelectorAll('[data-lstat]').forEach(b => { const on = +b.dataset.lstat.split(':')[1] === st; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); }); } }); return; }
   if ((v = ds('xpreset')) !== undefined) { XP.preset = v; XP.cols = new Set(XPRESETS[v]); XP.file = $('#x-file').value; exportModal(); return; }
   if ((v = ds('xscopebtn')) !== undefined) { XP.scope = v; XP.file = ''; exportModal(); return; }
   if ((v = ds('xtog')) !== undefined) { XP[v] = !XP[v]; XP.file = $('#x-file').value; exportModal(); return; }
@@ -1288,6 +1324,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (t.id === 'fs-name' && (e.key === 'Enter' || e.key === 'Escape')) { e.preventDefault(); FS.editName = false; t.blur(); $('#fs-sum').innerHTML = sumHTML(); return; }
   if (t.id === 'fs-extra' && e.key === 'Enter') { e.preventDefault(); const v = t.value.trim(); if (v && !activeTerms().includes(v)) { FS.extra.push(v); refreshFind(['what']); setTimeout(() => $('#fs-extra')?.focus(), 0); } return; }
+  if (document.querySelector('.ld') && !/INPUT|TEXTAREA|SELECT/.test(t.tagName) && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'j' || e.key === 'k')) { e.preventDefault(); navDrawer(e.key === 'ArrowDown' || e.key === 'j' ? 1 : -1); return; }
   if (e.key === 'Escape') { if (L$.openDD) { L$.openDD = null; renderPanel(); } else closeOverlay(); }
 });
 let noteTimer = 0;
