@@ -570,51 +570,67 @@ const XCOLS = [
   ['status', 'Lead status', 'Pipeline', L => LS[L.status]], ['search', 'Found by search', 'Pipeline', L => searchName(L.search_id)], ['added', 'Date added', 'Pipeline', L => dayKey.format(new Date(L.created_at))], ['notes', 'Notes', 'Pipeline', L => L.notes || ''],
 ];
 const XPRESETS = { contact: ['name', 'phone', 'website'], outreach: ['name', 'phone', 'website', 'city', 'region', 'rating', 'reviews', 'site', 'form', 'formurl', 'captcha', 'email', 'status'], full: XCOLS.map(c => c[0]) };
-const XP = (() => { try { const s = JSON.parse(localStorage.getItem('lh-export') || 'null'); if (s) return { ...s, cols: new Set(s.cols), scope: 'view', src: null }; } catch { /* default */ } return { scope: 'view', src: null, cols: new Set(XPRESETS.outreach), preset: 'outreach', phone: false, web: false, dedupePhone: false, pfmt: 'nat', fmt: 'csv' }; })();
-function saveXP() { try { localStorage.setItem('lh-export', JSON.stringify({ ...XP, cols: [...XP.cols], scope: undefined, src: undefined })); } catch { /* ignore */ } }
+const XP = (() => { try { const s = JSON.parse(localStorage.getItem('lh-export') || 'null'); if (s) return { ...s, cols: new Set(s.cols), scope: 'view', src: null }; } catch { /* default */ } return { scope: 'view', src: null, cols: new Set(XPRESETS.outreach), preset: 'outreach', phone: false, web: false, email: false, form: 'any', skipDnc: true, skipContacted: false, dedupePhone: false, dedupeSite: false, pfmt: 'nat', fmt: 'csv' }; })();
+function saveXP() { try { localStorage.setItem('lh-export', JSON.stringify({ ...XP, cols: [...XP.cols], scope: undefined, src: undefined, step: undefined, custom: undefined, file: undefined })); } catch { /* ignore */ } }
 function phoneOut(L) { if (!L.phone) return ''; if (XP.pfmt !== 'e164') return L.phone; const d = L.phone.replace(/\D/g, ''); return L.phone.trim().startsWith('+') ? '+' + d : (L.country === 'AU' ? '+61' + d.replace(/^0/, '') : L.country === 'AE' ? '+971' + d.replace(/^0/, '') : '+1' + d.replace(/^1(?=\d{10}$)/, '')); }
-function xRows() {
-  let base = XP.scope === 'sel' ? [...L$.sel].map(id => ST.byId.get(id)).filter(Boolean) : XP.scope === 'view' ? L$.res : XP.scope === 'search' ? ST.leads.filter(L => L.search_id === XP.src) : ST.leads;
-  if (XP.phone) base = base.filter(L => L.phone);
-  if (XP.web) base = base.filter(L => L.website);
-  if (XP.dedupePhone) { const seen = new Set(); base = base.filter(L => { if (!L.phone) return true; const k = L.phone.replace(/\D/g, ''); if (seen.has(k)) return false; seen.add(k); return true; }); }
-  return base;
-}
 const xCols = () => XCOLS.filter(c => XP.cols.has(c[0]));
 function defaultFile() {
   const base = XP.scope === 'search' ? searchName(XP.src) : XP.scope === 'sel' ? 'selected leads' : XP.scope === 'view' && summaryParts().length ? summaryParts().slice(0, 2).join(' ') : 'all leads';
   return ('leads ' + base).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) + '-' + dayKey.format(new Date());
 }
-function openExport(scope, src) { if (scope) XP.scope = scope; if (src != null) XP.src = src; else if (scope !== 'search') XP.src = null; if (XP.scope === 'sel' && !L$.sel.size) XP.scope = 'view'; if (XP.scope === 'view' && !$('#vt')) { runFilter(); } XP.file = ''; exportModal(); }
+function openExport(scope, src) { if (scope) XP.scope = scope; if (src != null) XP.src = src; else if (scope !== 'search') XP.src = null; if (XP.scope === 'sel' && !L$.sel.size) XP.scope = 'view'; if (XP.scope === 'view' && !$('#vt')) { runFilter(); } XP.file = ''; XP.step = 1; XP.custom = false; exportModal(); }
+function xRows() {
+  let base = XP.scope === 'sel' ? [...L$.sel].map(id => ST.byId.get(id)).filter(Boolean) : XP.scope === 'view' ? L$.res : XP.scope === 'search' ? ST.leads.filter(L => L.search_id === XP.src) : ST.leads;
+  if (XP.phone) base = base.filter(L => L.phone);
+  if (XP.web) base = base.filter(L => L.website);
+  if (XP.email) base = base.filter(L => L.email);
+  if (XP.form && XP.form !== 'any') base = base.filter(L => XP.form === 'open' ? L.form_status === 0 : XP.form === 'captcha' ? L.form_status === 1 : XP.form === 'anyform' ? (L.form_status === 0 || L.form_status === 1) : L.form_status === 2);
+  if (XP.skipDnc) base = base.filter(L => L.status !== 3);
+  if (XP.skipContacted) base = base.filter(L => L.status !== 2 && L.status !== 1);
+  const once = (keyFn) => { const seen = new Set(); base = base.filter(L => { const k = keyFn(L); if (!k) return true; if (seen.has(k)) return false; seen.add(k); return true; }); };
+  if (XP.dedupePhone) once(L => L.phone ? L.phone.replace(/\D/g, '') : null);
+  if (XP.dedupeSite) once(L => L.website ? hostOf(L.website) : null);
+  return base;
+}
+const XPRESET_INFO = { contact: ['Contact list', 'Name, phone and website. For calling or a quick list.'], outreach: ['Outreach', 'Contact details, location, reviews, site and form status. For campaigns.'], full: ['Everything', 'Every column the app has.'] };
 function exportModal() {
+  XP.step = XP.step || 1;
   const rows = xRows(), cols = xCols(), groups = [...new Set(XCOLS.map(c => c[2]))];
   const scopes = [['view', 'Current filters', L$.res.length], ['sel', 'Selected', L$.sel.size], ['all', 'All leads', ST.leads.length]];
   if (XP.src != null) scopes.unshift(['search', searchName(XP.src), ST.leads.filter(L => L.search_id === XP.src).length]);
-  const presetName = { contact: 'Contact list', outreach: 'Outreach', full: 'Everything' }[XP.preset] || 'Custom';
   const tog = (k, l) => `<button type="button" class="fx-pill ${XP[k] ? 'on' : ''}" data-xtog="${k}" aria-pressed="${!!XP[k]}"><span class="fx-tick">${XP[k] ? ic('check', 12) : ''}</span>${l}</button>`;
+  const steps = ['Leads', 'Columns', 'Download'];
+  const body = XP.step === 1 ? `
+    <div class="xm-sec"><span class="fx-k">Start from</span><div class="xm-scopes">${scopes.map(([k, l, n]) => `<button type="button" class="xm-scope ${XP.scope === k ? 'on' : ''}" data-xscopebtn="${k}" ${n ? '' : 'disabled'}><b>${esc(l)}</b><span class="num">${fmt(n)} leads</span></button>`).join('')}</div></div>
+    <div class="xm-sec"><span class="fx-k">Contact form</span><div class="seg-c xm-seg">${[['any', 'Any'], ['open', 'Open form'], ['captcha', 'CAPTCHA'], ['anyform', 'Any form'], ['none', 'No form']].map(([k, l]) => `<button type="button" class="${(XP.form || 'any') === k ? 'on' : ''}" data-xform="${k}">${l}</button>`).join('')}</div></div>
+    <div class="xm-sec"><span class="fx-k">Must have</span><div class="fx-pills">${tog('phone', 'Phone')}${tog('web', 'Website')}${tog('email', 'Email')}</div></div>
+    <div class="xm-sec"><span class="fx-k">Leave out</span><div class="fx-pills">${tog('skipDnc', 'Do not contact')}${tog('skipContacted', 'Already contacted or in a campaign')}</div></div>
+    <div class="xm-sec"><span class="fx-k">Duplicates</span><div class="fx-pills">${tog('dedupePhone', 'One row per phone number')}${tog('dedupeSite', 'One row per website')}</div></div>`
+  : XP.step === 2 ? `
+    <div class="xm-presetcards">${Object.entries(XPRESET_INFO).map(([k, [t, d]]) => `<button type="button" class="xm-pcard ${XP.preset === k ? 'on' : ''}" data-xpreset="${k}"><b>${t}</b><span>${d}</span><small>${XPRESETS[k].length} columns</small></button>`).join('')}
+      <button type="button" class="xm-pcard ${XP.preset === 'custom' || XP.custom ? 'on' : ''}" data-xcustom="1"><b>Custom</b><span>Pick exactly the columns you want.</span><small>${XP.preset === 'custom' ? cols.length + ' columns' : 'Choose below'}</small></button></div>
+    ${XP.custom || XP.preset === 'custom' ? `<div class="xcols">${groups.map(g => `<div><h6>${g}</h6>${XCOLS.filter(c => c[2] === g).map(c => `<label class="ck"><input type="checkbox" data-xcol="${c[0]}" ${XP.cols.has(c[0]) ? 'checked' : ''}>${c[1]}</label>`).join('')}</div>`).join('')}</div>`
+      : `<div class="xm-colsum">${cols.map(c => `<span class="fx-term">${c[1]}</span>`).join('')}</div>`}`
+  : `
+    <div class="xm-sec"><span class="fx-k">File name</span><div class="xm-file"><input class="input" id="x-file" value="${esc(XP.file || defaultFile())}" aria-label="File name"><span>.${XP.fmt}</span></div></div>
+    <div class="xm-sec xm-opts">
+      <div><span class="fx-k">Format</span><div class="seg-c">${[['csv', 'CSV'], ['xlsx', 'Excel']].map(([k, l]) => `<button type="button" class="${XP.fmt === k ? 'on' : ''}" data-xfmt="${k}">${l}</button>`).join('')}</div></div>
+      <div><span class="fx-k">Phone format</span><div class="seg-c">${[['nat', 'As listed'], ['e164', '+15125550148']].map(([k, l]) => `<button type="button" class="${XP.pfmt === k ? 'on' : ''}" data-xpfmt="${k}" title="${k === 'e164' ? 'International format for dialers and CRMs' : 'As shown on Google'}">${l}</button>`).join('')}</div></div>
+    </div>
+    <div class="xm-sec"><span class="fx-k">Preview · first 4 of ${fmt(rows.length)}</span><div class="tbl-wrap xprev">${cols.length && rows.length ? `<table><thead><tr>${cols.map(c => `<th>${c[1]}</th>`).join('')}</tr></thead><tbody>${rows.slice(0, 4).map(L => `<tr>${cols.map(c => `<td>${esc(c[3](L)) || '<span class="none">—</span>'}</td>`).join('')}</tr>`).join('')}</tbody></table>` : `<div class="empty" style="padding:16px">${cols.length ? 'No leads match. Go back and loosen the filters.' : 'Go back and pick at least one column.'}</div>`}</div></div>`;
+  const canNext = XP.step === 1 ? rows.length > 0 : XP.step === 2 ? cols.length > 0 : true;
   $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal xm" data-stop role="dialog" aria-label="Export leads">
    <div class="xm-h"><h2>Export leads</h2><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
-   <div class="xm-b">
-    <div class="xm-sec"><span class="fx-k">Leads</span><div class="xm-scopes">${scopes.map(([k, l, n]) => `<button type="button" class="xm-scope ${XP.scope === k ? 'on' : ''}" data-xscopebtn="${k}" ${n ? '' : 'disabled'}><b>${esc(l)}</b><span class="num">${fmt(n)}</span></button>`).join('')}</div></div>
-    <div class="xm-sec"><div class="row" style="justify-content:space-between"><span class="fx-k">Columns · ${cols.length}</span><button class="linkbtn muted" data-xcustom="1">${XP.custom ? 'Done' : 'Customize'}</button></div>
-      <div class="seg-c xm-presets">${[['contact', 'Contact list'], ['outreach', 'Outreach'], ['full', 'Everything']].map(([k, l]) => `<button type="button" class="${XP.preset === k ? 'on' : ''}" data-xpreset="${k}">${l}</button>`).join('')}${XP.preset === 'custom' ? '<button type="button" class="on">Custom</button>' : ''}</div>
-      ${XP.custom ? `<div class="xcols">${groups.map(g => `<div><h6>${g}</h6>${XCOLS.filter(c => c[2] === g).map(c => `<label class="ck"><input type="checkbox" data-xcol="${c[0]}" ${XP.cols.has(c[0]) ? 'checked' : ''}>${c[1]}</label>`).join('')}</div>`).join('')}</div>`
-        : `<div class="xm-colsum">${cols.slice(0, 8).map(c => `<span class="fx-term">${c[1]}</span>`).join('')}${cols.length > 8 ? `<span class="fx-term">+${cols.length - 8} more</span>` : ''}</div>`}</div>
-    <div class="xm-sec xm-opts">
-      <div><span class="fx-k">Only include</span><div class="fx-pills">${tog('phone', 'Has phone')}${tog('web', 'Has website')}${tog('dedupePhone', 'One row per phone')}</div></div>
-      <div><span class="fx-k">Phone format</span><div class="seg-c">${[['nat', 'As listed'], ['e164', '+1 5125550148']].map(([k, l]) => `<button type="button" class="${XP.pfmt === k ? 'on' : ''}" data-xpfmt="${k}" title="${k === 'e164' ? 'International format for dialers and CRMs' : 'As shown on Google'}">${l}</button>`).join('')}</div></div>
-      <div><span class="fx-k">File</span><div class="seg-c">${[['csv', 'CSV'], ['xlsx', 'Excel']].map(([k, l]) => `<button type="button" class="${XP.fmt === k ? 'on' : ''}" data-xfmt="${k}">${l}</button>`).join('')}</div></div>
-    </div>
-    <div class="xm-sec"><span class="fx-k">Preview</span><div class="tbl-wrap xprev">${cols.length && rows.length ? `<table><thead><tr>${cols.map(c => `<th>${c[1]}</th>`).join('')}</tr></thead><tbody>${rows.slice(0, 4).map(L => `<tr>${cols.map(c => `<td>${esc(c[3](L)) || '<span class="none">—</span>'}</td>`).join('')}</tr>`).join('')}</tbody></table>` : `<div class="empty" style="padding:16px">${cols.length ? 'No leads match these options.' : 'Pick at least one column.'}</div>`}</div></div>
-   </div>
-   <div class="xm-f"><div class="xm-file"><input class="input" id="x-file" value="${esc(XP.file || defaultFile())}" aria-label="File name"><span>.${XP.fmt}</span></div>
-     <span class="xm-count num"><b>${fmt(rows.length)}</b> rows</span>
-     <button class="btn" data-xact="copy" ${rows.length && cols.length ? '' : 'disabled'}>${ic('copy', 14)}Copy</button><button class="btn primary" data-xact="download" ${rows.length && cols.length ? '' : 'disabled'}>${ic('download', 14)}Download</button></div>
+   <div class="xm-steps">${steps.map((t, i) => `<button type="button" class="xm-step ${XP.step === i + 1 ? 'on' : XP.step > i + 1 ? 'done' : ''}" data-xstep="${i + 1}" ${i + 1 > XP.step && !canNext ? 'disabled' : ''}><i>${XP.step > i + 1 ? ic('check', 11) : i + 1}</i>${t}</button>`).join('<span class="xm-line"></span>')}</div>
+   <div class="xm-b">${body}</div>
+   <div class="xm-f"><span class="xm-count num"><b>${fmt(rows.length)}</b> lead${rows.length === 1 ? '' : 's'} · ${cols.length} columns</span>
+     <div class="row" style="gap:8px;margin-left:auto">${XP.step > 1 ? `<button class="btn ghost" data-xstep="${XP.step - 1}">${ic('back', 14)}Back</button>` : ''}
+     ${XP.step < 3 ? `<button class="btn primary" data-xstep="${XP.step + 1}" ${canNext ? '' : 'disabled'}>Next ${ic('arrow', 14)}</button>` : `<button class="btn" data-xact="copy" ${rows.length && cols.length ? '' : 'disabled'}>${ic('copy', 14)}Copy for Sheets</button><button class="btn primary" data-xact="download" ${rows.length && cols.length ? '' : 'disabled'}>${ic('download', 14)}Download</button>`}</div></div>
   </div></div>`;
 }
 function delimited(sep) {
   const cols = xCols();
-  const q = v => { v = String(v ?? ''); if (/^[=+\-@]/.test(v)) v = "'" + v; return sep === ',' ? (/[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v) : v.replace(/[\t\n\r]/g, ' '); };
+  const q = v => { v = String(v ?? ''); if (/^[=@\t\r]/.test(v) || (/^[+\-]/.test(v) && !/^[+\-]?[\d\s().-]+$/.test(v))) v = "'" + v; return sep === ',' ? (/[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v) : v.replace(/[\t\n\r]/g, ' '); };
   return [cols.map(c => q(c[1])).join(sep), ...xRows().map(L => cols.map(c => q(c[3](L))).join(sep))].join('\r\n');
 }
 function saveFile(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); }
@@ -1183,12 +1199,14 @@ document.addEventListener('click', async (e) => {
   if ((v = ds('lead')) !== undefined) { leadDrawer(+v); return; }
   if ((v = ds('lnav')) !== undefined) { navDrawer(+v); return; }
   if ((v = ds('lstat')) !== undefined) { const [lid, st] = v.split(':').map(Number); saveLead(lid, { status: st }, () => { toast('Status saved'); if (DRAWER_ID === lid) { document.querySelectorAll('[data-lstat]').forEach(b => { const on = +b.dataset.lstat.split(':')[1] === st; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); }); } }); return; }
-  if ((v = ds('xpreset')) !== undefined) { XP.preset = v; XP.cols = new Set(XPRESETS[v]); XP.file = $('#x-file').value; exportModal(); return; }
+  if ((v = ds('xpreset')) !== undefined) { XP.preset = v; XP.custom = false; XP.cols = new Set(XPRESETS[v]); exportModal(); return; }
   if ((v = ds('xscopebtn')) !== undefined) { XP.scope = v; XP.file = ''; exportModal(); return; }
-  if ((v = ds('xtog')) !== undefined) { XP[v] = !XP[v]; XP.file = $('#x-file').value; exportModal(); return; }
-  if ((v = ds('xpfmt')) !== undefined) { XP.pfmt = v; XP.file = $('#x-file').value; exportModal(); return; }
-  if ((v = ds('xcustom')) !== undefined) { XP.custom = !XP.custom; XP.file = $('#x-file').value; exportModal(); return; }
-  if ((v = ds('xfmt')) !== undefined) { XP.fmt = v; XP.file = $('#x-file').value; exportModal(); return; }
+  if ((v = ds('xstep')) !== undefined) { const f = $('#x-file'); if (f) XP.file = f.value; XP.step = +v; exportModal(); return; }
+  if ((v = ds('xform')) !== undefined) { XP.form = v; exportModal(); return; }
+  if ((v = ds('xtog')) !== undefined) { XP[v] = !XP[v]; exportModal(); return; }
+  if ((v = ds('xpfmt')) !== undefined) { const f = $('#x-file'); if (f) XP.file = f.value; XP.pfmt = v; exportModal(); return; }
+  if ((v = ds('xcustom')) !== undefined) { XP.custom = true; XP.preset = 'custom'; exportModal(); return; }
+  if ((v = ds('xfmt')) !== undefined) { const f = $('#x-file'); if (f) XP.file = f.value; XP.fmt = v; exportModal(); return; }
   if ((v = ds('xact')) !== undefined) { doExport(v); return; }
   if ((v = ds('ckgo')) !== undefined) { startCheck(v.split(',').map(Number)); return; }
   if ((v = ds('excl')) !== undefined) { excludedModal(+v); return; }
@@ -1378,7 +1396,7 @@ document.addEventListener('change', async (e) => {
   if (t.dataset.lstatus) { saveLead(+t.dataset.lstatus, { status: +t.value }, () => toast('Status saved')); return; }
   if (t.dataset.xscope) { XP.scope = t.dataset.xscope; XP.file = ''; exportModal(); return; }
   if (t.dataset.xopt) { XP[t.dataset.xopt] = t.checked; XP.file = $('#x-file').value; exportModal(); return; }
-  if (t.dataset.xcol) { t.checked ? XP.cols.add(t.dataset.xcol) : XP.cols.delete(t.dataset.xcol); XP.preset = Object.entries(XPRESETS).find(([, a]) => a.length === XP.cols.size && a.every(c => XP.cols.has(c)))?.[0] || 'custom'; XP.file = $('#x-file').value; exportModal(); return; }
+  if (t.dataset.xcol) { t.checked ? XP.cols.add(t.dataset.xcol) : XP.cols.delete(t.dataset.xcol); XP.preset = Object.entries(XPRESETS).find(([, a]) => a.length === XP.cols.size && a.every(c => XP.cols.has(c)))?.[0] || 'custom'; exportModal(); return; }
   if (t.id === 'x-pfmt') { XP.pfmt = t.value; XP.file = $('#x-file').value; exportModal(); return; }
   if (t.dataset.ck) { CK[t.dataset.ck] = t.checked; t.closest('.opt').classList.toggle('on', t.checked); return; }
   if (t.id === 'fs-ind') { FS.ind = +t.value; FS.terms = new Set(curInd().terms.map((_, i) => i)); FS.extra = []; refreshFind(['what']); return; }

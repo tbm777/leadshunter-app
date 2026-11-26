@@ -907,3 +907,25 @@ select.fx-mini{min-width:120px;cursor:pointer}
 .ld-actions .btn:not(.primary){color:var(--ink)}
 .ld-actions .btn:not(.primary) svg{color:var(--muted)}
 .ld-status.seg-c{display:grid!important;width:100%;box-sizing:border-box}
+
+/* ---------- export steps ---------- */
+.xm-steps{display:flex;align-items:center;gap:8px;padding:4px 20px 14px;border-bottom:1px solid var(--line)}
+.xm-step{display:inline-flex;align-items:center;gap:8px;border:0;background:none;padding:0;font-size:13px;color:var(--faint);font-weight:550;cursor:pointer}
+.xm-step i{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:11.5px;font-weight:650;border:1.5px solid var(--line);background:var(--surface)}
+.xm-step.on{color:var(--ink)}
+.xm-step.on i{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.xm-step.done{color:var(--muted)}
+.xm-step.done i{background:var(--ok);border-color:var(--ok);color:#fff}
+.xm-step[disabled]{cursor:default;opacity:.6}
+.xm-line{flex:1;height:1px;background:var(--line);max-width:60px}
+.xm .xm-b{padding-top:16px;min-height:300px}
+.xm-seg{align-self:flex-start;flex-wrap:wrap}
+.xm-presetcards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.xm-pcard{display:flex;flex-direction:column;gap:4px;text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:12px 14px;cursor:pointer;color:var(--ink)}
+.xm-pcard:hover{border-color:var(--faint)}
+.xm-pcard.on{border-color:var(--accent);background:var(--accent-soft)}
+.xm-pcard b{font-size:14px}
+.xm-pcard span{font-size:12.5px;color:var(--muted)}
+.xm-pcard small{font-size:11.5px;color:var(--faint);margin-top:2px}
+.xm-file{max-width:460px}
+@media (max-width:560px){.xm-presetcards{grid-template-columns:1fr}.xm-step{font-size:0}.xm-step i{font-size:11.5px}}
