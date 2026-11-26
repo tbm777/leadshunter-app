@@ -841,3 +841,4 @@ select.fx-mini{min-width:120px;cursor:pointer}
 .usetup a{color:var(--accent-text)}
 @media (max-width:960px){.ulayout{grid-template-columns:1fr}}
 .fseg.seg-c{display:grid!important;width:100%;box-sizing:border-box}
+.fxs-ph{color:var(--faint);font-weight:500}

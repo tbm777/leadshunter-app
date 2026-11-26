@@ -661,7 +661,7 @@ async function loadPostal(cc) {
   try { const r = await fetch(`/geo/postal-${cc}.json`); ST.postal[cc] = r.ok ? await r.json() : null; } catch { ST.postal[cc] = null; }
   return ST.postal[cc];
 }
-const curInd = () => ST.industries.find(i => i.id === FS.ind) || ST.industries.find(i => !i.archived);
+const curInd = () => (FS.ind == null ? null : ST.industries.find(i => i.id === FS.ind)) || null;
 const activeTerms = () => { const d = curInd(); return d ? [...d.terms.filter((_, i) => FS.terms.has(i)), ...FS.extra] : []; };
 const unitOf = cc => COUNTRY[cc].unit;
 const toKm = (v, cc) => unitOf(cc) === 'mi' ? v * 1.609 : v;
@@ -736,10 +736,10 @@ function fxsDefs(id) {
 }
 function fxsHTML(id) {
   const d = fxsDefs(id); if (!d) return '';
-  const cur = d.opts.find(o => o.v === d.value) || (id === 'limit' ? { l: fmt(FS.limit) } : d.opts[0]);
+  const cur = d.opts.find(o => o.v === d.value) || (id === 'limit' ? { l: fmt(FS.limit) } : id === 'ind' ? { l: 'Pick an industry', ph: true } : d.opts[0]);
   const open = FX.open === id, q = FX.q.toLowerCase();
   const list = d.opts.filter(o => !q || o.l.toLowerCase().includes(q) || (o.sub || '').toLowerCase().includes(q));
-  return `<div class="fxs ${d.cls}" data-fxs="${id}"><button type="button" class="fxs-btn" data-fxsopen="${id}" aria-haspopup="listbox" aria-expanded="${open}"><span>${esc(cur.l)}</span>${chev}</button>${open ? `<div class="fxs-pop" role="listbox">
+  return `<div class="fxs ${d.cls}" data-fxs="${id}"><button type="button" class="fxs-btn" data-fxsopen="${id}" aria-haspopup="listbox" aria-expanded="${open}"><span class="${cur.ph ? 'fxs-ph' : ''}">${esc(cur.l)}</span>${chev}</button>${open ? `<div class="fxs-pop" role="listbox">
     ${d.search ? `<div class="fxs-search">${ic('find', 14)}<input id="fxs-q" placeholder="Search" value="${esc(FX.q)}" autocomplete="off"></div>` : ''}
     <div class="fxs-list">${list.map((o, i) => `<button type="button" role="option" aria-selected="${o.v === d.value}" class="fxs-opt ${o.v === d.value ? 'sel' : ''} ${i === FX.hi ? 'hi' : ''}" data-fxsval="${id}" data-v="${o.v}"><span class="fxs-ol"><b>${esc(o.l)}</b>${o.sub ? `<small>${esc(o.sub)}</small>` : ''}</span>${o.v === d.value ? ic('check', 15) : ''}</button>`).join('') || '<div class="fxs-empty">No matches</div>'}</div>
     ${d.custom ? `<div class="fxs-custom"><label for="fxs-num">Custom</label><input id="fxs-num" type="number" min="1" step="50" placeholder="e.g. 750" inputmode="numeric"><button type="button" class="btn sm" data-fxscustom="${id}">Set</button></div>` : ''}</div>` : ''}</div>`;
@@ -761,7 +761,7 @@ function fxsSet(id, raw) {
 }
 
 V.find = () => {
-  if (FS.ind == null || !ST.industries.find(i => i.id === FS.ind && !i.archived)) { const d = ST.industries.find(i => !i.archived); FS.ind = d ? d.id : null; FS.terms = new Set(d ? d.terms.map((_, i) => i) : []); }
+  if (FS.ind != null && !ST.industries.find(i => i.id === FS.ind && !i.archived)) { FS.ind = null; FS.terms = new Set(); FS.extra = []; }
   const cfg = ST.config || {};
   return `
   <div class="head"><div><div class="eyebrow">Google Maps</div><h1>Find leads</h1></div></div>
@@ -830,6 +830,7 @@ const dur = s => !s ? '—' : s < 60 ? `${s} s` : s < 3600 ? `${Math.ceil(s / 60
 function startProblem() {
   const terms = activeTerms(), { n } = estimate();
   if (!ST.config.github) return 'Connect GitHub first';
+  if (!curInd()) return 'Pick an industry';
   if (!terms.length) return 'Pick at least one search term';
   if (!FS.locs.length) return 'Add a location';
   if (n > 6000) return `Too big: ${fmt(n)} map searches (max 6,000). Use a smaller area`;
