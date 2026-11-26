@@ -268,8 +268,11 @@ async function dispatch(env, id) {
   if (res.status === 204) return null;
   const text = (await res.text()).slice(0, 300);
   console.error('dispatch failed', res.status, text);
-  if (res.status === 401 || res.status === 403) return 'GitHub refused to start the job. Check that GH_TOKEN is valid and has “Actions: Read and write” on this repository, then press Retry.';
-  if (res.status === 404) return 'GitHub could not find the runner workflow. Make sure .github/workflows/runner.yml is on the main branch, then press Retry.';
+  let reason = '';
+  try { reason = (JSON.parse(text).message || '').slice(0, 160); } catch { /* not JSON */ }
+  if (res.status === 401) return `GitHub rejected GH_TOKEN as invalid or expired (${reason || 'Bad credentials'}). Create a new token, update the GH_TOKEN secret, run Deploy again, then press Retry.`;
+  if (res.status === 403) return `GitHub refused to start the job (${reason || 'forbidden'}). Make sure GH_TOKEN has “Actions: Read and write” on ${env.GH_REPO}, then press Retry.`;
+  if (res.status === 404) return `GitHub could not find the runner workflow or the repository ${env.GH_REPO} (${reason || 'not found'}). Make sure GH_TOKEN can access this repository, then press Retry.`;
   return `GitHub could not start the job (error ${res.status}). Press Retry in a minute.`;
 }
 async function cancelSearch(env, id) {
