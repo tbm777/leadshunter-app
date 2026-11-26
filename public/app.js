@@ -634,7 +634,7 @@ const RAD = { mi: [[0, 'City only'], [10, '+ 10 mi'], [25, '+ 25 mi'], [50, '+ 5
 const PRAD = { mi: [[5, '5 mi around'], [10, '10 mi around'], [25, '25 mi around']], km: [[8, '8 km around'], [15, '15 km around'], [40, '40 km around']] };
 const COUNTRY = { US: { name: 'United States', unit: 'mi', rw: 'state', ph: 'City, state or ZIP code' }, CA: { name: 'Canada', unit: 'km', rw: 'province', ph: 'City, province or postal code' }, AU: { name: 'Australia', unit: 'km', rw: 'state', ph: 'City, state or postcode' }, AE: { name: 'UAE', unit: 'km', rw: 'emirate', ph: 'City or emirate' } };
 const LIMITS = [100, 250, 500, 1000, 0];
-const FS = { ind: null, terms: new Set(), extra: [], country: 'US', locs: [], q: '', open: false, hi: 0, items: [], name: '', nameEdited: false, paste: false, pasteMsg: '', limit: 500, depth: 2, emails: false, showTerms: false, busy: false, allHist: false };
+const FS = { ind: null, terms: new Set(), extra: [], country: 'US', locs: [], q: '', open: false, hi: 0, items: [], name: '', nameEdited: false, paste: false, pasteMsg: '', limit: 500, depth: 2, emails: false, showTerms: false, busy: false, allHist: false, minRev: 0, maxRev: null, countryMenu: false, editName: false };
 const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 async function loadPlaces() {
   if (ST.places) return ST.places;
@@ -715,89 +715,91 @@ V.find = () => {
   if (FS.ind == null || !ST.industries.find(i => i.id === FS.ind && !i.archived)) { const d = ST.industries.find(i => !i.archived); FS.ind = d ? d.id : null; FS.terms = new Set(d ? d.terms.map((_, i) => i) : []); }
   const cfg = ST.config || {};
   return `
-  <div class="head"><div><div class="eyebrow">Google Maps search</div><h1>Find leads</h1><p>Pick an industry and where to look. Duplicates are removed and new businesses go straight into Leads.</p></div></div>
-  ${!cfg.github ? `<div class="banner">${ic('alert', 18)}<div><b>Searches can't start yet</b>GitHub isn't connected. Add the <code>GH_TOKEN</code> secret to the repository, run the Deploy workflow again, then come back.</div></div>` : ''}
-  <div class="fsgrid">
-    <div class="card fsform">
-      <div class="fsrow2">
-        <div class="field"><label class="flabel" for="fs-ind">Industry</label><select class="input big" id="fs-ind">${ST.industries.filter(x => !x.archived).map(x => `<option value="${x.id}" ${x.id === FS.ind ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
-          <span class="help" id="fs-termhelp">${termHelp()}</span></div>
-        <div class="field"><label class="flabel" for="fs-limit">Leads wanted</label>
-          <div class="limitbox"><input class="input big num" type="number" min="1" step="50" id="fs-limit" placeholder="No limit" value="${FS.limit || ''}"><div class="presets">${LIMITS.map(n => `<button class="${FS.limit === n ? 'on' : ''}" data-limit="${n}">${n ? fmt(n) : 'No limit'}</button>`).join('')}</div></div>
-          <span class="help">The search stops once this many new leads are found. Leads you already have don't count.</span></div>
-      </div>
-      <div id="fs-what">${FS.showTerms ? termsBox() : ''}</div>
-      <div class="field">
-        <div class="row" style="justify-content:space-between"><span class="flabel">Location</span><div class="seg-c flags" role="tablist" aria-label="Country">${Object.keys(COUNTRY).map(c => `<button role="tab" class="${FS.country === c ? 'on' : ''}" data-fsx="country" data-c="${c}" aria-selected="${FS.country === c}">${flag(c)}<span>${COUNTRY[c].name}</span></button>`).join('')}</div></div>
-        <div class="combo" id="combo">
-          <div class="combo-in">${flag(FS.country, 18)}<input id="fs-loc" role="combobox" aria-expanded="false" aria-controls="loc-pop" autocomplete="off" placeholder="${COUNTRY[FS.country].ph}" value="${esc(FS.q)}"><button class="linkbtn" data-fsx="pastetoggle" style="white-space:nowrap">${FS.paste ? 'Close' : 'Paste a list'}</button></div>
-          <div class="combo-pop" id="loc-pop" hidden></div>
+  <div class="head"><div><div class="eyebrow">Google Maps</div><h1>Find leads</h1></div></div>
+  ${!cfg.github ? `<div class="banner">${ic('alert', 18)}<div><b>Searches can't start yet</b>Add the <code>GH_TOKEN</code> secret in GitHub and run Deploy again.</div></div>` : ''}
+  <div class="card fx">
+    <div class="fx-bar">
+      <div class="fx-field fx-ind"><label class="fx-lbl" for="fs-ind">Industry</label>
+        <select id="fs-ind" class="fx-sel">${ST.industries.filter(x => !x.archived).map(x => `<option value="${x.id}" ${x.id === FS.ind ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div>
+      <div class="fx-field fx-loc combo" id="combo"><label class="fx-lbl" for="fs-loc">Location</label>
+        <div class="fx-locin">
+          <button class="fx-flag" data-fsx="cmenu" aria-label="Country: ${COUNTRY[FS.country].name}" aria-haspopup="true">${flag(FS.country, 20)}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg></button>
+          <input id="fs-loc" role="combobox" aria-expanded="false" aria-controls="loc-pop" autocomplete="off" placeholder="${COUNTRY[FS.country].ph}" value="${esc(FS.q)}">
         </div>
-        ${FS.paste ? `<div class="pastebox"><textarea class="input" id="fs-paste" placeholder="One location per line, for example:&#10;Austin, TX&#10;78704&#10;Toronto&#10;Sydney, NSW&#10;Dubai" style="min-height:110px"></textarea><div class="row" style="justify-content:space-between"><span class="help" id="paste-msg">${esc(FS.pasteMsg || 'Cities, states, provinces, regions and postal codes all work. Accents are optional.')}</span><button class="btn sm primary" data-fsx="pasteapply">Add locations</button></div></div>` : ''}
-        <div id="fs-where">${whereHTML()}</div>
-      </div>
-      <div class="field"><span class="flabel">Collect</span><div id="fs-collect">${collectHTML()}</div></div>
+        ${FS.countryMenu ? `<div class="menu fx-cmenu" role="menu">${Object.keys(COUNTRY).map(c => `<button role="menuitem" data-fsx="country" data-c="${c}" class="${FS.country === c ? 'on' : ''}">${flag(c, 20)}${COUNTRY[c].name}</button>`).join('')}</div>` : ''}
+        <div class="combo-pop" id="loc-pop" hidden></div></div>
+      <button class="btn primary fx-go" id="fs-go" data-fsx="start">${ic('find')}Start search</button>
     </div>
-    <aside class="card fsum" id="fs-sum">${sumHTML()}</aside>
+    <div id="fs-where">${whereHTML()}</div>
+    <div class="fx-opts">
+      <div class="fx-opt"><label class="fx-lbl" for="fs-limit">Leads</label>
+        <select id="fs-limit" class="fx-mini">${[100, 250, 500, 1000, 2500, 5000, 0].map(n => `<option value="${n}" ${FS.limit === n ? 'selected' : ''}>${n ? fmt(n) : 'No limit'}</option>`).join('')}${LIMITS.concat([2500, 5000]).includes(FS.limit) ? '' : `<option value="${FS.limit}" selected>${fmt(FS.limit)}</option>`}</select></div>
+      <div class="fx-opt"><span class="fx-lbl">Reviews</span>
+        <div class="fx-range"><input id="fs-rmin" class="fx-mini num" type="number" min="0" inputmode="numeric" placeholder="Min" aria-label="Minimum reviews" value="${FS.minRev || ''}"><span>–</span><input id="fs-rmax" class="fx-mini num" type="number" min="0" inputmode="numeric" placeholder="Max" aria-label="Maximum reviews" value="${FS.maxRev ?? ''}"></div></div>
+      <div class="fx-opt fx-grow"><span class="fx-lbl">Collect</span>
+        <div class="seg-c fx-seg" role="radiogroup" aria-label="What to collect" id="fs-collect">${collectHTML()}</div></div>
+      <label class="fx-opt fx-check" title="Look for an email on each website"><input type="checkbox" id="fs-emails" ${FS.emails ? 'checked' : ''}>Emails</label>
+    </div>
+    <div class="fx-foot"><div id="fs-termhelp" class="fx-terms">${termHelp()}</div><div id="fs-sum" class="fx-est">${sumHTML()}</div></div>
+    <div id="fs-what">${FS.showTerms ? termsBox() : ''}</div>
+    ${FS.paste ? `<div class="pastebox fx-paste"><textarea class="input" id="fs-paste" placeholder="One location per line&#10;Austin, TX&#10;78704&#10;Toronto&#10;Dubai" style="min-height:110px"></textarea><div class="row" style="justify-content:space-between"><span class="help" id="paste-msg">${esc(FS.pasteMsg)}</span><div class="row" style="gap:6px"><button class="btn sm ghost" data-fsx="pastetoggle">Cancel</button><button class="btn sm primary" data-fsx="pasteapply">Add locations</button></div></div></div>` : ''}
   </div>
-  <div class="card"><div class="card-h"><div><h3>Search history</h3><p>Results outside the industry's accepted Google categories are set aside under “excluded” for you to review.</p></div><button class="btn ghost sm" data-act="refreshjobs">Refresh</button></div>
+  <div class="card"><div class="card-h"><div><h3>Search history</h3></div><button class="btn ghost sm" data-act="refreshjobs">Refresh</button></div>
     <div id="jobs">${jobsHTML()}</div></div>`;
 };
 MOUNT.find = () => {
-  loadPlaces().then(() => { $('#fs-where') && ($('#fs-where').innerHTML = whereHTML()); refreshFind([]); }).catch(e => toast(e.message, 'alert'));
+  loadPlaces().then(() => { const w = $('#fs-where'); if (w) w.innerHTML = whereHTML(); refreshFind([]); }).catch(e => toast(e.message, 'alert'));
+  updateStart();
   if (ST.searches.some(ACTIVE)) startPolling();
 };
 function termHelp() {
-  const t = activeTerms(), d = curInd(); if (!d) return 'Add an industry first.';
-  const custom = FS.extra.length || FS.terms.size !== d.terms.length;
-  return `Searches for ${t.slice(0, 2).map(x => `“${esc(x)}”`).join(', ') || 'nothing yet'}${t.length > 2 ? ` and ${t.length - 2} more` : ''}${custom ? ' (changed)' : ''} · <button class="linkbtn" data-fsx="terms">${FS.showTerms ? 'Done' : 'Change'}</button>`;
+  const t = activeTerms(), d = curInd(); if (!d) return '';
+  return `<span class="fx-k">Terms</span> ${t.slice(0, 3).map(x => `<span class="fx-term">${esc(x)}</span>`).join('')}${t.length > 3 ? `<span class="fx-term">+${t.length - 3}</span>` : ''}<button class="linkbtn muted" data-fsx="terms">${FS.showTerms ? 'Done' : 'Edit'}</button>`;
 }
 function termsBox() {
   const d = curInd(); if (!d) return '';
-  return `<div class="termbox"><div class="termlist">${d.terms.map((t, i) => `<div class="termrow" data-fsterm="${i}" role="checkbox" tabindex="0" aria-checked="${FS.terms.has(i)}"><span class="cb ${FS.terms.has(i) ? 'on' : ''}"></span><span>${esc(t)}</span></div>`).join('')}
+  return `<div class="termbox fx-termbox"><div class="termlist">${d.terms.map((t, i) => `<div class="termrow" data-fsterm="${i}" role="checkbox" tabindex="0" aria-checked="${FS.terms.has(i)}"><span class="cb ${FS.terms.has(i) ? 'on' : ''}"></span><span>${esc(t)}</span></div>`).join('')}
    ${FS.extra.map((t, i) => `<div class="termrow"><span class="cb on"></span><span>${esc(t)}</span><span class="sub">This search only</span><button class="btn ghost sm" data-fsextra="${i}" aria-label="Remove ${esc(t)}">${ic('x', 13)}</button></div>`).join('')}
-   <div class="termadd">${ic('plus', 14)}<input id="fs-extra" placeholder="Add a term for this search, then press Enter" autocomplete="off"></div></div>
-   <span class="help">To change the defaults for every search, go to <a class="linkbtn" href="#industries">Industries</a>.</span></div>`;
+   <div class="termadd">${ic('plus', 14)}<input id="fs-extra" placeholder="Add a term for this search" autocomplete="off"></div></div></div>`;
 }
 function whereHTML() {
-  if (!FS.locs.length) return `<div class="locempty">Add at least one city, ${COUNTRY[FS.country].rw} or postal code.</div>`;
-  return `<div class="loclist">${FS.locs.map((l, i) => {
+  const chips = FS.locs.map((l, i) => {
     const u = unitOf(l.country), n = l.type === 'region' ? circlesFor(l).length : 0;
-    return `<div class="locrow">${flag(l.country, 22)}<div style="min-width:0"><b>${esc(locTitle(l))}</b><span>${esc(locSub(l))}</span></div>
-     ${l.type === 'region' ? `<span class="locfix">${n ? `${fmt(n)} ${n === 1 ? "city" : "cities"}` : 'Whole ' + COUNTRY[l.country].rw}</span>` : `<select class="input" data-locrad="${i}" aria-label="Area around ${esc(l.label)}">${(l.type === 'postal' ? PRAD : RAD)[u].map(([, lab], k) => `<option value="${k}" ${l.rad === k ? 'selected' : ''}>${lab}</option>`).join('')}</select>`}
-     <button class="btn ghost sm" data-fsx="rmloc" data-i="${i}" aria-label="Remove ${esc(l.label)}">${ic('x', 14)}</button></div>`;
-  }).join('')}</div>${FS.locs.length > 1 ? `<div class="row" style="justify-content:flex-end;margin-top:6px"><button class="linkbtn" data-fsx="clearlocs">Remove all</button></div>` : ''}`;
+    return `<span class="fx-chip">${flag(l.country, 16)}<b>${esc(locTitle(l))}</b>${l.type === 'region' ? `<span class="fx-chipnote">${n ? `${fmt(n)} ${n === 1 ? 'city' : 'cities'}` : 'whole ' + COUNTRY[l.country].rw}</span>` : `<select data-locrad="${i}" aria-label="Area around ${esc(l.label)}">${(l.type === 'postal' ? PRAD : RAD)[u].map(([, lab], k) => `<option value="${k}" ${l.rad === k ? 'selected' : ''}>${lab.replace(' around', '')}</option>`).join('')}</select>`}<button data-fsx="rmloc" data-i="${l.type ? i : i}" aria-label="Remove ${esc(l.label)}">${ic('x', 12)}</button></span>`;
+  }).join('');
+  return `<div class="fx-chips">${chips}${FS.locs.length ? '' : '<span class="fx-hint">Add one or more cities, states or postcodes.</span>'}<button class="linkbtn muted" data-fsx="pastetoggle">${ic('plus', 12)} Paste a list</button>${FS.locs.length > 1 ? '<button class="linkbtn muted" data-fsx="clearlocs">Clear</button>' : ''}</div>`;
 }
-function collectHTML() {
-  return `<div class="dopts">${[['Business info', 'Name, phone, website link, address, rating and reviews. No website visits.', 'Fastest'], ['Business info + website check', 'Also checks whether each website loads, and how fast.', ''], ['Business info + website + contact form', 'Also finds the contact form, CAPTCHA and platform.', 'Best for outreach']].map(([t, d, tag], i) => `<label class="dopt ${FS.depth === i ? 'on' : ''}"><input type="radio" name="dep" data-depth="${i}" ${FS.depth === i ? 'checked' : ''}><span class="radio"></span><span class="dopt-t"><b>${t}</b><small>${d}</small></span>${tag ? `<span class="dtag ${i === 2 ? 'acc' : ''}">${tag}</span>` : ''}</label>`).join('')}</div>
-   <label class="ck"><input type="checkbox" id="fs-emails" ${FS.emails ? 'checked' : ''}>Also find email addresses</label>`;
+const COLLECT = [['Basic info', 'Name, phone, website link, address, rating and reviews. No website visits.'], ['+ Website', 'Also checks that each website loads, and how fast.'], ['+ Contact form', 'Also finds the contact form, CAPTCHA and platform. Best for outreach.']];
+function collectHTML() { return COLLECT.map(([l, tip], i) => `<button role="radio" aria-checked="${FS.depth === i}" class="${FS.depth === i ? 'on' : ''}" data-depthb="${i}" title="${tip}">${l}</button>`).join(''); }
+const dur = s => !s ? '—' : s < 60 ? `${s} s` : s < 3600 ? `${Math.ceil(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
+function startProblem() {
+  const terms = activeTerms(), { n } = estimate();
+  if (!ST.config.github) return 'Connect GitHub first';
+  if (!terms.length) return 'Pick at least one search term';
+  if (!FS.locs.length) return 'Add a location';
+  if (n > 6000) return `Too big: ${fmt(n)} map searches (max 6,000). Use a smaller area`;
+  if (FS.maxRev != null && FS.maxRev < (FS.minRev || 0)) return 'Max reviews is below min';
+  return '';
 }
-const dur = s => !s ? '—' : s < 60 ? `≈ ${s} s` : s < 3600 ? `≈ ${Math.ceil(s / 60)} min` : `≈ ${(s / 3600).toFixed(1)} h`;
 function sumHTML() {
-  const terms = activeTerms(), { n, pts } = estimate();
+  const { n, pts } = estimate();
   const avg = pts * 13, f = FS.limit && avg ? Math.min(1, FS.limit / avg) : 1;
   const maps = Math.round(n * f * 2 / 4), biz = Math.min(avg, FS.limit || avg);
   const site = FS.depth >= 1 || FS.emails ? Math.round(biz * (FS.depth === 2 ? 1.8 : 1) * (FS.emails ? 1.3 : 1) / 20) : 0;
-  const lo = Math.round(pts * 6), hi = Math.round(pts * 18);
-  const [elo, ehi] = FS.limit ? [Math.min(lo, FS.limit), Math.min(hi, FS.limit)] : [lo, hi];
-  const tooBig = n > 6000;
-  const why = !ST.config.github ? 'Connect GitHub first (see the note above).' : !terms.length ? 'Choose at least one search term.' : !FS.locs.length ? 'Add at least one location.' : tooBig ? `That's ${fmt(n)} map searches; the limit is 6,000. Use a smaller area or fewer terms.` : '';
-  return `<div class="card-b" style="display:flex;flex-direction:column;gap:14px">
-    <div class="field"><label class="flabel" for="fs-name">Search name</label><input class="input nameinput" id="fs-name" value="${esc(FS.nameEdited ? FS.name : autoName())}" maxlength="80"><span class="help" id="fs-namehelp">${FS.nameEdited ? '<button class="linkbtn" data-fsx="resetname">Use suggested name</button>' : 'Suggested automatically. Type to rename.'}</span></div>
-    ${!n ? `<div class="sumempty">${ic('find', 18)}<span>${!FS.locs.length ? 'Add a location and the estimate shows up here.' : 'Choose a search term to see the estimate.'}</span></div>` : `<div class="bignums"><div><b class="num">${elo === ehi ? fmt(ehi) : `${fmt(elo)}–${fmt(ehi)}`}</b><span>${FS.limit && ehi === FS.limit ? 'new leads (your limit)' : 'businesses, roughly'}</span></div><div><b class="num">${dur(maps + site + 45)}</b><span>estimated time</span></div>
-      <div class="tsplit" style="grid-column:1/-1"><span><i style="background:var(--info)"></i>Google Maps · up to ${fmt(Math.round(n * f))} searches</span>${site ? `<span><i style="background:var(--accent)"></i>${['', 'Website check', 'Website + contact form check'][FS.depth] || 'Email search'}${FS.emails && FS.depth ? ' + emails' : ''}</span>` : '<span><i style="background:var(--line)"></i>No website visits</span>'}</div></div>`}
-    <button class="btn primary" data-fsx="start" style="justify-content:center;padding:11px" ${why || FS.busy ? 'disabled' : ''}>${FS.busy ? '<span class="spin"></span>Starting…' : ic('find') + 'Start search'}</button>
-    <span class="help" style="text-align:center;margin-top:-6px">${esc(why || 'Runs in the background on GitHub. You can close this page.')}</span>
-   </div>`;
+  const hi = Math.round(pts * 18), est = FS.limit ? Math.min(hi, FS.limit) : hi;
+  const name = FS.nameEdited ? FS.name : autoName();
+  const nameHTML = FS.editName ? `<input id="fs-name" class="input fx-nameinput" value="${esc(name)}" maxlength="80" aria-label="Search name">` : `<button class="fx-name" data-fsx="name" title="Rename this search">${esc(name)} ${ic('edit', 12)}</button>`;
+  const p = startProblem();
+  return `${nameHTML}<span class="fx-dot">·</span>${p ? `<span class="fx-warn">${esc(p)}</span>` : `<span>up to <b class="num">${fmt(est)}</b> leads</span><span class="fx-dot">·</span><span>about <b class="num">${dur(maps + site + 45)}</b></span>`}`;
 }
+function updateStart() { const b = $('#fs-go'); if (!b) return; const p = startProblem(); b.disabled = !!p || FS.busy; b.title = p; b.innerHTML = FS.busy ? '<span class="spin"></span>Starting…' : ic('find') + 'Start search'; }
 function refreshFind(parts) {
   if (!$('#fs-sum')) return;
   if (parts.includes('what')) $('#fs-what').innerHTML = FS.showTerms ? termsBox() : '';
   if (parts.includes('where')) $('#fs-where').innerHTML = whereHTML();
   const th = $('#fs-termhelp'); if (th) th.innerHTML = termHelp();
-  const nm = $('#fs-name'); if (!FS.nameEdited && nm && document.activeElement !== nm) nm.value = autoName();
-  const keep = document.activeElement && document.activeElement.id === 'fs-name';
-  if (!keep) $('#fs-sum').innerHTML = sumHTML();
+  if (!(document.activeElement && document.activeElement.id === 'fs-name')) $('#fs-sum').innerHTML = sumHTML();
+  updateStart();
 }
 function renderPop() {
   const pop = $('#loc-pop'), inp = $('#fs-loc'); if (!pop) return;
@@ -837,14 +839,14 @@ async function pasteApply() {
 async function startSearch() {
   const terms = activeTerms(), circles = FS.locs.flatMap(circlesFor);
   const name = FS.nameEdited && FS.name.trim() ? FS.name.trim() : autoName();
-  FS.busy = true; refreshFind([]);
+  FS.busy = true; updateStart();
   try {
-    const r = await api('POST', '/api/searches', { name, industry_id: FS.ind, terms, circles, limit: FS.limit, depth: FS.depth, emails: FS.emails, locationLabels: FS.locs.map(locTitle) });
+    const r = await api('POST', '/api/searches', { name, industry_id: FS.ind, terms, circles, limit: FS.limit, depth: FS.depth, emails: FS.emails, minReviews: FS.minRev || 0, maxReviews: FS.maxRev, locationLabels: FS.locs.map(locTitle) });
     upsertSearch(r.search); toast(`“${name}” started`); FS.nameEdited = false; FS.name = ''; startPolling();
   } catch (e) {
     toast(e.message, 'alert');
     if (e.status === 502) refreshSearches();
-  } finally { FS.busy = false; refreshFind([]); renderJobs(); $('#jobs')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  } finally { FS.busy = false; refreshFind([]); renderJobs(); }
 }
 function etaText(j) {
   if (j.status !== 'running' || !j.started_at || !j.total || !j.done) return '';
@@ -865,10 +867,10 @@ function jobsHTML() {
     const progressLine = j.status === 'queued' ? 'Waiting for GitHub to start the runner…'
       : checking ? `${fmt(j.checked)} of ${fmt(j.to_check)} websites checked`
       : `${fmt(j.done)} of ${fmt(j.total)} map searches${etaText(j) ? ' · ' + etaText(j) : ''}`;
-    const meta = [whenPT(j.created_at), check ? '' : (j.locations || []).slice(0, 3).join(', ') + ((j.locations || []).length > 3 ? ` +${j.locations.length - 3}` : ''), check ? '' : (['Business info', 'Website check', 'Contact form check'][j.depth] || '') + (j.emails ? ' + emails' : '')].filter(Boolean).join(' · ');
+    const meta = [whenPT(j.created_at), check ? '' : (j.locations || []).slice(0, 3).join(', ') + ((j.locations || []).length > 3 ? ` +${j.locations.length - 3}` : ''), check ? '' : (['Business info', 'Website check', 'Contact form check'][j.depth] || '') + (j.emails ? ' + emails' : ''), check || (!j.minReviews && j.maxReviews == null) ? '' : `${fmt(j.minReviews || 0)}–${j.maxReviews == null ? 'any' : fmt(j.maxReviews)} reviews`].filter(Boolean).join(' · ');
     const stats = check
       ? `<span><b>${fmt(j.checked)}</b> of ${fmt(j.to_check)} checked</span>`
-      : `<span><b>${fmt(j.new)}</b> new lead${j.new === 1 ? '' : 's'}</span><span>${fmt(j.found)} found</span><span>${fmt(j.dup)} already in Leads</span>${j.excluded ? `<button class="linkbtn muted" data-excl="${j.id}">${fmt(j.excluded)} excluded</button>` : ''}${!active && j.to_check ? `<span>${fmt(j.checked)} websites checked</span>` : ''}${j.limit_reached ? `<span class="okline">${ic('check', 13)}Reached your limit of ${fmt(j.limit)}</span>` : ''}`;
+      : `<span><b>${fmt(j.new)}</b> new lead${j.new === 1 ? '' : 's'}</span><span>${fmt(j.found)} found</span><span>${fmt(j.dup)} already in Leads</span>${j.excluded ? `<button class="linkbtn muted" data-excl="${j.id}">${fmt(j.excluded)} excluded</button>` : ''}${j.filtered ? `<span>${fmt(j.filtered)} outside review range</span>` : ''}${!active && j.to_check ? `<span>${fmt(j.checked)} websites checked</span>` : ''}${j.limit_reached ? `<span class="okline">${ic('check', 13)}Reached your limit of ${fmt(j.limit)}</span>` : ''}`;
     const actions = active
       ? `${j.run_url ? `<a class="btn sm ghost" href="${esc(j.run_url)}" target="_blank" rel="noopener">${ic('ext', 13)}Log</a>` : ''}${stuck ? `<button class="btn sm" data-jact="retry" data-id="${j.id}">${ic('retry', 13)}Retry</button>` : ''}<button class="btn sm ghost" data-jact="cancel" data-id="${j.id}">Cancel</button>`
       : `${j.status === 'failed' || j.status === 'cancelled' ? `<button class="btn sm" data-jact="retry" data-id="${j.id}" title="Continue where it stopped">${ic('retry', 13)}${j.done ? 'Resume' : 'Retry'}</button>` : ''}
@@ -902,7 +904,7 @@ async function excludedModal(id) {
 function loadIntoForm(j) {
   FS.ind = j.industry_id; const d = curInd();
   FS.terms = new Set((d?.terms || []).map((t, i) => (!j.terms.length || j.terms.includes(t)) ? i : -1).filter(i => i >= 0));
-  FS.extra = j.terms.filter(t => !d?.terms.includes(t)); FS.limit = j.limit; FS.depth = j.depth; FS.emails = j.emails;
+  FS.extra = j.terms.filter(t => !d?.terms.includes(t)); FS.limit = j.limit; FS.depth = j.depth; FS.emails = j.emails; FS.minRev = j.minReviews || 0; FS.maxRev = j.maxReviews ?? null;
   FS.name = j.name; FS.nameEdited = true; render(); window.scrollTo({ top: 0, behavior: 'smooth' });
   toast('Settings loaded. Add the locations again, then press Start search');
 }
@@ -954,6 +956,8 @@ document.addEventListener('click', async (e) => {
   if (t.closest('[data-act="close"]') && (!t.closest('[data-stop]') || t.closest('button[data-act="close"]'))) { closeOverlay(); return; }
   if (L$.openDD && !t.closest('.dd')) { L$.openDD = null; L$.ddq = ''; renderPanel(); }
   if (FS.open && !t.closest('#combo')) { FS.open = false; renderPop(); }
+  if (FS.countryMenu && !t.closest('[data-fsx="cmenu"]') && !t.closest('.fx-cmenu')) { FS.countryMenu = false; render(); }
+  if ((v = ds('depthb')) !== undefined) { FS.depth = +v; if (FS.depth === 0) FS.emails = false; $('#fs-collect').innerHTML = collectHTML(); const em = $('#fs-emails'); if (em) em.checked = FS.emails; refreshFind([]); return; }
   if ((v = ds('copy')) !== undefined) { try { await navigator.clipboard.writeText(v); toast('Copied'); } catch { toast('Copy blocked by the browser', 'alert'); } return; }
   if ((v = ds('sortcol')) !== undefined) { L$.sort = L$.sort === v ? 'reviews' : v; const s = $('#lsort'); if (s) s.value = L$.sort; leadsUpdate(false); $('#vt').scrollTop = 0; return; }
   if ((v = ds('dd')) !== undefined) { L$.openDD = L$.openDD === v ? null : v; L$.ddq = ''; renderPanel(); setTimeout(() => $('#ddq-' + v)?.focus(), 0); return; }
@@ -1021,7 +1025,9 @@ document.addEventListener('click', async (e) => {
     const b = t.closest('[data-fsx]');
     switch (v) {
       case 'terms': FS.showTerms = !FS.showTerms; refreshFind(['what']); if (FS.showTerms) setTimeout(() => $('#fs-extra')?.focus(), 0); break;
-      case 'country': FS.country = b.dataset.c; FS.q = ''; FS.hi = 0; render(); setTimeout(() => { $('#fs-loc').focus(); FS.open = true; renderPop(); }, 0); break;
+      case 'cmenu': FS.countryMenu = !FS.countryMenu; render(); break;
+      case 'country': FS.country = b.dataset.c; FS.countryMenu = false; FS.q = ''; FS.hi = 0; render(); setTimeout(() => { $('#fs-loc').focus(); FS.open = true; renderPop(); }, 0); break;
+      case 'name': FS.editName = true; $('#fs-sum').innerHTML = sumHTML(); setTimeout(() => { const i = $('#fs-name'); if (i) { i.focus(); i.select(); } }, 0); break;
       case 'addloc': { const it = FS.items[+b.dataset.li]; if (it && addLoc(it)) { FS.q = ''; $('#fs-loc').value = ''; FS.hi = 0; refreshFind(['where']); renderPop(); $('#fs-loc').focus(); } break; }
       case 'rmloc': FS.locs.splice(+b.dataset.i, 1); refreshFind(['where']); break;
       case 'clearlocs': FS.locs = []; refreshFind(['where']); break;
@@ -1093,6 +1099,7 @@ document.addEventListener('keydown', (e) => {
     else if (e.key === 'Backspace' && !t.value && FS.locs.length) { FS.locs.pop(); refreshFind(['where']); }
     return;
   }
+  if (t.id === 'fs-name' && (e.key === 'Enter' || e.key === 'Escape')) { e.preventDefault(); FS.editName = false; t.blur(); $('#fs-sum').innerHTML = sumHTML(); return; }
   if (t.id === 'fs-extra' && e.key === 'Enter') { e.preventDefault(); const v = t.value.trim(); if (v && !activeTerms().includes(v)) { FS.extra.push(v); refreshFind(['what']); setTimeout(() => $('#fs-extra')?.focus(), 0); } return; }
   if (e.key === 'Escape') { if (L$.openDD) { L$.openDD = null; renderPanel(); } else closeOverlay(); }
 });
@@ -1102,8 +1109,9 @@ document.addEventListener('input', (e) => {
   if (t.id === 'lq') { L$.F.q = t.value; changed(); return; }
   if (t.id && t.id.startsWith('ddq-')) { L$.ddq = t.value; renderPanel(); return; }
   if (t.id === 'fs-loc') { FS.q = t.value; FS.hi = 0; FS.open = true; renderPop(); return; }
-  if (t.id === 'fs-name') { FS.name = t.value; FS.nameEdited = true; const h = $('#fs-namehelp'); if (h) h.innerHTML = '<button class="linkbtn" data-fsx="resetname">Use suggested name</button>'; return; }
-  if (t.id === 'fs-limit') { const v = parseInt(t.value, 10); FS.limit = v > 0 ? v : 0; document.querySelectorAll('[data-limit]').forEach(b => b.classList.toggle('on', +b.dataset.limit === FS.limit)); $('#fs-sum').innerHTML = sumHTML(); return; }
+  if (t.id === 'fs-name') { FS.name = t.value; FS.nameEdited = !!t.value.trim(); return; }
+  if (t.id === 'fs-rmin' || t.id === 'fs-rmax') { const v = t.value === '' ? null : Math.max(0, parseInt(t.value, 10) || 0); if (t.id === 'fs-rmin') FS.minRev = v || 0; else FS.maxRev = v; refreshFind([]); return; }
+  if (t.id === 'fs-limit') { const v = parseInt(t.value, 10); FS.limit = v > 0 ? v : 0; refreshFind([]); return; }
   if (t.dataset.lnote) { clearTimeout(noteTimer); $('#dnote-h').textContent = 'Saving…'; noteTimer = setTimeout(() => saveLead(+t.dataset.lnote, { notes: t.value }, () => { const h = $('#dnote-h'); if (h) h.textContent = 'Saved.'; }), 700); return; }
   if (t.dataset.rng) {
     const k = t.dataset.rng, F = L$.F; let v = +t.value;
@@ -1116,6 +1124,7 @@ document.addEventListener('input', (e) => {
     changed(false);
   }
 });
+document.addEventListener('focusout', (e) => { if (e.target.id === 'fs-name' && FS.editName) { FS.editName = false; setTimeout(() => { const sm = $('#fs-sum'); if (sm) sm.innerHTML = sumHTML(); }, 0); } });
 document.addEventListener('change', async (e) => {
   const t = e.target;
   if (t.dataset.rng) { renderPanel(); return; }

@@ -152,13 +152,13 @@ function searchOut(r) {
   const params = parse(r.params, {});
   return {
     id: r.id, kind: r.kind, name: r.name, industry_id: r.industry_id, status: r.status, limit: r.limit_n,
-    total: r.total_tasks, done: r.done_tasks, found: r.found, new: r.new_count, dup: r.dup, excluded: r.excluded,
+    total: r.total_tasks, done: r.done_tasks, found: r.found, new: r.new_count, dup: r.dup, excluded: r.excluded, filtered: r.filtered || 0,
     to_check: r.to_check, checked: r.checked, limit_reached: !!r.limit_reached, error: r.error, run_url: r.run_url,
     created_at: r.created_at, started_at: r.started_at, finished_at: r.finished_at, heartbeat_at: r.heartbeat_at,
-    depth: params.depth ?? 0, emails: !!params.emails, locations: params.locationLabels || [], terms: params.terms || [],
+    depth: params.depth ?? 0, emails: !!params.emails, minReviews: params.minReviews || 0, maxReviews: params.maxReviews ?? null, locations: params.locationLabels || [], terms: params.terms || [],
   };
 }
-const SEARCH_COLS = 'id, kind, name, industry_id, params, status, limit_n, total_tasks, done_tasks, found, new_count, dup, excluded, to_check, checked, limit_reached, error, run_url, created_at, started_at, finished_at, heartbeat_at';
+const SEARCH_COLS = 'id, kind, name, industry_id, params, status, limit_n, total_tasks, done_tasks, found, new_count, dup, excluded, filtered, to_check, checked, limit_reached, error, run_url, created_at, started_at, finished_at, heartbeat_at';
 const inList = (n) => Array(n).fill('?').join(',');
 function chunk(arr, n) { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; }
 
@@ -231,8 +231,11 @@ async function createSearch(env, b) {
   const cells = buildCells(circles, terms.length);
   if (cells.length > MAX_TASKS) throw new HttpError(400, `This search needs ${cells.length.toLocaleString('en-US')} map searches, more than the ${MAX_TASKS.toLocaleString('en-US')} allowed in one go. Use fewer locations, a smaller area or fewer search terms.`);
   const depth = [0, 1, 2].includes(+b.depth) ? +b.depth : 2;
+  const minReviews = Math.max(0, Math.floor(+b.minReviews || 0));
+  const maxReviews = b.maxReviews === null || b.maxReviews === undefined || b.maxReviews === '' ? null : Math.max(0, Math.floor(+b.maxReviews));
+  if (maxReviews !== null && maxReviews < minReviews) throw new HttpError(400, 'Max reviews is lower than min reviews.');
   const params = {
-    terms, depth, emails: !!b.emails, countries: [...new Set(circles.map(c => c.country))],
+    terms, depth, emails: !!b.emails, minReviews, maxReviews, countries: [...new Set(circles.map(c => c.country))],
     locationLabels: cleanList(b.locationLabels, 50),
   };
   const name = String(b.name || '').trim().slice(0, 80) || `${ind.name} search`;
@@ -431,6 +434,7 @@ async function ingestCell(env, s, params, b) {
   // Normalise and split accepted / excluded, dedupe inside the batch.
   const seenPid = new Set();
   const keep = [], excluded = [];
+  let filtered = 0;
   for (const p of Array.isArray(b.places) ? b.places : []) {
     const pid = String(p.place_id || '').trim();
     const name = String(p.name || '').trim();
@@ -448,8 +452,9 @@ async function ingestCell(env, s, params, b) {
       rating: Number.isFinite(+p.rating) && +p.rating > 0 ? Math.round(+p.rating * 10) / 10 : null,
       reviews: Math.max(0, Math.floor(+p.reviews || 0)), maps_url: p.maps_url ? String(p.maps_url).slice(0, 500) : null, closed: p.closed ? 1 : 0,
     };
-    if (categoryAccepted(accepted, p.category, p.categories)) keep.push(lead);
-    else excluded.push(lead);
+    if (!categoryAccepted(accepted, p.category, p.categories)) excluded.push(lead);
+    else if (lead.reviews < (params.minReviews || 0) || (params.maxReviews != null && lead.reviews > params.maxReviews)) filtered++;
+    else keep.push(lead);
   }
 
   // Find existing leads by place id, domain or phone.
@@ -508,9 +513,9 @@ async function ingestCell(env, s, params, b) {
   const newTotal = s.new_count + newLeads.length;
   const limitReached = s.limit_n && newTotal >= s.limit_n ? 1 : 0;
   const toCheck = depth > 0 || params.emails ? newLeads.filter(x => x[1]).length : 0;
-  await env.DB.prepare(`UPDATE searches SET found = found + ?, new_count = new_count + ?, dup = dup + ?, excluded = excluded + ?,
+  await env.DB.prepare(`UPDATE searches SET found = found + ?, new_count = new_count + ?, dup = dup + ?, excluded = excluded + ?, filtered = filtered + ?,
       done_tasks = done_tasks + ?, total_tasks = total_tasks + ?, to_check = to_check + ?, done_bits = ?, limit_reached = MAX(limit_reached, ?), heartbeat_at = ? WHERE id = ?`)
-    .bind(keep.length + excluded.length, newLeads.length, dup, excluded.length, already ? 0 : 1 + extra, extra, toCheck, b64u(bits), limitReached, t, s.id).run();
+    .bind(keep.length + excluded.length + filtered, newLeads.length, dup, excluded.length, filtered, already ? 0 : 1 + extra, extra, toCheck, b64u(bits), limitReached, t, s.id).run();
   const status = (await env.DB.prepare('SELECT status FROM searches WHERE id = ?').bind(s.id).first()).status;
   return json({ new_leads: depth > 0 || params.emails ? newLeads.filter(x => x[1]) : [], new: newLeads.length, dup, excluded: excluded.length, stop: !!limitReached || status === 'cancelled' });
 }
