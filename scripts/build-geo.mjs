@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 const OUT = 'public/geo';
 const TMP = '.geo-tmp';
-const COUNTRIES = ['US', 'CA', 'MA'];
+const COUNTRIES = ['US', 'CA', 'AU', 'AE'];
 mkdirSync(OUT, { recursive: true });
 mkdirSync(TMP, { recursive: true });
 
@@ -27,6 +27,9 @@ const unzip = (zip, member) => execFileSync('unzip', ['-p', zip, member], { maxB
 
 // Canadian provinces use numbers in GeoNames admin1 codes; show the usual abbreviations instead.
 const CA_ABBR = { '01': 'AB', '02': 'BC', '03': 'MB', '04': 'NB', '05': 'NL', '07': 'NS', '08': 'ON', '09': 'PE', '10': 'QC', '11': 'SK', '12': 'YT', '13': 'NT', '14': 'NU' };
+// Australian states also use numbers in GeoNames.
+const AU_ABBR = { '01': 'ACT', '02': 'NSW', '03': 'NT', '04': 'QLD', '05': 'SA', '06': 'TAS', '07': 'VIC', '08': 'WA' };
+const ABBR = { CA: CA_ABBR, AU: AU_ABBR };
 
 const base = 'https://download.geonames.org/export';
 if (!await download(`${base}/dump/cities5000.zip`, join(TMP, 'cities.zip'))) throw new Error('Could not download GeoNames cities.');
@@ -38,7 +41,7 @@ for (const line of readFileSync(join(TMP, 'admin1.txt'), 'utf8').split('\n')) {
   if (!code) continue;
   const [cc, a1] = code.split('.');
   if (!COUNTRIES.includes(cc)) continue;
-  const key = cc === 'CA' ? (CA_ABBR[a1] || a1) : a1;
+  const key = ABBR[cc] ? (ABBR[cc][a1] || a1) : a1;
   (admin[cc] ||= {})[key] = { name, raw: a1 };
 }
 

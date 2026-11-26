@@ -39,7 +39,8 @@ const ic = (n, s = 16) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" f
 const FLAGS = {
   US: '<rect width="30" height="20" fill="#B22234"/><path d="M0 2.3h30M0 5.4h30M0 8.5h30M0 11.5h30M0 14.6h30M0 17.7h30" stroke="#fff" stroke-width="1.54"/><rect width="13" height="10.8" fill="#3C3B6E"/>',
   CA: '<rect width="30" height="20" fill="#fff"/><rect width="7.5" height="20" fill="#D52B1E"/><rect x="22.5" width="7.5" height="20" fill="#D52B1E"/><path d="M15 3.6l1.1 2.3 1.5-.7-.5 3.4 2-1.8.6 1.3 1.8-.4-.6 2.1 1 .6-3.4 2.6.5 1.4-3-.5v2.6h-.9v-2.6l-3 .5.5-1.4-3.4-2.6 1-.6-.6-2.1 1.8.4.6-1.3 2 1.8-.5-3.4 1.5.7z" fill="#D52B1E"/>',
-  MA: '<rect width="30" height="20" fill="#C1272D"/><path d="M15 5.6L17.75 14.05L10.55 8.83H19.45L12.25 14.05Z" fill="none" stroke="#006233" stroke-width="1" stroke-linejoin="round"/>',
+  AE: '<rect width="30" height="20" fill="#fff"/><rect width="30" height="6.67" fill="#00732F"/><rect y="13.33" width="30" height="6.67" fill="#000"/><rect width="8" height="20" fill="#FF0000"/>',
+  AU: '<rect width="30" height="20" fill="#012169"/><path d="M0 0l15 10M15 0L0 10" stroke="#fff" stroke-width="2"/><path d="M0 0l15 10M15 0L0 10" stroke="#C8102E" stroke-width=".9"/><path d="M7.5 0v10M0 5h15" stroke="#fff" stroke-width="3"/><path d="M7.5 0v10M0 5h15" stroke="#C8102E" stroke-width="1.6"/><g fill="#fff"><circle cx="7.5" cy="15" r="1.6"/><circle cx="22.5" cy="16.5" r=".9"/><circle cx="19.5" cy="9" r=".9"/><circle cx="22.5" cy="4" r=".9"/><circle cx="25.5" cy="8" r=".9"/><circle cx="24" cy="11.5" r=".5"/></g>',
 };
 const flag = (c, w = 20) => FLAGS[c] ? `<svg class="flag" width="${w}" height="${Math.round(w * 2 / 3)}" viewBox="0 0 30 20" aria-hidden="true">${FLAGS[c]}</svg>` : '';
 function toast(msg, icon = 'check') {
@@ -507,7 +508,7 @@ const XCOLS = [
 const XPRESETS = { contact: ['name', 'phone', 'website'], outreach: ['name', 'phone', 'website', 'city', 'region', 'rating', 'reviews', 'site', 'form', 'formurl', 'captcha', 'email', 'status'], full: XCOLS.map(c => c[0]) };
 const XP = (() => { try { const s = JSON.parse(localStorage.getItem('lh-export') || 'null'); if (s) return { ...s, cols: new Set(s.cols), scope: 'view', src: null }; } catch { /* default */ } return { scope: 'view', src: null, cols: new Set(XPRESETS.outreach), preset: 'outreach', phone: false, web: false, dedupePhone: false, pfmt: 'nat', fmt: 'csv' }; })();
 function saveXP() { try { localStorage.setItem('lh-export', JSON.stringify({ ...XP, cols: [...XP.cols], scope: undefined, src: undefined })); } catch { /* ignore */ } }
-function phoneOut(L) { if (!L.phone) return ''; if (XP.pfmt !== 'e164') return L.phone; const d = L.phone.replace(/\D/g, ''); return L.phone.trim().startsWith('+') ? '+' + d : (L.country === 'MA' ? '+212' + d.replace(/^0/, '') : '+1' + d.replace(/^1(?=\d{10}$)/, '')); }
+function phoneOut(L) { if (!L.phone) return ''; if (XP.pfmt !== 'e164') return L.phone; const d = L.phone.replace(/\D/g, ''); return L.phone.trim().startsWith('+') ? '+' + d : (L.country === 'AU' ? '+61' + d.replace(/^0/, '') : L.country === 'AE' ? '+971' + d.replace(/^0/, '') : '+1' + d.replace(/^1(?=\d{10}$)/, '')); }
 function xRows() {
   let base = XP.scope === 'sel' ? [...L$.sel].map(id => ST.byId.get(id)).filter(Boolean) : XP.scope === 'view' ? L$.res : XP.scope === 'search' ? ST.leads.filter(L => L.search_id === XP.src) : ST.leads;
   if (XP.phone) base = base.filter(L => L.phone);
@@ -631,7 +632,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && $(
 /* ================================================================ find leads */
 const RAD = { mi: [[0, 'City only'], [10, '+ 10 mi'], [25, '+ 25 mi'], [50, '+ 50 mi']], km: [[0, 'City only'], [15, '+ 15 km'], [40, '+ 40 km'], [80, '+ 80 km']] };
 const PRAD = { mi: [[5, '5 mi around'], [10, '10 mi around'], [25, '25 mi around']], km: [[8, '8 km around'], [15, '15 km around'], [40, '40 km around']] };
-const COUNTRY = { US: { name: 'United States', unit: 'mi', rw: 'state', ph: 'City, state or ZIP code' }, CA: { name: 'Canada', unit: 'km', rw: 'province', ph: 'City, province or postal code' }, MA: { name: 'Morocco', unit: 'km', rw: 'region', ph: 'City, region or postal code' } };
+const COUNTRY = { US: { name: 'United States', unit: 'mi', rw: 'state', ph: 'City, state or ZIP code' }, CA: { name: 'Canada', unit: 'km', rw: 'province', ph: 'City, province or postal code' }, AU: { name: 'Australia', unit: 'km', rw: 'state', ph: 'City, state or postcode' }, AE: { name: 'UAE', unit: 'km', rw: 'emirate', ph: 'City or emirate' } };
 const LIMITS = [100, 250, 500, 1000, 0];
 const FS = { ind: null, terms: new Set(), extra: [], country: 'US', locs: [], q: '', open: false, hi: 0, items: [], name: '', nameEdited: false, paste: false, pasteMsg: '', limit: 500, depth: 2, emails: false, showTerms: false, busy: false, allHist: false };
 const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -663,7 +664,7 @@ function circlesFor(l) {
   }
   return [];
 }
-const locTitle = l => l.type === 'city' ? (l.country === 'MA' ? l.label : `${l.label}, ${l.region}`) : l.label;
+const locTitle = l => l.type === 'city' && l.country !== 'AE' ? `${l.label}, ${l.region}` : l.label;
 function locSub(l) { const c = COUNTRY[l.country]; const rn = ST.places?.[l.country]?.regions?.[l.region]; return l.type === 'city' ? `${rn || l.region}, ${c.name}` : l.type === 'region' ? `Entire ${c.rw} · ${c.name}` : `${l.place ? l.place + ', ' : ''}${c.name}`; }
 function autoName() { const d = curInd(); if (!d) return 'New search'; if (!FS.locs.length) return d.name; const l = FS.locs[0]; return `${d.name} · ${l.type === 'postal' ? l.code : l.label}${FS.locs.length > 1 ? ` + ${FS.locs.length - 1} more` : ''}`; }
 function estimate() {
@@ -682,7 +683,7 @@ function locResults(q) {
   if (post) {
     const key = cc === 'CA' ? raw.toUpperCase().replace(/\s+/g, ' ').slice(0, 3) : raw.toUpperCase();
     const hit = post[key] || (cc === 'CA' ? post[raw.toUpperCase().replace(/\s+/g, ' ')] : null);
-    if (hit) out.push({ grp: 'Postal code', type: 'postal', code: key, label: (cc === 'US' ? 'ZIP code ' : 'Postal code ') + key, place: hit[2], region: hit[3], country: cc, lat: hit[0], lon: hit[1], rad: 1 });
+    if (hit) out.push({ grp: 'Postal code', type: 'postal', code: key, label: (cc === 'US' ? 'ZIP code ' : cc === 'AU' ? 'Postcode ' : 'Postal code ') + key, place: hit[2], region: hit[3], country: cc, lat: hit[0], lon: hit[1], rad: 1 });
   } else if (/^\d{4,5}$|^[a-z]\d[a-z]/i.test(raw)) { loadPostal(cc).then(() => { if (FS.open) renderPop(); }); }
   const cityMatch = (code) => {
     const G = P[code], res = [];
@@ -696,9 +697,11 @@ function locResults(q) {
     }
     return res.sort((a, b) => a.score - b.score || b.c[5] - a.c[5]);
   };
-  cityMatch(cc).slice(0, 7).forEach(({ c }) => out.push({ grp: 'Cities', type: 'city', label: c[0], region: c[2], country: cc, lat: c[3], lon: c[4], pop: c[5] }));
-  Object.entries(g.regions).filter(([code, name]) => norm(name).split(' ').some(w => w.startsWith(nq)) || norm(name).startsWith(nq) || (nq.length >= 2 && norm(code) === nq))
-    .slice(0, 4).forEach(([code, name]) => out.push({ grp: COUNTRY[cc].rw[0].toUpperCase() + COUNTRY[cc].rw.slice(1) + 's', type: 'region', label: name, region: code, country: cc }));
+  const cities = cityMatch(cc).slice(0, 7).map(({ c }) => ({ grp: 'Cities', type: 'city', label: c[0], region: c[2], country: cc, lat: c[3], lon: c[4], pop: c[5] }));
+  const regions = Object.entries(g.regions).filter(([code, name]) => norm(name).split(' ').some(w => w.startsWith(nq)) || norm(name).startsWith(nq) || (nq.length >= 2 && norm(code) === nq))
+    .slice(0, 4).map(([code, name]) => ({ grp: COUNTRY[cc].rw[0].toUpperCase() + COUNTRY[cc].rw.slice(1) + 's', type: 'region', label: name, region: code, country: cc }));
+  const cityNameHit = cities.some(c => norm(c.label).startsWith(nq));
+  out.push(...(regions.length && !cityNameHit ? [...regions, ...cities] : [...cities, ...regions]));
   for (const oc of Object.keys(P)) { if (oc === cc) continue; cityMatch(oc).slice(0, 3).forEach(({ c }) => out.push({ grp: 'In ' + COUNTRY[oc].name, type: 'city', label: c[0], region: c[2], country: oc, lat: c[3], lon: c[4], pop: c[5] })); }
   return out;
 }
@@ -730,7 +733,7 @@ V.find = () => {
           <div class="combo-in">${flag(FS.country, 18)}<input id="fs-loc" role="combobox" aria-expanded="false" aria-controls="loc-pop" autocomplete="off" placeholder="${COUNTRY[FS.country].ph}" value="${esc(FS.q)}"><button class="linkbtn" data-fsx="pastetoggle" style="white-space:nowrap">${FS.paste ? 'Close' : 'Paste a list'}</button></div>
           <div class="combo-pop" id="loc-pop" hidden></div>
         </div>
-        ${FS.paste ? `<div class="pastebox"><textarea class="input" id="fs-paste" placeholder="One location per line, for example:&#10;Austin, TX&#10;78704&#10;Toronto&#10;Marrakech" style="min-height:110px"></textarea><div class="row" style="justify-content:space-between"><span class="help" id="paste-msg">${esc(FS.pasteMsg || 'Cities, states, provinces, regions and postal codes all work. Accents are optional.')}</span><button class="btn sm primary" data-fsx="pasteapply">Add locations</button></div></div>` : ''}
+        ${FS.paste ? `<div class="pastebox"><textarea class="input" id="fs-paste" placeholder="One location per line, for example:&#10;Austin, TX&#10;78704&#10;Toronto&#10;Sydney, NSW&#10;Dubai" style="min-height:110px"></textarea><div class="row" style="justify-content:space-between"><span class="help" id="paste-msg">${esc(FS.pasteMsg || 'Cities, states, provinces, regions and postal codes all work. Accents are optional.')}</span><button class="btn sm primary" data-fsx="pasteapply">Add locations</button></div></div>` : ''}
         <div id="fs-where">${whereHTML()}</div>
       </div>
       <div class="field"><span class="flabel">Collect</span><div id="fs-collect">${collectHTML()}</div></div>
@@ -761,7 +764,7 @@ function whereHTML() {
   return `<div class="loclist">${FS.locs.map((l, i) => {
     const u = unitOf(l.country), n = l.type === 'region' ? circlesFor(l).length : 0;
     return `<div class="locrow">${flag(l.country, 22)}<div style="min-width:0"><b>${esc(locTitle(l))}</b><span>${esc(locSub(l))}</span></div>
-     ${l.type === 'region' ? `<span class="locfix">${n ? `${fmt(n)} cities` : 'Whole ' + COUNTRY[l.country].rw}</span>` : `<select class="input" data-locrad="${i}" aria-label="Area around ${esc(l.label)}">${(l.type === 'postal' ? PRAD : RAD)[u].map(([, lab], k) => `<option value="${k}" ${l.rad === k ? 'selected' : ''}>${lab}</option>`).join('')}</select>`}
+     ${l.type === 'region' ? `<span class="locfix">${n ? `${fmt(n)} ${n === 1 ? "city" : "cities"}` : 'Whole ' + COUNTRY[l.country].rw}</span>` : `<select class="input" data-locrad="${i}" aria-label="Area around ${esc(l.label)}">${(l.type === 'postal' ? PRAD : RAD)[u].map(([, lab], k) => `<option value="${k}" ${l.rad === k ? 'selected' : ''}>${lab}</option>`).join('')}</select>`}
      <button class="btn ghost sm" data-fsx="rmloc" data-i="${i}" aria-label="Remove ${esc(l.label)}">${ic('x', 14)}</button></div>`;
   }).join('')}</div>${FS.locs.length > 1 ? `<div class="row" style="justify-content:flex-end;margin-top:6px"><button class="linkbtn" data-fsx="clearlocs">Remove all</button></div>` : ''}`;
 }

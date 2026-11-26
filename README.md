@@ -1,6 +1,6 @@
 # LeadsHunter
 
-Find local businesses on Google Maps, check their websites and contact forms, and keep them in a fast, filterable lead list.
+Find local businesses on Google Maps (United States, Canada, Australia and the UAE), check their websites and contact forms, and keep them in a fast, filterable lead list.
 Runs entirely on free plans: **Cloudflare Workers + D1 + KV** for the app and data, **GitHub Actions** (public repo) for scraping and website checks.
 
 ## How it works

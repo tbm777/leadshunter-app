@@ -18,13 +18,18 @@ test('domains ignore www and shared hosts are flagged', () => {
 test('phones normalise to E.164', () => {
   assert.equal(phoneE164('(512) 555-0148', 'US'), '+15125550148');
   assert.equal(phoneE164('+1 512-555-0148', 'US'), '+15125550148');
-  assert.equal(phoneE164('0522-123456', 'MA'), '+212522123456');
+  assert.equal(phoneE164('(02) 9123 4567', 'AU'), '+61291234567');
+  assert.equal(phoneE164('0412 345 678', 'AU'), '+61412345678');
+  assert.equal(phoneE164('+61 412 345 678', 'AU'), '+61412345678');
+  assert.equal(phoneE164('04 123 4567', 'AE'), '+97141234567');
+  assert.equal(phoneE164('050 123 4567', 'AE'), '+971501234567');
   assert.equal(phoneE164('416 555 0199', 'CA'), '+14165550199');
   assert.equal(phoneE164('123', 'US'), null);
 });
 test('countries and categories', () => {
   assert.equal(countryCode('United States'), 'US');
-  assert.equal(countryCode('Maroc'), 'MA');
+  assert.equal(countryCode('Australia'), 'AU');
+  assert.equal(countryCode('United Arab Emirates'), 'AE');
   assert.equal(countryCode('', 'CA'), 'CA');
   assert.ok(categoryAccepted([], 'Anything'));
   assert.ok(categoryAccepted(['Roofing contractor'], 'roofing contractor'));

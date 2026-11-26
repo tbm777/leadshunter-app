@@ -39,7 +39,7 @@ export function domainOf(url) {
 export function isSharedDomain(domain) { return !!domain && endsWith(domain, SHARED); }
 export function isSocialHost(host) { return !!host && endsWith(host.toLowerCase().replace(/^www\./, ''), SOCIAL); }
 
-const CC = { US: '1', CA: '1', MA: '212' };
+const CC = { US: '1', CA: '1', AU: '61', AE: '971' };
 
 /** Phone to E.164. Country is a two-letter code used when the number has no country prefix. */
 export function phoneE164(raw, country) {
@@ -54,10 +54,16 @@ export function phoneE164(raw, country) {
     if (d.length === 10) return '+1' + d;
     return null;
   }
-  if (cc === '212') {
-    if (d.startsWith('212')) return '+' + d;
+  if (cc === '61') {
+    if (d.startsWith('61') && d.length === 11) return '+' + d;
     if (d.startsWith('0')) d = d.slice(1);
-    return d.length === 9 ? '+212' + d : null;
+    return d.length === 9 ? '+61' + d : null;
+  }
+  if (cc === '971') {
+    if (d.startsWith('971') && (d.length === 11 || d.length === 12)) return '+' + d;
+    if (d.startsWith('00971')) return '+' + d.slice(2);
+    if (d.startsWith('0')) d = d.slice(1);
+    return d.length === 8 || d.length === 9 ? '+971' + d : null;
   }
   return null;
 }
@@ -68,7 +74,8 @@ export function countryCode(v, fallback = null) {
   const s = String(v).trim().toLowerCase();
   if (s === 'us' || s === 'usa' || s.includes('united states')) return 'US';
   if (s === 'ca' || s === 'canada') return 'CA';
-  if (s === 'ma' || s === 'morocco' || s === 'maroc' || s === 'المغرب') return 'MA';
+  if (s === 'au' || s === 'aus' || s === 'australia') return 'AU';
+  if (s === 'ae' || s === 'uae' || s.includes('united arab emirates') || s === 'الإمارات العربية المتحدة') return 'AE';
   return fallback;
 }
 
