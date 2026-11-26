@@ -258,12 +258,19 @@ const V = {}, MOUNT = {};
 function render() {
   const view = (location.hash || '#leads').slice(1);
   const v = V[view] ? view : 'leads';
+  CURRENT_VIEW = v;
   renderNav(v);
   $('#crumbs').innerHTML = `<span>Workspace</span><span>›</span><b>${TITLES[v]}</b>`;
   $('#page').innerHTML = V[v]();
   MOUNT[v] && MOUNT[v]();
 }
-window.addEventListener('hashchange', () => { closeOverlay(); render(); window.scrollTo(0, 0); });
+let CURRENT_VIEW = null;
+window.addEventListener('hashchange', () => {
+  // Remember where the leads list was, so coming back lands in the same place.
+  if (CURRENT_VIEW === 'leads') { const vt = $('#vt'); if (vt) L$.vtScroll = vt.scrollTop; L$.winScroll = window.scrollY; }
+  closeOverlay(); render();
+  if (CURRENT_VIEW !== 'leads') window.scrollTo(0, 0);
+});
 function onLeadsChanged() {
   renderNav((location.hash || '#leads').slice(1));
   if ($('#vt')) { L$.viewCounts = null; leadsUpdate(); }
@@ -343,7 +350,11 @@ V.leads = () => `
 MOUNT.leads = () => {
   leadsUpdate();
   setSync(ST.syncing ? 'busy' : 'ok');
-  $('#vt').addEventListener('scroll', () => { if (!L$.raf) L$.raf = requestAnimationFrame(() => { L$.raf = 0; renderRows(); }); });
+  const vt = $('#vt');
+  vt.addEventListener('scroll', () => { L$.vtScroll = vt.scrollTop; if (!L$.raf) L$.raf = requestAnimationFrame(() => { L$.raf = 0; renderRows(); }); });
+  // Restore the previous position (after the table has its full height).
+  if (L$.vtScroll) { vt.scrollTop = L$.vtScroll; renderRows(); }
+  requestAnimationFrame(() => window.scrollTo(0, L$.winScroll || 0));
 };
 function leadsUpdate(panel = true) {
   runFilter();
