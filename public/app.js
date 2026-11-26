@@ -528,25 +528,28 @@ function defaultFile() {
 function openExport(scope, src) { if (scope) XP.scope = scope; if (src != null) XP.src = src; else if (scope !== 'search') XP.src = null; if (XP.scope === 'sel' && !L$.sel.size) XP.scope = 'view'; if (XP.scope === 'view' && !$('#vt')) { runFilter(); } XP.file = ''; exportModal(); }
 function exportModal() {
   const rows = xRows(), cols = xCols(), groups = [...new Set(XCOLS.map(c => c[2]))];
-  const scopes = [['sel', 'Selected leads', L$.sel.size], ['view', 'Current filters', L$.res.length], ['all', 'All leads', ST.leads.length]];
-  if (XP.src != null) scopes.unshift(['search', `Search: ${searchName(XP.src)}`, ST.leads.filter(L => L.search_id === XP.src).length]);
-  $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal xmodal" data-stop role="dialog" aria-label="Export leads">
-   <div class="card-h"><div><h2>Export leads</h2><p>Built in your browser from your local copy, so it's instant and free. Your choices are remembered.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
-   <div class="xgrid"><div class="xcol">
-     <div class="field"><span class="flabel">Leads</span>${scopes.map(([k, l, n]) => `<label class="opt sm ${XP.scope === k ? 'on' : ''} ${n ? '' : 'off'}"><input type="radio" name="xs" data-xscope="${k}" ${XP.scope === k ? 'checked' : ''} ${n ? '' : 'disabled'}><div><b>${esc(l)}</b><span class="num">${fmt(n)} leads</span></div></label>`).join('')}</div>
-     <div class="field"><span class="flabel">Only include</span>
-      <label class="ck"><input type="checkbox" data-xopt="phone" ${XP.phone ? 'checked' : ''}>Leads with a phone number</label>
-      <label class="ck"><input type="checkbox" data-xopt="web" ${XP.web ? 'checked' : ''}>Leads with a website</label>
-      <label class="ck"><input type="checkbox" data-xopt="dedupePhone" ${XP.dedupePhone ? 'checked' : ''}>One row per phone number</label></div>
-     <div class="field"><label class="flabel" for="x-pfmt">Phone format</label><select class="input" id="x-pfmt"><option value="nat" ${XP.pfmt === 'nat' ? 'selected' : ''}>As listed on Google</option><option value="e164" ${XP.pfmt === 'e164' ? 'selected' : ''}>+15125550148 (for dialers and CRMs)</option></select></div>
-     <div class="field"><span class="flabel">File type</span><div class="seg-c">${[['csv', 'CSV'], ['xlsx', 'Excel (.xlsx)']].map(([k, l]) => `<button class="${XP.fmt === k ? 'on' : ''}" data-xfmt="${k}">${l}</button>`).join('')}</div></div>
-    </div><div class="xcol">
-     <div class="row" style="justify-content:space-between"><span class="flabel">Columns <span class="sub">(${cols.length})</span></span><div class="seg-c">${[['contact', 'Contact list'], ['outreach', 'Outreach'], ['full', 'Everything']].map(([k, l]) => `<button class="${XP.preset === k ? 'on' : ''}" data-xpreset="${k}">${l}</button>`).join('')}</div></div>
-     <div class="xcols">${groups.map(g => `<div><h6>${g}</h6>${XCOLS.filter(c => c[2] === g).map(c => `<label class="ck"><input type="checkbox" data-xcol="${c[0]}" ${XP.cols.has(c[0]) ? 'checked' : ''}>${c[1]}</label>`).join('')}</div>`).join('')}</div>
-     <div class="field"><span class="flabel">Preview</span><div class="tbl-wrap xprev">${cols.length && rows.length ? `<table><thead><tr>${cols.map(c => `<th>${c[1]}</th>`).join('')}</tr></thead><tbody>${rows.slice(0, 4).map(L => `<tr>${cols.map(c => `<td>${esc(c[3](L))}</td>`).join('')}</tr>`).join('')}</tbody></table>` : `<div class="empty" style="padding:16px">${cols.length ? 'No leads to export.' : 'Pick at least one column.'}</div>`}</div></div>
-   </div></div>
-   <div class="card-h xfoot"><div class="field" style="flex:1;min-width:220px"><label class="flabel" for="x-file">File name</label><div class="row" style="gap:6px;flex-wrap:nowrap"><input class="input" id="x-file" value="${esc(XP.file || defaultFile())}"><span class="sub">.${XP.fmt}</span></div></div>
-     <div class="row"><span class="num" style="color:var(--muted);font-size:13px"><b style="color:var(--ink)">${fmt(rows.length)}</b> rows × ${cols.length} columns</span><button class="btn" data-xact="copy" ${rows.length && cols.length ? '' : 'disabled'}>${ic('copy', 14)}Copy for Sheets</button><button class="btn primary" data-xact="download" ${rows.length && cols.length ? '' : 'disabled'}>${ic('download', 14)}Download</button></div></div>
+  const scopes = [['view', 'Current filters', L$.res.length], ['sel', 'Selected', L$.sel.size], ['all', 'All leads', ST.leads.length]];
+  if (XP.src != null) scopes.unshift(['search', searchName(XP.src), ST.leads.filter(L => L.search_id === XP.src).length]);
+  const presetName = { contact: 'Contact list', outreach: 'Outreach', full: 'Everything' }[XP.preset] || 'Custom';
+  const tog = (k, l) => `<button type="button" class="fx-pill ${XP[k] ? 'on' : ''}" data-xtog="${k}" aria-pressed="${!!XP[k]}"><span class="fx-tick">${XP[k] ? ic('check', 12) : ''}</span>${l}</button>`;
+  $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal xm" data-stop role="dialog" aria-label="Export leads">
+   <div class="xm-h"><h2>Export leads</h2><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
+   <div class="xm-b">
+    <div class="xm-sec"><span class="fx-k">Leads</span><div class="xm-scopes">${scopes.map(([k, l, n]) => `<button type="button" class="xm-scope ${XP.scope === k ? 'on' : ''}" data-xscopebtn="${k}" ${n ? '' : 'disabled'}><b>${esc(l)}</b><span class="num">${fmt(n)}</span></button>`).join('')}</div></div>
+    <div class="xm-sec"><div class="row" style="justify-content:space-between"><span class="fx-k">Columns · ${cols.length}</span><button class="linkbtn muted" data-xcustom="1">${XP.custom ? 'Done' : 'Customize'}</button></div>
+      <div class="seg-c xm-presets">${[['contact', 'Contact list'], ['outreach', 'Outreach'], ['full', 'Everything']].map(([k, l]) => `<button type="button" class="${XP.preset === k ? 'on' : ''}" data-xpreset="${k}">${l}</button>`).join('')}${XP.preset === 'custom' ? '<button type="button" class="on">Custom</button>' : ''}</div>
+      ${XP.custom ? `<div class="xcols">${groups.map(g => `<div><h6>${g}</h6>${XCOLS.filter(c => c[2] === g).map(c => `<label class="ck"><input type="checkbox" data-xcol="${c[0]}" ${XP.cols.has(c[0]) ? 'checked' : ''}>${c[1]}</label>`).join('')}</div>`).join('')}</div>`
+        : `<div class="xm-colsum">${cols.slice(0, 8).map(c => `<span class="fx-term">${c[1]}</span>`).join('')}${cols.length > 8 ? `<span class="fx-term">+${cols.length - 8} more</span>` : ''}</div>`}</div>
+    <div class="xm-sec xm-opts">
+      <div><span class="fx-k">Only include</span><div class="fx-pills">${tog('phone', 'Has phone')}${tog('web', 'Has website')}${tog('dedupePhone', 'One row per phone')}</div></div>
+      <div><span class="fx-k">Phone format</span><div class="seg-c">${[['nat', 'As listed'], ['e164', '+1 5125550148']].map(([k, l]) => `<button type="button" class="${XP.pfmt === k ? 'on' : ''}" data-xpfmt="${k}" title="${k === 'e164' ? 'International format for dialers and CRMs' : 'As shown on Google'}">${l}</button>`).join('')}</div></div>
+      <div><span class="fx-k">File</span><div class="seg-c">${[['csv', 'CSV'], ['xlsx', 'Excel']].map(([k, l]) => `<button type="button" class="${XP.fmt === k ? 'on' : ''}" data-xfmt="${k}">${l}</button>`).join('')}</div></div>
+    </div>
+    <div class="xm-sec"><span class="fx-k">Preview</span><div class="tbl-wrap xprev">${cols.length && rows.length ? `<table><thead><tr>${cols.map(c => `<th>${c[1]}</th>`).join('')}</tr></thead><tbody>${rows.slice(0, 4).map(L => `<tr>${cols.map(c => `<td>${esc(c[3](L)) || '<span class="none">—</span>'}</td>`).join('')}</tr>`).join('')}</tbody></table>` : `<div class="empty" style="padding:16px">${cols.length ? 'No leads match these options.' : 'Pick at least one column.'}</div>`}</div></div>
+   </div>
+   <div class="xm-f"><div class="xm-file"><input class="input" id="x-file" value="${esc(XP.file || defaultFile())}" aria-label="File name"><span>.${XP.fmt}</span></div>
+     <span class="xm-count num"><b>${fmt(rows.length)}</b> rows</span>
+     <button class="btn" data-xact="copy" ${rows.length && cols.length ? '' : 'disabled'}>${ic('copy', 14)}Copy</button><button class="btn primary" data-xact="download" ${rows.length && cols.length ? '' : 'disabled'}>${ic('download', 14)}Download</button></div>
   </div></div>`;
 }
 function delimited(sep) {
@@ -1055,6 +1058,10 @@ document.addEventListener('click', async (e) => {
   if ((v = ds('lsel')) !== undefined) { e.stopPropagation(); const id = +v; L$.sel.has(id) ? L$.sel.delete(id) : L$.sel.add(id); renderSel(); renderRows(); return; }
   if ((v = ds('lead')) !== undefined) { leadDrawer(+v); return; }
   if ((v = ds('xpreset')) !== undefined) { XP.preset = v; XP.cols = new Set(XPRESETS[v]); XP.file = $('#x-file').value; exportModal(); return; }
+  if ((v = ds('xscopebtn')) !== undefined) { XP.scope = v; XP.file = ''; exportModal(); return; }
+  if ((v = ds('xtog')) !== undefined) { XP[v] = !XP[v]; XP.file = $('#x-file').value; exportModal(); return; }
+  if ((v = ds('xpfmt')) !== undefined) { XP.pfmt = v; XP.file = $('#x-file').value; exportModal(); return; }
+  if ((v = ds('xcustom')) !== undefined) { XP.custom = !XP.custom; XP.file = $('#x-file').value; exportModal(); return; }
   if ((v = ds('xfmt')) !== undefined) { XP.fmt = v; XP.file = $('#x-file').value; exportModal(); return; }
   if ((v = ds('xact')) !== undefined) { doExport(v); return; }
   if ((v = ds('ckgo')) !== undefined) { startCheck(v.split(',').map(Number)); return; }
