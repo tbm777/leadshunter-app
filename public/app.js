@@ -646,7 +646,7 @@ const RAD = { mi: [[0, 'City only'], [10, '+ 10 mi'], [25, '+ 25 mi'], [50, '+ 5
 const PRAD = { mi: [[5, '5 mi around'], [10, '10 mi around'], [25, '25 mi around']], km: [[8, '8 km around'], [15, '15 km around'], [40, '40 km around']] };
 const COUNTRY = { US: { name: 'United States', unit: 'mi', rw: 'state', ph: 'City, state or ZIP code' }, CA: { name: 'Canada', unit: 'km', rw: 'province', ph: 'City, province or postal code' }, AU: { name: 'Australia', unit: 'km', rw: 'state', ph: 'City, state or postcode' }, AE: { name: 'UAE', unit: 'km', rw: 'emirate', ph: 'City or emirate' } };
 const LIMITS = [100, 250, 500, 1000, 0];
-const FS = { ind: null, terms: new Set(), extra: [], country: 'US', locs: [], q: '', open: false, hi: 0, items: [], name: '', nameEdited: false, paste: false, pasteMsg: '', limit: 500, depth: 2, emails: false, showTerms: false, busy: false, allHist: false, minRev: 0, maxRev: null, countryMenu: false, editName: false, website: 'any', form: 'any' };
+const FS = { ind: null, terms: new Set(), extra: [], country: 'US', locs: [], q: '', open: false, hi: 0, items: [], name: '', nameEdited: false, paste: false, pasteMsg: '', limit: 500, depth: 0, emails: false, showTerms: false, busy: false, allHist: false, minRev: 0, maxRev: null, countryMenu: false, editName: false, website: 'yes', form: 'any' };
 const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 async function loadPlaces() {
   if (ST.places) return ST.places;
