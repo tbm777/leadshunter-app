@@ -1,0 +1,24 @@
+-- Default industries. Safe to run again.
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Decks & Patios', '["deck builder"]', '["Deck builder"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Dog Groomers', '["pet groomer"]', '["Pet groomer"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Electricians', '["electrician", "electrical contractor"]', '["Electrician", "Electrical installation service"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Floor & Carpet Cleaning', '["carpet cleaning service", "floor cleaning service"]', '["Carpet cleaning service", "Floor cleaning service"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Garage Door Companies', '["garage door repair"]', '["Garage door supplier", "Garage door repair service"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('General Contractors', '["general contractor"]', '["General contractor", "Construction company"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('HVAC Contractors', '["HVAC contractor", "air conditioning contractor", "heating contractor"]', '["HVAC contractor", "Air conditioning contractor", "Heating contractor", "Air conditioning repair service", "Furnace repair service"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Handyman', '["handyman"]', '["Handyman/Handywoman/Handyperson", "Handyman"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Hardscaping', '["landscape designer"]', '["Landscape designer", "Landscaper"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('House Cleaners', '["house cleaning service", "maid service"]', '["House cleaning service", "Maid service", "Cleaning service"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Landscapers', '["landscaper", "lawn care service"]', '["Landscaper", "Lawn care service"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Movers', '["moving company", "moving service"]', '["Moving company", "Mover", "Moving and storage service"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Painters', '["painting contractor", "house painter"]', '["Painter", "Painting contractor", "House painter"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Paving', '["paving contractor", "asphalt contractor"]', '["Paving contractor", "Asphalt contractor"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Pest Control Companies', '["pest control service", "exterminator"]', '["Pest control service", "Exterminator"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Plumbers', '["plumber", "plumbing contractor"]', '["Plumber", "Plumbing contractor"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Pool Construction', '["swimming pool contractor"]', '["Swimming pool contractor"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Pressure Washing', '["pressure washing service"]', '["Pressure washing service"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Remodeling', '["remodeler", "kitchen remodeler", "bathroom remodeler"]', '["Remodeler", "Kitchen remodeler", "Bathroom remodeler"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Roofers', '["roofing company", "roofer", "roofing contractor"]', '["Roofing contractor", "Roofer"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Siding', '["siding contractor"]', '["Siding contractor"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Tree Service', '["tree service"]', '["Tree service"]', 1795700000000);
+INSERT OR IGNORE INTO industries (name, terms, categories, created_at) VALUES ('Windows & Doors', '["window installation service"]', '["Window installation service", "Window supplier", "Door supplier"]', 1795700000000);

@@ -1,0 +1,13 @@
+{
+  "name": "leadshunter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "dev": "wrangler dev",
+    "build:geo": "node scripts/build-geo.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "3.114.17"
+  }
+}

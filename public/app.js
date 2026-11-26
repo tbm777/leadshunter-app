@@ -1,0 +1,1128 @@
+// LeadsHunter web app (phase 1: leads). Plain ES modules, no build step.
+import { buildCells, cityRadiusKm } from './shared/grid.js';
+
+/* ================================================================ basics */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const fmt = n => (+n || 0).toLocaleString('en-US');
+const TZ = 'America/Los_Angeles';
+const dateFmt = new Intl.DateTimeFormat('en-US', { timeZone: TZ, month: 'short', day: 'numeric' });
+const timeFmt = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' });
+const dayKey = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
+function whenPT(ms) {
+  if (!ms) return '';
+  const d = new Date(ms), today = dayKey.format(new Date()), yest = dayKey.format(new Date(Date.now() - 864e5)), k = dayKey.format(d);
+  return `${k === today ? 'Today' : k === yest ? 'Yesterday' : dateFmt.format(d)}, ${timeFmt.format(d)} PT`;
+}
+function dayPT(ms) {
+  if (!ms) return '—';
+  const k = dayKey.format(new Date(ms));
+  return k === dayKey.format(new Date()) ? 'Today' : k === dayKey.format(new Date(Date.now() - 864e5)) ? 'Yesterday' : dateFmt.format(new Date(ms));
+}
+const P = {
+  find: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  leads: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c1.8.7 3 2.5 3.5 5.2"/>',
+  campaigns: '<path d="M21 3 10 14"/><path d="M21 3l-7 18-4-7-7-4z"/>',
+  manual: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="m9 13 2 2 4-4"/>',
+  messages: '<path d="M4 5h16v11H8l-4 4z"/><path d="M8 9h8M8 12h5"/>',
+  senders: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2.2"/><path d="M5.5 16c.6-1.6 1.9-2.4 3.5-2.4s2.9.8 3.5 2.4M15 10h3M15 13h3"/>',
+  industries: '<path d="M3 21h18M5 21V10l5-3v14M10 21V8l9-4v17M14 9h2M14 13h2M14 17h2"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', check: '<path d="m5 12 5 5 9-10"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',
+  ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5v.5"/>', globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>',
+  shield: '<path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"/>', filter: '<path d="M4 5h16l-6 8v6l-4-2v-4z"/>',
+  download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>', arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  back: '<path d="M19 12H5M11 6l-6 6 6 6"/>', play: '<path d="M7 4v16l13-8z"/>', logout: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h11"/>',
+};
+const ic = (n, s = 16) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n] || ''}</svg>`;
+const FLAGS = {
+  US: '<rect width="30" height="20" fill="#B22234"/><path d="M0 2.3h30M0 5.4h30M0 8.5h30M0 11.5h30M0 14.6h30M0 17.7h30" stroke="#fff" stroke-width="1.54"/><rect width="13" height="10.8" fill="#3C3B6E"/>',
+  CA: '<rect width="30" height="20" fill="#fff"/><rect width="7.5" height="20" fill="#D52B1E"/><rect x="22.5" width="7.5" height="20" fill="#D52B1E"/><path d="M15 3.6l1.1 2.3 1.5-.7-.5 3.4 2-1.8.6 1.3 1.8-.4-.6 2.1 1 .6-3.4 2.6.5 1.4-3-.5v2.6h-.9v-2.6l-3 .5.5-1.4-3.4-2.6 1-.6-.6-2.1 1.8.4.6-1.3 2 1.8-.5-3.4 1.5.7z" fill="#D52B1E"/>',
+  MA: '<rect width="30" height="20" fill="#C1272D"/><path d="M15 5.6L17.75 14.05L10.55 8.83H19.45L12.25 14.05Z" fill="none" stroke="#006233" stroke-width="1" stroke-linejoin="round"/>',
+};
+const flag = (c, w = 20) => FLAGS[c] ? `<svg class="flag" width="${w}" height="${Math.round(w * 2 / 3)}" viewBox="0 0 30 20" aria-hidden="true">${FLAGS[c]}</svg>` : '';
+function toast(msg, icon = 'check') {
+  const t = $('#toast'); t.innerHTML = ic(icon, 15) + `<span>${esc(msg)}</span>`; t.classList.add('show');
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 3200);
+}
+const closeOverlay = () => { $('#overlay').innerHTML = ''; };
+
+/* ================================================================ API */
+class ApiError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
+async function api(method, path, body) {
+  let res;
+  try {
+    res = await fetch(path, { method, credentials: 'same-origin', headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  } catch {
+    throw new ApiError(0, 'You appear to be offline. Check your connection and try again.');
+  }
+  if (res.status === 401 && path !== '/api/login') { showLogin(); throw new ApiError(401, 'Please sign in.'); }
+  if (res.status === 204) return null;
+  let data = {};
+  try { data = await res.json(); } catch { /* not json */ }
+  if (!res.ok) throw new ApiError(res.status, data.error || `Request failed (${res.status}).`);
+  return data;
+}
+
+/* ================================================================ state */
+const ST = { industries: [], searches: [], config: {}, cols: [], leads: [], byId: new Map(), seq: 0, views: [], places: null, postal: {}, syncing: false, lastSync: 0 };
+const SS = ['Loads', 'Slow (over 5 s)', 'Down', 'Not checked yet', 'No website', 'Blocked us', 'Parked or for sale', 'Social media page'];
+const SS_SHORT = ['Loads', 'Slow', 'Down', 'Not checked', '', 'Blocked us', 'Parked', 'Social page'];
+const SS_C = ['ok', 'warn', 'bad', 'faint', 'faint', 'warn', 'faint', 'faint'];
+const FM = ['Open form', 'CAPTCHA', 'No form found', 'Not checked yet', 'Needs browser check'];
+const PF = ['WordPress', 'Wix', 'Squarespace', 'Webflow', 'GoDaddy', 'Shopify', 'Duda', 'Weebly', 'HubSpot', 'Custom', 'Not checked'];
+const LS = ['New', 'In campaign', 'Contacted', 'Do not contact'];
+const LS_C = ['', 'info', 'ok', 'bad'];
+const LOCS = [];            // "City, Region" strings
+const LOC_IDX = new Map();
+function locKey(l) { const k = [l.city, l.region].filter(Boolean).join(', ') || l.country || 'Unknown'; let i = LOC_IDX.get(k); if (i === undefined) { i = LOCS.length; LOCS.push(k); LOC_IDX.set(k, i); } return i; }
+
+function rowToLead(row) {
+  const o = {};
+  ST.cols.forEach((c, i) => { o[c] = row[i]; });
+  o.k = ((o.name || '') + ' ' + (o.website || '') + ' ' + (o.phone || '').replace(/\D/g, '')).toLowerCase();
+  o.li = locKey(o);
+  o.pf = o.platform ? Math.max(0, PF.indexOf(o.platform)) : 10;
+  if (o.platform && PF.indexOf(o.platform) < 0) o.pf = 9;
+  o.dom = o.website ? o.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '') : '';
+  return o;
+}
+function applyRows(cols, rows) {
+  if (cols) ST.cols = cols;
+  let changed = 0;
+  for (const r of rows) {
+    const l = rowToLead(r);
+    const prev = ST.byId.get(l.id);
+    if (l.deleted) { if (prev) { ST.byId.delete(l.id); changed++; } continue; }
+    ST.byId.set(l.id, l);
+    changed++;
+    if (l.seq > ST.seq) ST.seq = l.seq;
+  }
+  if (changed) ST.leads = [...ST.byId.values()];
+  return changed;
+}
+
+/* ================================================================ local storage (IndexedDB cache) */
+const DB_NAME = 'leadshunter', DB_VER = 1, CACHE_VER = 3;
+function idb() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME, DB_VER);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function cacheGet(key) {
+  try { const db = await idb(); return await new Promise((res) => { const q = db.transaction('kv').objectStore('kv').get(key); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); } catch { return null; }
+}
+async function cacheSet(key, val) {
+  try { const db = await idb(); await new Promise((res) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(val, key); tx.oncomplete = res; tx.onerror = res; }); } catch { /* storage unavailable: app still works, it just downloads again next time */ }
+}
+let saveTimer = 0;
+function saveCacheSoon() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    const rows = ST.leads.map(l => ST.cols.map(c => l[c]));
+    cacheSet('leads', { v: CACHE_VER, cols: ST.cols, rows, seq: ST.seq });
+  }, 800);
+}
+
+/* ================================================================ sync */
+const bc = 'BroadcastChannel' in window ? new BroadcastChannel('leadshunter') : null;
+bc && (bc.onmessage = (e) => { if (e.data === 'changed') sync(); });
+
+async function loadSnapshot() {
+  const res = await fetch('/api/snapshot', { credentials: 'same-origin' });
+  if (res.status === 401) { showLogin(); return false; }
+  if (res.status !== 200 || !res.body || !('DecompressionStream' in window)) return false;
+  const text = await new Response(res.body.pipeThrough(new DecompressionStream('gzip'))).text();
+  const snap = JSON.parse(text);
+  ST.byId.clear(); ST.seq = 0;
+  applyRows(snap.cols, snap.rows);
+  ST.seq = Math.max(ST.seq, snap.seq || 0);
+  return true;
+}
+async function sync({ quiet = true } = {}) {
+  if (ST.syncing) return;
+  ST.syncing = true;
+  setSync('busy');
+  try {
+    let total = 0, more = true, guard = 0;
+    while (more && guard++ < 200) {
+      const r = await api('GET', `/api/changes?since=${ST.seq}&limit=5000`);
+      total += applyRows(r.cols, r.rows);
+      ST.seq = Math.max(ST.seq, r.seq);
+      more = r.more;
+    }
+    ST.lastSync = Date.now();
+    if (total) { saveCacheSoon(); onLeadsChanged(); bc && bc.postMessage('changed'); }
+    if (!quiet) toast(total ? `${fmt(total)} lead${total === 1 ? '' : 's'} updated` : 'Up to date');
+    setSync('ok');
+  } catch (e) {
+    setSync('error', e.message);
+    if (!quiet) toast(e.message, 'alert');
+  } finally { ST.syncing = false; }
+}
+function setSync(state, msg) {
+  const b = $('#syncbtn'); if (!b) return;
+  b.classList.toggle('busy', state === 'busy');
+  b.classList.toggle('err', state === 'error');
+  b.querySelector('span').textContent = state === 'busy' ? 'Syncing…' : state === 'error' ? 'Sync failed, retry' : `Synced ${ST.lastSync ? timeFmt.format(new Date(ST.lastSync)) : ''}`;
+  b.title = msg || 'Leads are stored in this browser and kept in sync';
+}
+async function initLeads() {
+  const cached = await cacheGet('leads');
+  if (cached && cached.v === CACHE_VER && Array.isArray(cached.rows)) {
+    ST.byId.clear(); applyRows(cached.cols, cached.rows); ST.seq = cached.seq || ST.seq;
+  } else {
+    try { await loadSnapshot(); } catch (e) { console.warn('Snapshot unavailable', e); }
+  }
+  onLeadsChanged();
+  await sync();
+  saveCacheSoon();
+}
+
+/* ================================================================ shell */
+const NAV = [
+  ['leads', 'Leads', 'leads'], ['find', 'Find leads', 'find'], ['industries', 'Industries', 'industries'],
+];
+const SOON = [['Campaigns', 'campaigns'], ['Manual queue', 'manual'], ['Messages', 'messages'], ['Sender profiles', 'senders']];
+function shell() {
+  $('#root').innerHTML = `<div class="app">
+    <aside class="rail">
+      <div class="brand"><div class="brand-mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></div><div><b>LeadsHunter</b><small>Outreach workspace</small></div></div>
+      <nav class="nav" id="nav"></nav>
+      <div class="usage" style="gap:8px"><h4>This browser</h4><p id="railcount">—</p><button class="btn ghost sm" data-act="logout" style="justify-content:flex-start;color:var(--rail-ink);padding-left:0">${ic('logout', 14)}Sign out</button></div>
+      <div class="attrib">Place data © <a href="https://www.geonames.org" target="_blank" rel="noopener">GeoNames</a> (CC BY 4.0)</div>
+    </aside>
+    <div class="main">
+      <header class="top"><div class="crumbs" id="crumbs"></div><span class="clock num" id="clock" style="margin-left:auto"></span><button class="iconbtn" data-act="theme" id="themebtn" aria-label="Switch light or dark theme"></button></header>
+      <main class="page" id="page"></main>
+    </div></div>`;
+  applyTheme(themeGet());
+  tickClock();
+}
+function renderNav(active) {
+  $('#nav').innerHTML = `<div class="nav-label">Leads</div>` + NAV.map(([id, label, icon]) => `<a href="#${id}" class="${active === id ? 'on' : ''}">${ic(icon)}${label}${id === 'leads' ? `<span class="count">${ST.leads.length >= 1000 ? (ST.leads.length / 1000).toFixed(ST.leads.length >= 10000 ? 0 : 1) + 'k' : ST.leads.length}</span>` : ''}</a>`).join('')
+    + `<div class="nav-label">Outreach</div>` + SOON.map(([l, i]) => `<a class="soon" aria-disabled="true">${ic(i)}${l}<small>Next</small></a>`).join('');
+  const rc = $('#railcount'); if (rc) rc.textContent = `${fmt(ST.leads.length)} leads stored here, so filtering is instant and free.`;
+}
+function tickClock() { const c = $('#clock'); if (c) c.textContent = timeFmt.format(new Date()) + ' PT'; }
+setInterval(tickClock, 30000);
+const themeGet = () => { try { return localStorage.getItem('lh-theme') || 'system'; } catch { return 'system'; } };
+function applyTheme(t) {
+  const r = document.documentElement;
+  if (t === 'system') delete r.dataset.theme; else r.dataset.theme = t;
+  const b = $('#themebtn'); if (b) { b.textContent = t === 'dark' ? '☾' : t === 'light' ? '☀' : '◐'; b.title = 'Theme: ' + t; }
+}
+
+function showLogin(msg) {
+  stopPolling();
+  $('#root').innerHTML = `<div class="login"><form id="loginform">
+    <div class="brand" style="padding:0"><div class="brand-mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/></svg></div></div>
+    <div><h1>Sign in to LeadsHunter</h1><p>Use the app password you set in GitHub.</p></div>
+    <div class="field"><label class="flabel" for="pw">Password</label><input class="input big" id="pw" type="password" autocomplete="current-password" required></div>
+    <div class="help" id="loginerr" style="color:var(--bad)">${esc(msg || '')}</div>
+    <button class="btn primary" style="justify-content:center;padding:11px" type="submit">Sign in</button></form></div>`;
+  setTimeout(() => $('#pw')?.focus(), 0);
+}
+document.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'loginform') return;
+  e.preventDefault();
+  const btn = e.target.querySelector('button'); btn.disabled = true;
+  try { await api('POST', '/api/login', { password: $('#pw').value }); await boot(); }
+  catch (err) { $('#loginerr').textContent = err.message; btn.disabled = false; }
+});
+
+/* ================================================================ router */
+const TITLES = { leads: 'Leads', find: 'Find leads', industries: 'Industries' };
+const V = {}, MOUNT = {};
+function render() {
+  const view = (location.hash || '#leads').slice(1);
+  const v = V[view] ? view : 'leads';
+  renderNav(v);
+  $('#crumbs').innerHTML = `<span>Workspace</span><span>›</span><b>${TITLES[v]}</b>`;
+  $('#page').innerHTML = V[v]();
+  MOUNT[v] && MOUNT[v]();
+}
+window.addEventListener('hashchange', () => { closeOverlay(); render(); window.scrollTo(0, 0); });
+function onLeadsChanged() {
+  renderNav((location.hash || '#leads').slice(1));
+  if ($('#vt')) { L$.viewCounts = null; leadsUpdate(); }
+  if ($('#ind-table')) $('#ind-table').outerHTML = industriesTable();
+}
+
+/* ================================================================ leads page */
+const defaultF = () => ({ ind: new Set(), loc: new Set(), rMin: 1, rMax: 5, noRating: true, vMin: 0, vMax: Infinity, web: 'any', site: new Set(), form: new Set(), pf: new Set(), ph: 'any', em: 'any', st: new Set(), add: 0, src: new Set(), hideClosed: true, q: '' });
+const L$ = { F: defaultF(), view: null, openDD: null, ddq: '', sort: 'reviews', sel: new Set(), res: [], C: null, ms: 0, fopen: false };
+const RV_STOPS = [0, 1, 10, 25, 50, 100, 250, 500, 1000, Infinity];
+const ROWH = 54;
+
+function facetArrays() {
+  return { 0: new Map(), 1: new Int32Array(LOCS.length), 2: new Int32Array(8), 3: new Int32Array(9), 4: new Int32Array(2), 5: new Int32Array(8), 6: new Int32Array(5), 7: new Int32Array(PF.length), 8: new Int32Array(2), 9: new Int32Array(2), 10: new Int32Array(4), 12: new Map() };
+}
+function runFilter() {
+  const t0 = performance.now(), F = L$.F, q = F.q.trim().toLowerCase();
+  const C = facetArrays(), res = [], now = Date.now();
+  const addMs = F.add ? F.add * 864e5 : 0;
+  for (const L of ST.leads) {
+    let n = 0, g = -1;
+    if (F.ind.size && !F.ind.has(L.industry_id)) { n++; g = 0; }
+    if (F.loc.size && !F.loc.has(L.li)) { n++; g = 1; }
+    if (L.rating == null ? !F.noRating : (L.rating < F.rMin - 1e-9 || L.rating > F.rMax + 1e-9)) { n++; g = 2; }
+    if (L.reviews < F.vMin || L.reviews > F.vMax) { n++; g = 3; }
+    if (F.web !== 'any' && ((F.web === 'yes') !== !!L.website)) { n++; g = 4; }
+    if (F.site.size && !F.site.has(L.site_status)) { n++; g = 5; }
+    if (F.form.size && !F.form.has(L.form_status)) { n++; g = 6; }
+    if (F.pf.size && !F.pf.has(L.pf)) { n++; g = 7; }
+    if (F.ph !== 'any' && ((F.ph === 'yes') !== !!L.phone)) { n++; g = 8; }
+    if (F.em !== 'any' && ((F.em === 'yes') !== !!L.email)) { n++; g = 9; }
+    if (F.st.size && !F.st.has(L.status)) { n++; g = 10; }
+    if (addMs && now - L.created_at > addMs) { n++; g = 11; }
+    if (F.src.size && !F.src.has(L.search_id)) { n++; g = 12; }
+    if (F.hideClosed && L.closed) { n++; g = 13; }
+    if (q && !L.k.includes(q)) { n++; g = 14; }
+    if (n > 1) continue;
+    const all = n === 0;
+    if (all) res.push(L);
+    if (all || g === 0) C[0].set(L.industry_id, (C[0].get(L.industry_id) || 0) + 1);
+    if (all || g === 1) C[1][L.li]++;
+    if ((all || g === 2) && L.rating != null) C[2][Math.max(0, Math.min(7, Math.floor((L.rating - 1) / 0.5)))]++;
+    if (all || g === 3) { let b = 0; while (L.reviews >= RV_STOPS[b + 1]) b++; C[3][b]++; }
+    if (all || g === 4) C[4][L.website ? 1 : 0]++;
+    if (all || g === 5) C[5][L.site_status]++;
+    if (all || g === 6) C[6][L.form_status]++;
+    if (all || g === 7) C[7][L.pf]++;
+    if (all || g === 8) C[8][L.phone ? 1 : 0]++;
+    if (all || g === 9) C[9][L.email ? 1 : 0]++;
+    if (all || g === 10) C[10][L.status]++;
+    if (all || g === 12) C[12].set(L.search_id, (C[12].get(L.search_id) || 0) + 1);
+  }
+  const s = L$.sort;
+  res.sort(s === 'reviews' ? (a, b) => b.reviews - a.reviews : s === 'rating' ? (a, b) => ((b.rating || 0) - (a.rating || 0)) || b.reviews - a.reviews
+    : s === 'name' ? (a, b) => a.name.localeCompare(b.name) : (a, b) => b.created_at - a.created_at);
+  L$.res = res; L$.C = C; L$.ms = performance.now() - t0;
+}
+
+V.leads = () => `
+  <div class="head"><div><div class="eyebrow">CRM</div><h1>Leads</h1><p>Every business you've found and checked. Filtering runs in your browser, so it's instant and doesn't touch your Cloudflare limits.</p></div>
+    <div class="row"><button class="syncbtn" data-act="sync" id="syncbtn"><i></i><span>Synced</span></button><button class="btn" data-act="export">${ic('download')}Export</button><a class="btn" href="#find">${ic('find')}Find leads</a></div></div>
+  <div class="views" id="lv-views"></div>
+  <div class="lgrid">
+    <aside class="card fpanel ${L$.fopen ? 'open' : ''}" id="lf-panel"></aside>
+    <div class="card lmain">
+      <div class="lsum" id="lf-sum"></div>
+      <div class="ltool"><button class="btn sm fbtn" data-act="fopen">${ic('filter', 14)}Filters</button>
+        <div class="lsearch">${ic('find', 15)}<input id="lq" placeholder="Search by name, website or phone" value="${esc(L$.F.q)}" autocomplete="off"></div>
+        <label class="row" style="gap:6px;color:var(--muted);font-size:12.5px" for="lsort">Sort<select class="input" id="lsort" style="width:auto;padding:5px 8px">${[['reviews', 'Most reviews'], ['rating', 'Highest rating'], ['added', 'Newest first'], ['name', 'Name A–Z']].map(([v, l]) => `<option value="${v}" ${L$.sort === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <span class="lperf" id="lperf"></span></div>
+      <div id="lf-selbar"></div>
+      <div class="vt" id="vt"><div class="vt-in">
+        <div class="vrow vhead"><div><span class="cb" data-act="selall" id="cb-all"></span></div><div><button class="sorth" data-sortcol="name">Business<i></i></button></div><div><button class="sorth" data-sortcol="rating">Rating<i></i></button></div><div>Website</div><div>Form</div><div class="c-ph">Phone</div><div class="c-st">Status</div></div>
+        <div class="vbody" id="vt-body"></div></div></div>
+    </div>
+  </div>`;
+MOUNT.leads = () => {
+  leadsUpdate();
+  setSync(ST.syncing ? 'busy' : 'ok');
+  $('#vt').addEventListener('scroll', () => { if (!L$.raf) L$.raf = requestAnimationFrame(() => { L$.raf = 0; renderRows(); }); });
+};
+function leadsUpdate(panel = true) {
+  runFilter();
+  if (panel) renderPanel();
+  renderViews(); renderSum(); renderSel();
+  $('#vt-body').style.height = (L$.res.length * ROWH) + 'px';
+  renderRows();
+}
+function changed(panel = true) { L$.view = null; leadsUpdate(panel); }
+function renderViews() {
+  const el = $('#lv-views'); if (!el) return;
+  el.hidden = !ST.views.length; if (el.hidden) return;
+  el.innerHTML = `<span class="savedlbl">Saved views</span><button class="vbtn ${L$.view === 'all' ? 'on' : ''}" data-view="all">All leads</button>` +
+    ST.views.map(v => `<span class="vwrap"><button class="vbtn ${L$.view === v.id ? 'on' : ''}" data-view="${v.id}">${esc(v.name)}</button><button class="vdel" data-viewdel="${v.id}" aria-label="Delete view ${esc(v.name)}">${ic('x', 12)}</button></span>`).join('');
+}
+function withFocus(fn) {
+  const a = document.activeElement, id = a && a.id, ss = a && a.selectionStart, pt = $('#lf-panel')?.scrollTop;
+  fn();
+  const p = $('#lf-panel'); if (p && pt != null) p.scrollTop = pt;
+  if (id) { const n = document.getElementById(id); if (n && n !== document.activeElement) { n.focus(); try { if (ss != null) n.setSelectionRange(ss, ss); } catch { /* not a text field */ } } }
+}
+function industryName(id) { return ST.industries.find(i => i.id === id)?.name || 'Other'; }
+function searchName(id) { const s = ST.searches.find(x => x.id === id); return s ? s.name : `Search #${id}`; }
+function ddOpts(key) {
+  const C = L$.C;
+  if (key === 'ind') { const ids = new Set([...ST.industries.map(i => i.id), ...C[0].keys()]); return [...ids].map(id => ({ v: id, l: industryName(id), n: C[0].get(id) || 0 })).filter(o => o.n || !ST.industries.find(i => i.id === o.v)?.archived).sort((a, b) => a.l.localeCompare(b.l)); }
+  if (key === 'loc') return LOCS.map((l, i) => ({ v: i, l, n: C[1][i] })).filter(o => o.n || L$.F.loc.has(o.v)).sort((a, b) => b.n - a.n);
+  if (key === 'site') return SS.map((l, i) => ({ v: i, l, n: C[5][i] }));
+  if (key === 'form') return FM.map((l, i) => ({ v: i, l, n: C[6][i] }));
+  if (key === 'pf') return PF.map((l, i) => ({ v: i, l, n: C[7][i] }));
+  if (key === 'st') return LS.map((l, i) => ({ v: i, l, n: C[10][i] }));
+  if (key === 'src') { const ids = [...C[12].keys()]; return ids.map(id => ({ v: id, l: searchName(id), n: C[12].get(id) || 0, sub: dayPT(ST.searches.find(s => s.id === id)?.created_at) })).sort((a, b) => b.v - a.v); }
+  return [];
+}
+function dd(key, label, allText) {
+  const sel = L$.F[key], opts = ddOpts(key), open = L$.openDD === key;
+  const chosen = opts.filter(o => sel.has(o.v));
+  const txt = !chosen.length ? allText : chosen.length === 1 ? chosen[0].l : chosen[0].l + ` + ${chosen.length - 1} more`;
+  const q = L$.ddq.toLowerCase(), list = opts.filter(o => !q || o.l.toLowerCase().includes(q)).slice(0, 300);
+  return `<div class="field dd"><span class="flabel">${label}</span><button class="dd-btn ${chosen.length ? 'set' : ''}" data-dd="${key}" aria-expanded="${open}"><span>${esc(txt)}</span>${chosen.length ? `<b class="dd-n">${chosen.length}</b>` : ''}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button>
+    ${open ? `<div class="dd-pop">${opts.length > 6 ? `<input class="input" id="ddq-${key}" placeholder="Search ${label.toLowerCase()}" value="${esc(L$.ddq)}" autocomplete="off">` : ''}
+      <div class="dd-list">${list.map(o => `<div class="dd-opt ${o.n ? '' : 'zero'}" data-ddopt="${key}:${o.v}" role="checkbox" aria-checked="${sel.has(o.v)}" tabindex="0"><span class="cb ${sel.has(o.v) ? 'on' : ''}"></span><span class="dd-l">${esc(o.l)}${o.sub ? `<small>${esc(o.sub)}</small>` : ''}</span><span class="cnt">${fmt(o.n)}</span><button class="only" data-ddonly="${key}:${o.v}">Only</button></div>`).join('') || '<div class="empty" style="padding:14px">Nothing here yet</div>'}</div>
+      <div class="dd-foot"><button class="btn ghost sm" data-ddclear="${key}">Clear</button><button class="btn sm" data-dd="${key}">Done</button></div></div>` : ''}</div>`;
+}
+function selF(key, label, opts, counts) {
+  return `<div class="field"><label class="flabel" for="fs-${key}">${label}</label><select class="input" id="fs-${key}" data-fsel="${key}">${opts.map(([v, l, ci]) => `<option value="${v}" ${String(L$.F[key]) === String(v) ? 'selected' : ''}>${l}${counts && ci != null ? ` (${fmt(counts[ci])})` : ''}</option>`).join('')}</select></div>`;
+}
+const rvIdxMin = v => { let k = 0; while (k < 8 && RV_STOPS[k + 1] <= v) k++; return k; };
+const rvIdxMax = v => { if (v === Infinity) return 9; let k = 1; while (k < 9 && RV_STOPS[k] - 1 < v) k++; return k; };
+function rngRating() {
+  const F = L$.F, h = L$.C[2], mx = Math.max(...h, 1), p = v => ((v - 1) / 4 * 100);
+  return `<div class="rng"><div class="rng-top"><span>Rating</span><span class="num">${F.rMin.toFixed(1)} – ${F.rMax.toFixed(1)} ★</span></div>
+    <div class="hist">${[...h].map((n, b) => { const lo = 1 + b * 0.5; return `<i class="${lo + 0.5 > F.rMin && lo < F.rMax ? 'in' : ''}" style="height:${Math.max(4, n / mx * 100)}%" title="${lo.toFixed(1)}–${(lo + 0.5).toFixed(1)}: ${fmt(n)}"></i>`; }).join('')}</div>
+    <div class="dual"><div class="track"></div><div class="fill" id="fill-rt" style="left:${p(F.rMin)}%;right:${100 - p(F.rMax)}%"></div><input type="range" aria-label="Minimum rating" min="1" max="5" step="0.1" value="${F.rMin}" data-rng="rMin"><input type="range" aria-label="Maximum rating" min="1" max="5" step="0.1" value="${F.rMax}" data-rng="rMax"></div>
+    <div class="rng-in"><input class="input num" type="number" id="n-rMin" min="1" max="5" step="0.1" value="${F.rMin.toFixed(1)}" data-num="rMin" aria-label="Minimum rating"><span>to</span><input class="input num" type="number" id="n-rMax" min="1" max="5" step="0.1" value="${F.rMax.toFixed(1)}" data-num="rMax" aria-label="Maximum rating"></div>
+    <label class="ck"><input type="checkbox" data-fchk="noRating" ${F.noRating ? 'checked' : ''}>Include businesses with no reviews yet</label></div>`;
+}
+function rngReviews() {
+  const F = L$.F, h = L$.C[3], mx = Math.max(...h, 1), a = rvIdxMin(F.vMin), b = rvIdxMax(F.vMax);
+  const lbl = F.vMax === Infinity ? (F.vMin ? fmt(F.vMin) + '+' : 'Any') : fmt(F.vMin) + ' – ' + fmt(F.vMax);
+  return `<div class="rng"><div class="rng-top"><span>Reviews</span><span class="num">${lbl}</span></div>
+    <div class="hist">${[...h].map((n, k) => `<i class="${k >= a && k < b ? 'in' : ''}" style="height:${Math.max(4, n / mx * 100)}%" title="${RV_STOPS[k]}${k === 8 ? '+' : '–' + (RV_STOPS[k + 1] - 1)}: ${fmt(n)}"></i>`).join('')}</div>
+    <div class="dual"><div class="track"></div><div class="fill" id="fill-rv" style="left:${a / 9 * 100}%;right:${100 - b / 9 * 100}%"></div><input type="range" aria-label="Minimum reviews" min="0" max="9" step="1" value="${a}" data-rng="vMin"><input type="range" aria-label="Maximum reviews" min="0" max="9" step="1" value="${b}" data-rng="vMax"></div>
+    <div class="hist-l"><span>0</span><span>10</span><span>50</span><span>250</span><span>1k+</span></div>
+    <div class="rng-in"><input class="input num" type="number" id="n-vMin" min="0" value="${F.vMin}" data-num="vMin" aria-label="Minimum reviews"><span>to</span><input class="input num" type="number" id="n-vMax" min="0" placeholder="No max" value="${F.vMax === Infinity ? '' : F.vMax}" data-num="vMax" aria-label="Maximum reviews"></div></div>`;
+}
+function activeCount() { const F = L$.F, d = defaultF(); let n = 0; for (const k of Object.keys(d)) { if (k === 'q') continue; const a = F[k], b = d[k]; if (a instanceof Set ? a.size : a !== b) n++; } return n; }
+function renderPanel() {
+  const el = $('#lf-panel'); if (!el) return; const C = L$.C;
+  withFocus(() => {
+    el.innerHTML = `<div class="fp-h"><b>Filters${activeCount() ? ` <span class="dd-n">${activeCount()}</span>` : ''}</b><button class="btn ghost sm" data-act="reset" ${activeCount() ? '' : 'disabled'}>Reset all</button></div>
+    <div class="fp-sec"><h5>Business</h5>${dd('ind', 'Industry', 'All industries')}${dd('loc', 'Location', 'All locations')}${rngRating()}${rngReviews()}
+      ${selF('ph', 'Phone number', [['any', 'Any'], ['yes', 'Has phone', 1], ['no', 'No phone', 0]], C[8])}
+      <label class="ck"><input type="checkbox" data-fchk="hideClosed" ${L$.F.hideClosed ? 'checked' : ''}>Hide permanently closed businesses</label></div>
+    <div class="fp-sec"><h5>Website</h5>${selF('web', 'Website', [['any', 'Any'], ['yes', 'Has a website', 1], ['no', 'No website', 0]], C[4])}${dd('site', 'Site status', 'Any status')}${dd('pf', 'Platform', 'Any platform')}</div>
+    <div class="fp-sec"><h5>Contact</h5>${dd('form', 'Contact form', 'Any')}${selF('em', 'Email address', [['any', 'Any'], ['yes', 'Email found', 1], ['no', 'No email found', 0]], C[9])}</div>
+    <div class="fp-sec" style="border-bottom:0"><h5>Pipeline</h5>${dd('st', 'Lead status', 'Any status')}${dd('src', 'Found by search', 'Any search')}${selF('add', 'Date added', [[0, 'Any time'], [1, 'Last 24 hours'], [7, 'Last 7 days'], [30, 'Last 30 days']])}</div>`;
+  });
+}
+function summaryParts() {
+  const F = L$.F, p = [];
+  const names = (set, fn) => { const a = [...set].map(fn); return a.length > 2 ? a.slice(0, 2).join(', ') + ` + ${a.length - 2} more` : a.join(' or '); };
+  if (F.ind.size) p.push(names(F.ind, industryName));
+  if (F.loc.size) p.push('in ' + names(F.loc, i => LOCS[i]));
+  if (F.rMin > 1 || F.rMax < 5) p.push(`rated ${F.rMin.toFixed(1)}–${F.rMax.toFixed(1)}` + (F.noRating ? ' or unrated' : '')); else if (!F.noRating) p.push('has a rating');
+  if (F.vMin > 0 || F.vMax < Infinity) p.push(F.vMax === Infinity ? `${fmt(F.vMin)}+ reviews` : `${fmt(F.vMin)}–${fmt(F.vMax)} reviews`);
+  if (F.web !== 'any') p.push(F.web === 'yes' ? 'has a website' : 'no website');
+  if (F.site.size) p.push('site ' + names(F.site, i => SS[i].toLowerCase()));
+  if (F.pf.size) p.push('on ' + names(F.pf, i => PF[i]));
+  if (F.form.size) p.push(names(F.form, i => FM[i].toLowerCase()));
+  if (F.em !== 'any') p.push(F.em === 'yes' ? 'email found' : 'no email');
+  if (F.ph !== 'any') p.push(F.ph === 'yes' ? 'has phone' : 'no phone');
+  if (F.st.size) p.push('status ' + names(F.st, i => LS[i].toLowerCase()));
+  if (F.src.size) p.push(F.src.size === 1 ? `from “${searchName([...F.src][0])}”` : `from ${F.src.size} searches`);
+  if (F.add) p.push(F.add === 1 ? 'added in the last 24 hours' : `added in the last ${F.add} days`);
+  if (!F.hideClosed) p.push('including closed');
+  if (F.q.trim()) p.push(`matching “${F.q.trim()}”`);
+  return p;
+}
+function renderSum() {
+  const p = summaryParts();
+  $('#lf-sum').innerHTML = `<span><b class="big num">${fmt(L$.res.length)}</b> of ${fmt(ST.leads.length)} leads</span><span class="lsum-t">${esc(p.length ? p.join(' · ') : 'No filters applied')}</span>${p.length ? `<span class="row" style="margin-left:auto;gap:4px"><button class="btn ghost sm" data-act="saveview">${ic('plus', 13)}Save as view</button><button class="btn ghost sm" data-act="reset">Clear all</button></span>` : ''}`;
+  $('#lperf').textContent = ST.leads.length ? `Filtered ${fmt(ST.leads.length)} leads in ${Math.max(1, Math.round(L$.ms))} ms` : '';
+  const fb = document.querySelector('.fbtn'); if (fb) fb.innerHTML = ic('filter', 14) + 'Filters' + (activeCount() ? ` (${activeCount()})` : '');
+}
+function renderSel() {
+  for (const id of [...L$.sel]) if (!ST.byId.has(id)) L$.sel.delete(id);
+  const n = L$.sel.size, m = L$.res.length, allIn = m && n >= m && L$.res.every(l => L$.sel.has(l.id));
+  const cb = $('#cb-all'); if (cb) cb.className = 'cb ' + (allIn ? 'on' : n ? 'part' : '');
+  $('#lf-selbar').innerHTML = n ? `<div class="selbar"><b class="num">${fmt(n)} selected</b>${!allIn && m > n ? `<button class="linkbtn" data-act="selall">Select all ${fmt(m)} matching</button>` : ''}<button class="linkbtn" data-act="clearsel">Clear selection</button>
+    <div class="selacts"><button class="btn sm ghost" data-act="export">${ic('download', 14)}Export</button><button class="btn sm ghost" data-act="checkmodal">${ic('globe', 14)}Check websites</button><button class="btn sm ghost" data-act="bdnc">${ic('shield', 14)}Do not contact</button></div></div>` : '';
+}
+function renderRows() {
+  const vt = $('#vt'), body = $('#vt-body'); if (!vt || !body) return;
+  if (!ST.leads.length) {
+    body.style.height = '280px';
+    body.innerHTML = `<div class="empty" style="position:absolute;inset:0;display:grid;place-content:center;gap:8px"><b>No leads yet</b><span>Run your first search and businesses show up here as they're found.</span><a class="btn" href="#find" style="justify-self:center">${ic('find')}Find leads</a></div>`;
+    return;
+  }
+  const top = Math.max(0, vt.scrollTop - 38);
+  const a = Math.max(0, Math.floor(top / ROWH) - 8), b = Math.min(L$.res.length, Math.ceil((top + vt.clientHeight) / ROWH) + 8);
+  let h = '';
+  for (let r = a; r < b; r++) {
+    const L = L$.res[r], on = L$.sel.has(L.id);
+    h += `<div class="vrow ${on ? 'sel' : ''}" style="top:${r * ROWH}px" data-lead="${L.id}"><div><span class="cb ${on ? 'on' : ''}" data-lsel="${L.id}"></span></div>
+      <div class="cell2"><div class="biz">${esc(L.name)}${L.closed ? ' <span class="tagc">Closed</span>' : ''}</div><div class="sub">${esc(LOCS[L.li])} <span class="dotsep">·</span> ${esc(industryName(L.industry_id))}</div></div>
+      <div class="cell2 num">${L.rating == null ? '<span class="none">No reviews</span>' : `<div><span class="stars">★</span> <b>${L.rating.toFixed(1)}</b></div><div class="sub">${fmt(L.reviews)}<span class="rvw"> review${L.reviews === 1 ? '' : 's'}</span></div>`}</div>
+      <div class="cell2">${L.website ? `<div class="dom">${esc(L.dom)}</div><div class="sub st-${SS_C[L.site_status]}"><i class="sdot"></i>${SS_SHORT[L.site_status]}</div>` : '<span class="none">No website</span>'}</div>
+      <div>${L.form_status === 0 ? '<span class="pill c-ok">Open form</span>' : L.form_status === 1 ? `<span class="pill c-manual">${esc(L.captcha || 'CAPTCHA')}</span>` : L.form_status === 4 ? '<span class="pill c-idle">Needs browser</span>' : L.form_status === 3 ? '<span class="none">Not checked</span>' : '<span class="none">None</span>'}</div>
+      <div class="num c-ph">${L.phone ? esc(L.phone) : '<span class="none">—</span>'}</div>
+      <div class="c-st">${L.status === 0 ? '<span class="none">New</span>' : `<span class="stxt st-${LS_C[L.status]}"><i class="sdot"></i>${LS[L.status]}</span>`}</div></div>`;
+  }
+  body.innerHTML = h || `<div class="empty" style="position:absolute;inset:0"><b>No leads match these filters</b>Widen the rating or review range, or clear a filter on the left.</div>`;
+  if (!L$.res.length) body.style.height = '240px';
+  document.querySelectorAll('[data-sortcol]').forEach(el => el.classList.toggle('on', L$.sort === el.dataset.sortcol));
+}
+
+/* ---------- lead drawer */
+function checksHTML(L, running) {
+  const row = (c, k, t) => `<div class="check">${running ? '<span class="spin"></span>' : `<span style="color:var(--${c})">${ic(c === 'ok' ? 'check' : c === 'bad' ? 'x' : c === 'manual' ? 'manual' : 'alert', 15)}</span>`}${k}<span class="st sub" style="color:var(--muted)">${running ? 'Checking…' : esc(t)}</span></div>`;
+  const ss = L.site_status;
+  const siteTxt = ss === 0 || ss === 1 ? `Loaded in ${((L.site_ms || 0) / 1000).toFixed(1)} s` : SS[ss];
+  return row(['ok', 'warn', 'bad', 'idle', 'idle', 'warn', 'idle', 'idle'][ss], 'Website', siteTxt)
+    + row(['ok', 'manual', 'idle', 'idle', 'warn'][L.form_status], 'Contact form', L.form_status === 1 ? `${L.captcha || 'CAPTCHA'}${L.form_url ? ' · ' + pathOf(L.form_url) : ''}` : L.form_status === 0 && L.form_url ? `Found on ${pathOf(L.form_url)}` : FM[L.form_status])
+    + row(L.platform ? 'ok' : 'idle', 'Platform', L.platform || 'Not checked yet')
+    + row(L.email ? 'ok' : 'idle', 'Email', L.email || (L.checked_at ? 'None found' : 'Not checked yet'));
+}
+const pathOf = u => { try { const x = new URL(u); return x.pathname === '/' ? 'home page' : x.pathname; } catch { return u; } };
+function leadDrawer(id) {
+  const L = ST.byId.get(id); if (!L) return;
+  $('#overlay').innerHTML = `<div class="scrim" data-act="close"><div class="drawer" data-stop role="dialog" aria-label="${esc(L.name)}">
+    <div class="drawer-h"><div><div class="row" style="margin-bottom:6px">${L.status ? `<span class="stxt st-${LS_C[L.status]}"><i class="sdot"></i>${LS[L.status]}</span>` : ''}${L.closed ? '<span class="pill c-bad">Permanently closed</span>' : ''}</div><h2>${esc(L.name)}</h2><div style="color:var(--muted);font-size:13px">${esc(industryName(L.industry_id))} · ${esc(LOCS[L.li])}</div></div><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
+    <section><h5>Business</h5><dl class="kv" style="margin:0">
+      <dt>Rating</dt><dd>${L.rating == null ? 'No reviews yet' : `<span class="stars">★ ${L.rating.toFixed(1)}</span> · ${fmt(L.reviews)} reviews`}</dd>
+      <dt>Phone</dt><dd class="num">${L.phone ? `${esc(L.phone)} <button class="linkbtn muted" data-copy="${esc(L.phone)}">Copy</button>` : 'Not listed'}</dd>
+      <dt>Website</dt><dd>${L.website ? `<a href="${esc(L.website)}" target="_blank" rel="noopener noreferrer">${esc(L.dom)}</a>` : 'Not listed'}</dd>
+      <dt>Address</dt><dd>${esc(L.address || '—')}</dd>
+      <dt>Google category</dt><dd>${esc(L.category || '—')}</dd>
+      <dt>Found by</dt><dd>${esc(searchName(L.search_id))}, ${dayPT(L.created_at)}</dd>
+      ${L.maps_url ? `<dt>Google Maps</dt><dd><a href="${esc(L.maps_url)}" target="_blank" rel="noopener noreferrer">Open listing</a></dd>` : ''}</dl></section>
+    <section><div class="row" style="justify-content:space-between"><h5>Website check</h5><button class="btn sm" data-act="checkone" data-id="${L.id}" ${L.website ? '' : 'disabled'}>${ic('globe', 14)}Check again</button></div><div class="checks" id="dchecks">${checksHTML(L)}</div>
+      <span class="help">${L.checked_at ? `Checked ${whenPT(L.checked_at)}.` : 'Not checked yet.'}</span></section>
+    <section><h5>Status</h5><select class="input" id="dstatus" data-lstatus="${L.id}">${LS.map((s, i) => `<option value="${i}" ${L.status === i ? 'selected' : ''}>${s}</option>`).join('')}</select></section>
+    <section style="border-bottom:0"><h5>Notes</h5><textarea class="input" id="dnote" data-lnote="${L.id}" style="min-height:90px" placeholder="Add a note about this business">${esc(L.notes || '')}</textarea><span class="help" id="dnote-h">Saved automatically.</span></section>
+  </div></div>`;
+}
+
+/* ---------- export */
+const XCOLS = [
+  ['name', 'Name', 'Business', L => L.name], ['phone', 'Phone', 'Business', L => phoneOut(L)], ['website', 'Website', 'Business', L => L.website || ''],
+  ['industry', 'Industry', 'Business', L => industryName(L.industry_id)], ['category', 'Google category', 'Business', L => L.category || ''], ['address', 'Address', 'Business', L => L.address || ''],
+  ['city', 'City', 'Business', L => L.city || ''], ['region', 'State / province', 'Business', L => L.region || ''], ['postal', 'Postal code', 'Business', L => L.postal || ''], ['country', 'Country', 'Business', L => L.country || ''],
+  ['rating', 'Rating', 'Business', L => L.rating ?? ''], ['reviews', 'Reviews', 'Business', L => L.reviews], ['maps', 'Google Maps link', 'Business', L => L.maps_url || ''],
+  ['site', 'Site status', 'Website check', L => L.website ? SS[L.site_status] : 'No website'], ['platform', 'Platform', 'Website check', L => L.platform || ''],
+  ['form', 'Contact form', 'Contact', L => FM[L.form_status]], ['formurl', 'Form page', 'Contact', L => L.form_url || ''], ['captcha', 'CAPTCHA type', 'Contact', L => L.form_status === 1 ? (L.captcha || '') : ''], ['email', 'Email', 'Contact', L => L.email || ''],
+  ['status', 'Lead status', 'Pipeline', L => LS[L.status]], ['search', 'Found by search', 'Pipeline', L => searchName(L.search_id)], ['added', 'Date added', 'Pipeline', L => dayKey.format(new Date(L.created_at))], ['notes', 'Notes', 'Pipeline', L => L.notes || ''],
+];
+const XPRESETS = { contact: ['name', 'phone', 'website'], outreach: ['name', 'phone', 'website', 'city', 'region', 'rating', 'reviews', 'site', 'form', 'formurl', 'captcha', 'email', 'status'], full: XCOLS.map(c => c[0]) };
+const XP = (() => { try { const s = JSON.parse(localStorage.getItem('lh-export') || 'null'); if (s) return { ...s, cols: new Set(s.cols), scope: 'view', src: null }; } catch { /* default */ } return { scope: 'view', src: null, cols: new Set(XPRESETS.outreach), preset: 'outreach', phone: false, web: false, dedupePhone: false, pfmt: 'nat', fmt: 'csv' }; })();
+function saveXP() { try { localStorage.setItem('lh-export', JSON.stringify({ ...XP, cols: [...XP.cols], scope: undefined, src: undefined })); } catch { /* ignore */ } }
+function phoneOut(L) { if (!L.phone) return ''; if (XP.pfmt !== 'e164') return L.phone; const d = L.phone.replace(/\D/g, ''); return L.phone.trim().startsWith('+') ? '+' + d : (L.country === 'MA' ? '+212' + d.replace(/^0/, '') : '+1' + d.replace(/^1(?=\d{10}$)/, '')); }
+function xRows() {
+  let base = XP.scope === 'sel' ? [...L$.sel].map(id => ST.byId.get(id)).filter(Boolean) : XP.scope === 'view' ? L$.res : XP.scope === 'search' ? ST.leads.filter(L => L.search_id === XP.src) : ST.leads;
+  if (XP.phone) base = base.filter(L => L.phone);
+  if (XP.web) base = base.filter(L => L.website);
+  if (XP.dedupePhone) { const seen = new Set(); base = base.filter(L => { if (!L.phone) return true; const k = L.phone.replace(/\D/g, ''); if (seen.has(k)) return false; seen.add(k); return true; }); }
+  return base;
+}
+const xCols = () => XCOLS.filter(c => XP.cols.has(c[0]));
+function defaultFile() {
+  const base = XP.scope === 'search' ? searchName(XP.src) : XP.scope === 'sel' ? 'selected leads' : XP.scope === 'view' && summaryParts().length ? summaryParts().slice(0, 2).join(' ') : 'all leads';
+  return ('leads ' + base).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) + '-' + dayKey.format(new Date());
+}
+function openExport(scope, src) { if (scope) XP.scope = scope; if (src != null) XP.src = src; else if (scope !== 'search') XP.src = null; if (XP.scope === 'sel' && !L$.sel.size) XP.scope = 'view'; if (XP.scope === 'view' && !$('#vt')) { runFilter(); } XP.file = ''; exportModal(); }
+function exportModal() {
+  const rows = xRows(), cols = xCols(), groups = [...new Set(XCOLS.map(c => c[2]))];
+  const scopes = [['sel', 'Selected leads', L$.sel.size], ['view', 'Current filters', L$.res.length], ['all', 'All leads', ST.leads.length]];
+  if (XP.src != null) scopes.unshift(['search', `Search: ${searchName(XP.src)}`, ST.leads.filter(L => L.search_id === XP.src).length]);
+  $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal xmodal" data-stop role="dialog" aria-label="Export leads">
+   <div class="card-h"><div><h2>Export leads</h2><p>Built in your browser from your local copy, so it's instant and free. Your choices are remembered.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
+   <div class="xgrid"><div class="xcol">
+     <div class="field"><span class="flabel">Leads</span>${scopes.map(([k, l, n]) => `<label class="opt sm ${XP.scope === k ? 'on' : ''} ${n ? '' : 'off'}"><input type="radio" name="xs" data-xscope="${k}" ${XP.scope === k ? 'checked' : ''} ${n ? '' : 'disabled'}><div><b>${esc(l)}</b><span class="num">${fmt(n)} leads</span></div></label>`).join('')}</div>
+     <div class="field"><span class="flabel">Only include</span>
+      <label class="ck"><input type="checkbox" data-xopt="phone" ${XP.phone ? 'checked' : ''}>Leads with a phone number</label>
+      <label class="ck"><input type="checkbox" data-xopt="web" ${XP.web ? 'checked' : ''}>Leads with a website</label>
+      <label class="ck"><input type="checkbox" data-xopt="dedupePhone" ${XP.dedupePhone ? 'checked' : ''}>One row per phone number</label></div>
+     <div class="field"><label class="flabel" for="x-pfmt">Phone format</label><select class="input" id="x-pfmt"><option value="nat" ${XP.pfmt === 'nat' ? 'selected' : ''}>As listed on Google</option><option value="e164" ${XP.pfmt === 'e164' ? 'selected' : ''}>+15125550148 (for dialers and CRMs)</option></select></div>
+     <div class="field"><span class="flabel">File type</span><div class="seg-c">${[['csv', 'CSV'], ['xlsx', 'Excel (.xlsx)']].map(([k, l]) => `<button class="${XP.fmt === k ? 'on' : ''}" data-xfmt="${k}">${l}</button>`).join('')}</div></div>
+    </div><div class="xcol">
+     <div class="row" style="justify-content:space-between"><span class="flabel">Columns <span class="sub">(${cols.length})</span></span><div class="seg-c">${[['contact', 'Contact list'], ['outreach', 'Outreach'], ['full', 'Everything']].map(([k, l]) => `<button class="${XP.preset === k ? 'on' : ''}" data-xpreset="${k}">${l}</button>`).join('')}</div></div>
+     <div class="xcols">${groups.map(g => `<div><h6>${g}</h6>${XCOLS.filter(c => c[2] === g).map(c => `<label class="ck"><input type="checkbox" data-xcol="${c[0]}" ${XP.cols.has(c[0]) ? 'checked' : ''}>${c[1]}</label>`).join('')}</div>`).join('')}</div>
+     <div class="field"><span class="flabel">Preview</span><div class="tbl-wrap xprev">${cols.length && rows.length ? `<table><thead><tr>${cols.map(c => `<th>${c[1]}</th>`).join('')}</tr></thead><tbody>${rows.slice(0, 4).map(L => `<tr>${cols.map(c => `<td>${esc(c[3](L))}</td>`).join('')}</tr>`).join('')}</tbody></table>` : `<div class="empty" style="padding:16px">${cols.length ? 'No leads to export.' : 'Pick at least one column.'}</div>`}</div></div>
+   </div></div>
+   <div class="card-h xfoot"><div class="field" style="flex:1;min-width:220px"><label class="flabel" for="x-file">File name</label><div class="row" style="gap:6px;flex-wrap:nowrap"><input class="input" id="x-file" value="${esc(XP.file || defaultFile())}"><span class="sub">.${XP.fmt}</span></div></div>
+     <div class="row"><span class="num" style="color:var(--muted);font-size:13px"><b style="color:var(--ink)">${fmt(rows.length)}</b> rows × ${cols.length} columns</span><button class="btn" data-xact="copy" ${rows.length && cols.length ? '' : 'disabled'}>${ic('copy', 14)}Copy for Sheets</button><button class="btn primary" data-xact="download" ${rows.length && cols.length ? '' : 'disabled'}>${ic('download', 14)}Download</button></div></div>
+  </div></div>`;
+}
+function delimited(sep) {
+  const cols = xCols();
+  const q = v => { v = String(v ?? ''); if (/^[=+\-@]/.test(v)) v = "'" + v; return sep === ',' ? (/[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v) : v.replace(/[\t\n\r]/g, ' '); };
+  return [cols.map(c => q(c[1])).join(sep), ...xRows().map(L => cols.map(c => q(c[3](L))).join(sep))].join('\r\n');
+}
+function saveFile(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); }
+let xlsxLib = null;
+function loadXLSX() {
+  if (xlsxLib) return xlsxLib;
+  xlsxLib = new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; s.onload = () => res(window.XLSX); s.onerror = () => { xlsxLib = null; rej(new Error('Could not load the Excel exporter. Check your connection or export as CSV.')); }; document.head.appendChild(s); });
+  return xlsxLib;
+}
+async function doExport(kind) {
+  XP.file = ($('#x-file').value || defaultFile()).replace(/[\\/:*?"<>|]+/g, '-');
+  saveXP();
+  const n = xRows().length;
+  if (kind === 'copy') {
+    try { await navigator.clipboard.writeText(delimited('\t')); toast(`Copied ${fmt(n)} rows. Paste into Google Sheets or Excel`); } catch { toast('Your browser blocked copying. Use Download instead', 'alert'); }
+    return;
+  }
+  if (XP.fmt === 'csv') { saveFile(new Blob(['﻿' + delimited(',')], { type: 'text/csv;charset=utf-8' }), XP.file + '.csv'); }
+  else {
+    try {
+      const X = await loadXLSX(), cols = xCols();
+      const data = [cols.map(c => c[1]), ...xRows().map(L => cols.map(c => c[3](L)))];
+      const ws = X.utils.aoa_to_sheet(data), wb = X.utils.book_new();
+      X.utils.book_append_sheet(wb, ws, 'Leads');
+      X.writeFile(wb, XP.file + '.xlsx');
+    } catch (e) { toast(e.message, 'alert'); return; }
+  }
+  closeOverlay(); toast(`Exported ${fmt(n)} leads`, 'download');
+}
+
+/* ---------- checks */
+const CK = { form: true, email: false };
+function checkModal(ids) {
+  const leads = ids.map(id => ST.byId.get(id)).filter(Boolean), withW = leads.filter(L => L.website).length;
+  $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Check websites">
+   <div class="card-h"><div><h2>Check ${fmt(leads.length)} lead${leads.length === 1 ? '' : 's'}</h2><p>${fmt(withW)} have a website. Leads without one are skipped.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
+   <div class="card-b" style="display:flex;flex-direction:column;gap:10px">
+    <label class="opt on"><input type="checkbox" checked disabled><div><b>Website loads</b><span>Is the site up, and how fast does it load? Always included.</span></div></label>
+    <label class="opt ${CK.form ? 'on' : ''}"><input type="checkbox" data-ck="form" ${CK.form ? 'checked' : ''}><div><b>Contact form</b><span>Is there a form, does it have a CAPTCHA, which platform is it?</span></div></label>
+    <label class="opt ${CK.email ? 'on' : ''}"><input type="checkbox" data-ck="email" ${CK.email ? 'checked' : ''}><div><b>Email addresses</b><span>Look for an email on the home page and contact page.</span></div></label>
+    <span class="help">Runs in the background on GitHub. Results appear in the table as they finish.</span></div>
+   <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-ckgo="${ids.join(',')}" ${withW ? '' : 'disabled'}>${ic('globe', 14)}Start checks</button></div></div></div>`;
+}
+async function startCheck(ids) {
+  try {
+    const r = await api('POST', '/api/checks', { ids, form: CK.form, email: CK.email });
+    upsertSearch(r.search); closeOverlay(); toast(`Checking ${fmt(ids.length)} website${ids.length === 1 ? '' : 's'}. Results appear as they finish`, 'globe'); startPolling();
+  } catch (e) {
+    if (e.status === 502) { closeOverlay(); toast(e.message, 'alert'); refreshSearches(); } else toast(e.message, 'alert');
+  }
+}
+
+/* ================================================================ searches: list + polling */
+function upsertSearch(s) { const i = ST.searches.findIndex(x => x.id === s.id); if (i >= 0) ST.searches[i] = s; else ST.searches.unshift(s); }
+const ACTIVE = s => s.status === 'queued' || s.status === 'running';
+let pollTimer = 0, pollTick = 0;
+function startPolling() { if (!pollTimer) pollTimer = setInterval(poll, 4000); }
+function stopPolling() { clearInterval(pollTimer); pollTimer = 0; }
+async function poll() {
+  if (document.hidden) return;
+  const active = ST.searches.filter(ACTIVE);
+  if (!active.length) { stopPolling(); await sync(); return; }
+  pollTick++;
+  try {
+    for (const s of active.slice(0, 5)) {
+      const r = await api('GET', `/api/searches/${s.id}`);
+      const was = s.status;
+      upsertSearch(r.search);
+      if (was !== r.search.status && !ACTIVE(r.search)) announce(r.search);
+    }
+    renderJobs();
+    if (pollTick % 2 === 0) await sync();
+  } catch (e) { console.warn('poll failed', e); }
+}
+function announce(s) {
+  if (s.status === 'done') toast(s.kind === 'check' ? `${s.name}: done` : `${s.name}: ${fmt(s.new)} new lead${s.new === 1 ? '' : 's'}`);
+  else if (s.status === 'failed') toast(`${s.name} stopped. Open Find leads for details`, 'alert');
+}
+async function refreshSearches() { try { const r = await api('GET', '/api/searches?limit=60'); ST.searches = r.searches; renderJobs(); if (ST.searches.some(ACTIVE)) startPolling(); } catch { /* keep old list */ } }
+document.addEventListener('visibilitychange', () => { if (!document.hidden && $('#root .app')) { sync(); if (ST.searches.some(ACTIVE)) startPolling(); } });
+
+/* ================================================================ find leads */
+const RAD = { mi: [[0, 'City only'], [10, '+ 10 mi'], [25, '+ 25 mi'], [50, '+ 50 mi']], km: [[0, 'City only'], [15, '+ 15 km'], [40, '+ 40 km'], [80, '+ 80 km']] };
+const PRAD = { mi: [[5, '5 mi around'], [10, '10 mi around'], [25, '25 mi around']], km: [[8, '8 km around'], [15, '15 km around'], [40, '40 km around']] };
+const COUNTRY = { US: { name: 'United States', unit: 'mi', rw: 'state', ph: 'City, state or ZIP code' }, CA: { name: 'Canada', unit: 'km', rw: 'province', ph: 'City, province or postal code' }, MA: { name: 'Morocco', unit: 'km', rw: 'region', ph: 'City, region or postal code' } };
+const LIMITS = [100, 250, 500, 1000, 0];
+const FS = { ind: null, terms: new Set(), extra: [], country: 'US', locs: [], q: '', open: false, hi: 0, items: [], name: '', nameEdited: false, paste: false, pasteMsg: '', limit: 500, depth: 2, emails: false, showTerms: false, busy: false, allHist: false };
+const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+async function loadPlaces() {
+  if (ST.places) return ST.places;
+  const res = await fetch('/geo/places.json');
+  if (!res.ok) throw new Error('Place data is missing. Run the Deploy workflow again so it can download it.');
+  const raw = await res.json();
+  for (const cc of Object.keys(raw)) raw[cc].cities.forEach(c => { c.n = norm(c[0] + ' ' + c[1]); });
+  return (ST.places = raw);
+}
+async function loadPostal(cc) {
+  if (ST.postal[cc] !== undefined) return ST.postal[cc];
+  try { const r = await fetch(`/geo/postal-${cc}.json`); ST.postal[cc] = r.ok ? await r.json() : null; } catch { ST.postal[cc] = null; }
+  return ST.postal[cc];
+}
+const curInd = () => ST.industries.find(i => i.id === FS.ind) || ST.industries.find(i => !i.archived);
+const activeTerms = () => { const d = curInd(); return d ? [...d.terms.filter((_, i) => FS.terms.has(i)), ...FS.extra] : []; };
+const unitOf = cc => COUNTRY[cc].unit;
+const toKm = (v, cc) => unitOf(cc) === 'mi' ? v * 1.609 : v;
+function circlesFor(l) {
+  if (l.type === 'city') return [{ lat: l.lat, lon: l.lon, r: cityRadiusKm(l.pop) + toKm(RAD[unitOf(l.country)][l.rad][0], l.country), country: l.country }];
+  if (l.type === 'postal') return [{ lat: l.lat, lon: l.lon, r: toKm(PRAD[unitOf(l.country)][l.rad][0], l.country), country: l.country }];
+  if (l.type === 'region') {
+    const cities = (ST.places?.[l.country]?.cities || []).filter(c => c[2] === l.region);
+    let pick = cities.filter(c => c[5] >= 20000);
+    if (pick.length < 5) pick = cities.slice(0, 40);
+    return pick.map(c => ({ lat: c[3], lon: c[4], r: cityRadiusKm(c[5]), country: l.country }));
+  }
+  return [];
+}
+const locTitle = l => l.type === 'city' ? (l.country === 'MA' ? l.label : `${l.label}, ${l.region}`) : l.label;
+function locSub(l) { const c = COUNTRY[l.country]; const rn = ST.places?.[l.country]?.regions?.[l.region]; return l.type === 'city' ? `${rn || l.region}, ${c.name}` : l.type === 'region' ? `Entire ${c.rw} · ${c.name}` : `${l.place ? l.place + ', ' : ''}${c.name}`; }
+function autoName() { const d = curInd(); if (!d) return 'New search'; if (!FS.locs.length) return d.name; const l = FS.locs[0]; return `${d.name} · ${l.type === 'postal' ? l.code : l.label}${FS.locs.length > 1 ? ` + ${FS.locs.length - 1} more` : ''}`; }
+function estimate() {
+  const circles = FS.locs.flatMap(circlesFor), terms = activeTerms();
+  if (!circles.length || !terms.length) return { n: 0, pts: 0 };
+  const n = buildCells(circles, terms.length).length;
+  return { n, pts: n / terms.length };
+}
+
+function locResults(q) {
+  const P = ST.places; if (!P) return [];
+  const out = [], nq = norm(q), toks = nq.split(' ').filter(Boolean), cc = FS.country, g = P[cc];
+  if (!nq) { g.cities.slice(0, 8).forEach(c => out.push({ grp: `Largest cities in ${COUNTRY[cc].name}`, type: 'city', label: c[0], region: c[2], country: cc, lat: c[3], lon: c[4], pop: c[5] })); return out; }
+  const raw = q.trim();
+  const post = ST.postal[cc];
+  if (post) {
+    const key = cc === 'CA' ? raw.toUpperCase().replace(/\s+/g, ' ').slice(0, 3) : raw.toUpperCase();
+    const hit = post[key] || (cc === 'CA' ? post[raw.toUpperCase().replace(/\s+/g, ' ')] : null);
+    if (hit) out.push({ grp: 'Postal code', type: 'postal', code: key, label: (cc === 'US' ? 'ZIP code ' : 'Postal code ') + key, place: hit[2], region: hit[3], country: cc, lat: hit[0], lon: hit[1], rad: 1 });
+  } else if (/^\d{4,5}$|^[a-z]\d[a-z]/i.test(raw)) { loadPostal(cc).then(() => { if (FS.open) renderPop(); }); }
+  const cityMatch = (code) => {
+    const G = P[code], res = [];
+    for (const c of G.cities) {
+      const hay = c.n + ' ' + norm(c[2] + ' ' + (G.regions[c[2]] || ''));
+      const words = hay.split(' ');
+      if (!toks.every(t => words.some(w => w.startsWith(t)))) continue;
+      const score = (c.n.startsWith(nq) ? 0 : c.n.startsWith(toks[0]) ? 1 : 2);
+      res.push({ c, score });
+      if (res.length > 400) break;
+    }
+    return res.sort((a, b) => a.score - b.score || b.c[5] - a.c[5]);
+  };
+  cityMatch(cc).slice(0, 7).forEach(({ c }) => out.push({ grp: 'Cities', type: 'city', label: c[0], region: c[2], country: cc, lat: c[3], lon: c[4], pop: c[5] }));
+  Object.entries(g.regions).filter(([code, name]) => norm(name).split(' ').some(w => w.startsWith(nq)) || norm(name).startsWith(nq) || (nq.length >= 2 && norm(code) === nq))
+    .slice(0, 4).forEach(([code, name]) => out.push({ grp: COUNTRY[cc].rw[0].toUpperCase() + COUNTRY[cc].rw.slice(1) + 's', type: 'region', label: name, region: code, country: cc }));
+  for (const oc of Object.keys(P)) { if (oc === cc) continue; cityMatch(oc).slice(0, 3).forEach(({ c }) => out.push({ grp: 'In ' + COUNTRY[oc].name, type: 'city', label: c[0], region: c[2], country: oc, lat: c[3], lon: c[4], pop: c[5] })); }
+  return out;
+}
+const sameLoc = (a, b) => a.type === b.type && a.label === b.label && (a.region || '') === (b.region || '') && a.country === b.country;
+function addLoc(it) {
+  if (FS.locs.some(l => sameLoc(l, it))) { toast('Already added', 'alert'); return false; }
+  FS.locs.push({ ...it, grp: undefined, rad: it.type === 'region' ? 0 : 1 }); return true;
+}
+
+V.find = () => {
+  if (FS.ind == null || !ST.industries.find(i => i.id === FS.ind && !i.archived)) { const d = ST.industries.find(i => !i.archived); FS.ind = d ? d.id : null; FS.terms = new Set(d ? d.terms.map((_, i) => i) : []); }
+  const cfg = ST.config || {};
+  return `
+  <div class="head"><div><div class="eyebrow">Google Maps search</div><h1>Find leads</h1><p>Pick an industry and where to look. Duplicates are removed and new businesses go straight into Leads.</p></div></div>
+  ${!cfg.github ? `<div class="banner">${ic('alert', 18)}<div><b>Searches can't start yet</b>GitHub isn't connected. Add the <code>GH_TOKEN</code> secret to the repository, run the Deploy workflow again, then come back.</div></div>` : ''}
+  <div class="fsgrid">
+    <div class="card fsform">
+      <div class="fsrow2">
+        <div class="field"><label class="flabel" for="fs-ind">Industry</label><select class="input big" id="fs-ind">${ST.industries.filter(x => !x.archived).map(x => `<option value="${x.id}" ${x.id === FS.ind ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
+          <span class="help" id="fs-termhelp">${termHelp()}</span></div>
+        <div class="field"><label class="flabel" for="fs-limit">Leads wanted</label>
+          <div class="limitbox"><input class="input big num" type="number" min="1" step="50" id="fs-limit" placeholder="No limit" value="${FS.limit || ''}"><div class="presets">${LIMITS.map(n => `<button class="${FS.limit === n ? 'on' : ''}" data-limit="${n}">${n ? fmt(n) : 'No limit'}</button>`).join('')}</div></div>
+          <span class="help">The search stops once this many new leads are found. Leads you already have don't count.</span></div>
+      </div>
+      <div id="fs-what">${FS.showTerms ? termsBox() : ''}</div>
+      <div class="field">
+        <div class="row" style="justify-content:space-between"><span class="flabel">Location</span><div class="seg-c flags" role="tablist" aria-label="Country">${Object.keys(COUNTRY).map(c => `<button role="tab" class="${FS.country === c ? 'on' : ''}" data-fsx="country" data-c="${c}" aria-selected="${FS.country === c}">${flag(c)}<span>${COUNTRY[c].name}</span></button>`).join('')}</div></div>
+        <div class="combo" id="combo">
+          <div class="combo-in">${flag(FS.country, 18)}<input id="fs-loc" role="combobox" aria-expanded="false" aria-controls="loc-pop" autocomplete="off" placeholder="${COUNTRY[FS.country].ph}" value="${esc(FS.q)}"><button class="linkbtn" data-fsx="pastetoggle" style="white-space:nowrap">${FS.paste ? 'Close' : 'Paste a list'}</button></div>
+          <div class="combo-pop" id="loc-pop" hidden></div>
+        </div>
+        ${FS.paste ? `<div class="pastebox"><textarea class="input" id="fs-paste" placeholder="One location per line, for example:&#10;Austin, TX&#10;78704&#10;Toronto&#10;Marrakech" style="min-height:110px"></textarea><div class="row" style="justify-content:space-between"><span class="help" id="paste-msg">${esc(FS.pasteMsg || 'Cities, states, provinces, regions and postal codes all work. Accents are optional.')}</span><button class="btn sm primary" data-fsx="pasteapply">Add locations</button></div></div>` : ''}
+        <div id="fs-where">${whereHTML()}</div>
+      </div>
+      <div class="field"><span class="flabel">Collect</span><div id="fs-collect">${collectHTML()}</div></div>
+    </div>
+    <aside class="card fsum" id="fs-sum">${sumHTML()}</aside>
+  </div>
+  <div class="card"><div class="card-h"><div><h3>Search history</h3><p>Results outside the industry's accepted Google categories are set aside under “excluded” for you to review.</p></div><button class="btn ghost sm" data-act="refreshjobs">Refresh</button></div>
+    <div id="jobs">${jobsHTML()}</div></div>`;
+};
+MOUNT.find = () => {
+  loadPlaces().then(() => { $('#fs-where') && ($('#fs-where').innerHTML = whereHTML()); refreshFind([]); }).catch(e => toast(e.message, 'alert'));
+  if (ST.searches.some(ACTIVE)) startPolling();
+};
+function termHelp() {
+  const t = activeTerms(), d = curInd(); if (!d) return 'Add an industry first.';
+  const custom = FS.extra.length || FS.terms.size !== d.terms.length;
+  return `Searches for ${t.slice(0, 2).map(x => `“${esc(x)}”`).join(', ') || 'nothing yet'}${t.length > 2 ? ` and ${t.length - 2} more` : ''}${custom ? ' (changed)' : ''} · <button class="linkbtn" data-fsx="terms">${FS.showTerms ? 'Done' : 'Change'}</button>`;
+}
+function termsBox() {
+  const d = curInd(); if (!d) return '';
+  return `<div class="termbox"><div class="termlist">${d.terms.map((t, i) => `<div class="termrow" data-fsterm="${i}" role="checkbox" tabindex="0" aria-checked="${FS.terms.has(i)}"><span class="cb ${FS.terms.has(i) ? 'on' : ''}"></span><span>${esc(t)}</span></div>`).join('')}
+   ${FS.extra.map((t, i) => `<div class="termrow"><span class="cb on"></span><span>${esc(t)}</span><span class="sub">This search only</span><button class="btn ghost sm" data-fsextra="${i}" aria-label="Remove ${esc(t)}">${ic('x', 13)}</button></div>`).join('')}
+   <div class="termadd">${ic('plus', 14)}<input id="fs-extra" placeholder="Add a term for this search, then press Enter" autocomplete="off"></div></div>
+   <span class="help">To change the defaults for every search, go to <a class="linkbtn" href="#industries">Industries</a>.</span></div>`;
+}
+function whereHTML() {
+  if (!FS.locs.length) return `<div class="locempty">Add at least one city, ${COUNTRY[FS.country].rw} or postal code.</div>`;
+  return `<div class="loclist">${FS.locs.map((l, i) => {
+    const u = unitOf(l.country), n = l.type === 'region' ? circlesFor(l).length : 0;
+    return `<div class="locrow">${flag(l.country, 22)}<div style="min-width:0"><b>${esc(locTitle(l))}</b><span>${esc(locSub(l))}</span></div>
+     ${l.type === 'region' ? `<span class="locfix">${n ? `${fmt(n)} cities` : 'Whole ' + COUNTRY[l.country].rw}</span>` : `<select class="input" data-locrad="${i}" aria-label="Area around ${esc(l.label)}">${(l.type === 'postal' ? PRAD : RAD)[u].map(([, lab], k) => `<option value="${k}" ${l.rad === k ? 'selected' : ''}>${lab}</option>`).join('')}</select>`}
+     <button class="btn ghost sm" data-fsx="rmloc" data-i="${i}" aria-label="Remove ${esc(l.label)}">${ic('x', 14)}</button></div>`;
+  }).join('')}</div>${FS.locs.length > 1 ? `<div class="row" style="justify-content:flex-end;margin-top:6px"><button class="linkbtn" data-fsx="clearlocs">Remove all</button></div>` : ''}`;
+}
+function collectHTML() {
+  return `<div class="dopts">${[['Business info', 'Name, phone, website link, address, rating and reviews. No website visits.', 'Fastest'], ['Business info + website check', 'Also checks whether each website loads, and how fast.', ''], ['Business info + website + contact form', 'Also finds the contact form, CAPTCHA and platform.', 'Best for outreach']].map(([t, d, tag], i) => `<label class="dopt ${FS.depth === i ? 'on' : ''}"><input type="radio" name="dep" data-depth="${i}" ${FS.depth === i ? 'checked' : ''}><span class="radio"></span><span class="dopt-t"><b>${t}</b><small>${d}</small></span>${tag ? `<span class="dtag ${i === 2 ? 'acc' : ''}">${tag}</span>` : ''}</label>`).join('')}</div>
+   <label class="ck"><input type="checkbox" id="fs-emails" ${FS.emails ? 'checked' : ''}>Also find email addresses</label>`;
+}
+const dur = s => !s ? '—' : s < 60 ? `≈ ${s} s` : s < 3600 ? `≈ ${Math.ceil(s / 60)} min` : `≈ ${(s / 3600).toFixed(1)} h`;
+function sumHTML() {
+  const terms = activeTerms(), { n, pts } = estimate();
+  const avg = pts * 13, f = FS.limit && avg ? Math.min(1, FS.limit / avg) : 1;
+  const maps = Math.round(n * f * 2 / 4), biz = Math.min(avg, FS.limit || avg);
+  const site = FS.depth >= 1 || FS.emails ? Math.round(biz * (FS.depth === 2 ? 1.8 : 1) * (FS.emails ? 1.3 : 1) / 20) : 0;
+  const lo = Math.round(pts * 6), hi = Math.round(pts * 18);
+  const [elo, ehi] = FS.limit ? [Math.min(lo, FS.limit), Math.min(hi, FS.limit)] : [lo, hi];
+  const tooBig = n > 6000;
+  const why = !ST.config.github ? 'Connect GitHub first (see the note above).' : !terms.length ? 'Choose at least one search term.' : !FS.locs.length ? 'Add at least one location.' : tooBig ? `That's ${fmt(n)} map searches; the limit is 6,000. Use a smaller area or fewer terms.` : '';
+  return `<div class="card-b" style="display:flex;flex-direction:column;gap:14px">
+    <div class="field"><label class="flabel" for="fs-name">Search name</label><input class="input nameinput" id="fs-name" value="${esc(FS.nameEdited ? FS.name : autoName())}" maxlength="80"><span class="help" id="fs-namehelp">${FS.nameEdited ? '<button class="linkbtn" data-fsx="resetname">Use suggested name</button>' : 'Suggested automatically. Type to rename.'}</span></div>
+    ${!n ? `<div class="sumempty">${ic('find', 18)}<span>${!FS.locs.length ? 'Add a location and the estimate shows up here.' : 'Choose a search term to see the estimate.'}</span></div>` : `<div class="bignums"><div><b class="num">${elo === ehi ? fmt(ehi) : `${fmt(elo)}–${fmt(ehi)}`}</b><span>${FS.limit && ehi === FS.limit ? 'new leads (your limit)' : 'businesses, roughly'}</span></div><div><b class="num">${dur(maps + site + 45)}</b><span>estimated time</span></div>
+      <div class="tsplit" style="grid-column:1/-1"><span><i style="background:var(--info)"></i>Google Maps · up to ${fmt(Math.round(n * f))} searches</span>${site ? `<span><i style="background:var(--accent)"></i>${['', 'Website check', 'Website + contact form check'][FS.depth] || 'Email search'}${FS.emails && FS.depth ? ' + emails' : ''}</span>` : '<span><i style="background:var(--line)"></i>No website visits</span>'}</div></div>`}
+    <button class="btn primary" data-fsx="start" style="justify-content:center;padding:11px" ${why || FS.busy ? 'disabled' : ''}>${FS.busy ? '<span class="spin"></span>Starting…' : ic('find') + 'Start search'}</button>
+    <span class="help" style="text-align:center;margin-top:-6px">${esc(why || 'Runs in the background on GitHub. You can close this page.')}</span>
+   </div>`;
+}
+function refreshFind(parts) {
+  if (!$('#fs-sum')) return;
+  if (parts.includes('what')) $('#fs-what').innerHTML = FS.showTerms ? termsBox() : '';
+  if (parts.includes('where')) $('#fs-where').innerHTML = whereHTML();
+  const th = $('#fs-termhelp'); if (th) th.innerHTML = termHelp();
+  const nm = $('#fs-name'); if (!FS.nameEdited && nm && document.activeElement !== nm) nm.value = autoName();
+  const keep = document.activeElement && document.activeElement.id === 'fs-name';
+  if (!keep) $('#fs-sum').innerHTML = sumHTML();
+}
+function renderPop() {
+  const pop = $('#loc-pop'), inp = $('#fs-loc'); if (!pop) return;
+  if (!FS.open || !ST.places) { pop.hidden = true; inp && inp.setAttribute('aria-expanded', 'false'); return; }
+  const items = locResults(FS.q); FS.items = items; FS.hi = Math.min(FS.hi, Math.max(0, items.length - 1));
+  let g = '', h = '';
+  items.forEach((it, i) => {
+    if (it.grp !== g) { g = it.grp; h += `<div class="cmdk-grp">${esc(g)}</div>`; }
+    const added = FS.locs.some(l => sameLoc(l, it));
+    h += `<button class="combo-it ${i === FS.hi ? 'on' : ''}" data-fsx="addloc" data-li="${i}" ${added ? 'disabled' : ''}>${flag(it.country, 20)}<span><b>${esc(it.label)}</b><small>${esc(it.type === 'postal' ? (it.place ? it.place + ' · ' : '') + 'Area around this postal code' : locSub(it))}${it.type === 'city' && it.pop ? ' · pop. ' + fmt(it.pop) : ''}</small></span>${added ? '<em>Added</em>' : ''}</button>`;
+  });
+  if (!items.length) h = `<div class="empty" style="padding:18px"><b>No match for “${esc(FS.q)}”</b>Check the spelling, try the ${COUNTRY[FS.country].rw} instead, or switch country above.</div>`;
+  pop.innerHTML = h; pop.hidden = false; inp.setAttribute('aria-expanded', 'true');
+  pop.querySelector('.on')?.scrollIntoView({ block: 'nearest' });
+}
+async function pasteApply() {
+  await Promise.all(Object.keys(COUNTRY).map(loadPostal));
+  const lines = $('#fs-paste').value.split(/\n|;/).map(s => s.trim()).filter(Boolean);
+  let added = 0; const miss = [], keep = FS.country;
+  for (const line of lines) {
+    let hit = null;
+    for (const c of [keep, ...Object.keys(COUNTRY).filter(k => k !== keep)]) {
+      FS.country = c;
+      const r = locResults(line).filter(x => !x.grp.startsWith('In ') && !x.grp.startsWith('Largest'));
+      const first = norm(line.split(',')[0]);
+      const exact = r.find(x => norm(x.label) === first);
+      hit = exact || (r[0] && (r[0].type === 'postal' || norm(r[0].label).startsWith(first)) ? r[0] : null);
+      if (hit) break;
+    }
+    FS.country = keep;
+    if (hit) { if (!FS.locs.some(l => sameLoc(l, hit))) { addLoc(hit); added++; } } else miss.push(line);
+  }
+  FS.pasteMsg = `Added ${added} location${added === 1 ? '' : 's'}.` + (miss.length ? ` Couldn't find: ${miss.slice(0, 4).join(', ')}${miss.length > 4 ? '…' : ''}` : '');
+  if (!miss.length) FS.paste = false;
+  render(); toast(`Added ${added} location${added === 1 ? '' : 's'}`);
+}
+async function startSearch() {
+  const terms = activeTerms(), circles = FS.locs.flatMap(circlesFor);
+  const name = FS.nameEdited && FS.name.trim() ? FS.name.trim() : autoName();
+  FS.busy = true; refreshFind([]);
+  try {
+    const r = await api('POST', '/api/searches', { name, industry_id: FS.ind, terms, circles, limit: FS.limit, depth: FS.depth, emails: FS.emails, locationLabels: FS.locs.map(locTitle) });
+    upsertSearch(r.search); toast(`“${name}” started`); FS.nameEdited = false; FS.name = ''; startPolling();
+  } catch (e) {
+    toast(e.message, 'alert');
+    if (e.status === 502) refreshSearches();
+  } finally { FS.busy = false; refreshFind([]); renderJobs(); $('#jobs')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+}
+function jobsHTML() {
+  if (!ST.searches.length) return `<div class="empty"><b>No searches yet</b>Your searches and their progress show up here.</div>`;
+  const list = FS.allHist ? ST.searches : ST.searches.slice(0, 10);
+  return list.map(j => {
+    const active = ACTIVE(j), check = j.kind === 'check';
+    const mapPct = j.total ? j.done / j.total : 0, chkPct = j.to_check ? j.checked / j.to_check : 0;
+    const pct = check ? chkPct * 100 : j.status === 'done' ? 100 : (j.depth > 0 || j.emails) ? (mapPct * 70 + chkPct * 30) : mapPct * 100;
+    const stage = j.status === 'queued' ? 'Waiting for GitHub to start' : j.status === 'running' ? (check || (j.total && j.done >= j.total) || j.limit_reached ? 'Checking websites' : 'Searching Google Maps') : '';
+    const pill = active ? `<span class="pill c-info">${stage}</span>` : j.status === 'done' ? '' : j.status === 'failed' ? '<span class="pill c-bad">Stopped</span>' : j.status === 'cancelled' ? '<span class="pill c-idle">Cancelled</span>' : '';
+    const depthLbl = check ? '' : `<span class="pill plain c-idle">${['Business info', 'Website check', 'Contact form check'][j.depth] || ''}${j.emails ? ' + emails' : ''}</span>`;
+    const stats = check
+      ? `<span><b>${fmt(j.checked)}</b> of ${fmt(j.to_check)} checked</span>`
+      : `<span><b>${fmt(j.new)}</b> new leads</span><span>${fmt(j.found)} found</span><span>${fmt(j.dup)} duplicates</span>${j.excluded ? `<button class="linkbtn muted" data-excl="${j.id}">${fmt(j.excluded)} excluded</button>` : ''}${j.to_check ? `<span>${fmt(j.checked)} / ${fmt(j.to_check)} websites checked</span>` : ''}${j.limit_reached ? `<span style="color:var(--ok);font-weight:550">Reached your limit of ${fmt(j.limit)}</span>` : ''}${active && j.total ? `<span>${fmt(j.done)} / ${fmt(j.total)} map searches</span>` : ''}`;
+    return `<div class="job"><div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+      <div class="row"><b>${esc(j.name)}</b><span class="sub">${whenPT(j.created_at)}</span>${depthLbl}${pill}</div>
+      ${active ? `<div class="seg" style="height:6px"><i style="width:${Math.max(2, pct)}%;background:var(--info)"></i></div>` : ''}
+      <div class="jstats num">${stats}</div>
+      ${j.status === 'failed' && j.error ? `<div class="help" style="color:var(--bad)">${esc(j.error)}</div>` : ''}</div>
+      <div class="row" style="gap:4px">${j.run_url ? `<a class="btn sm ghost" href="${esc(j.run_url)}" target="_blank" rel="noopener" title="Open the run on GitHub">${ic('ext', 13)}Log</a>` : ''}
+        ${active ? `<button class="btn sm ghost" data-jact="cancel" data-id="${j.id}">Cancel</button>` : ''}
+        ${j.status === 'failed' || j.status === 'cancelled' || (active && Date.now() - (j.heartbeat_at || j.started_at || j.created_at) > 5 * 60 * 1000) ? `<button class="btn sm" data-jact="retry" data-id="${j.id}">${ic('play', 12)}Retry</button>` : ''}
+        ${!check && !active ? `<button class="btn sm ghost" data-jact="again" data-id="${j.id}">Run again</button>` : ''}
+        ${!check && j.new ? `<button class="btn sm ghost" data-jact="export" data-id="${j.id}">${ic('download', 14)}Export</button><button class="btn sm" data-jact="view" data-id="${j.id}">View leads ${ic('arrow', 13)}</button>` : ''}</div></div>`;
+  }).join('') + (ST.searches.length > 10 ? `<div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:center"><button class="btn ghost sm" data-act="allhist">${FS.allHist ? 'Show fewer' : `Show all ${ST.searches.length} searches`}</button></div>` : '');
+}
+function renderJobs() { const el = $('#jobs'); if (el) el.innerHTML = jobsHTML(); }
+async function excludedModal(id) {
+  $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop><div class="card-b"><span class="spin"></span> Loading…</div></div></div>`;
+  try {
+    const r = await api('GET', `/api/searches/${id}/excluded`), s = ST.searches.find(x => x.id === id);
+    $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Excluded results">
+      <div class="card-h"><div><h2>Excluded results (${fmt(r.excluded.length)})</h2><p>Google returned these, but their category isn't on ${esc(industryName(s?.industry_id))}'s accepted list, so they never entered your leads.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
+      <div class="tbl-wrap" style="max-height:420px"><table><thead><tr><th>Business</th><th>Google category</th><th></th></tr></thead><tbody>${r.excluded.map(x => `<tr><td><div class="biz">${esc(x.name)}</div><div class="sub">${esc(x.address || '')}</div></td><td class="sub">${esc(x.category || 'No category')}</td><td>${x.category ? `<button class="btn sm ghost" data-acceptcat="${esc(x.category)}" data-ind="${s?.industry_id}">Accept category</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="3"><div class="empty">Nothing was excluded.</div></td></tr>'}</tbody></table></div>
+      <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0"><span class="help">Accepting a category adds it to the industry. Future searches keep those businesses; run the search again to bring these in.</span><button class="btn" data-act="close">Done</button></div></div></div>`;
+  } catch (e) { closeOverlay(); toast(e.message, 'alert'); }
+}
+function loadIntoForm(j) {
+  FS.ind = j.industry_id; const d = curInd();
+  FS.terms = new Set((d?.terms || []).map((t, i) => (!j.terms.length || j.terms.includes(t)) ? i : -1).filter(i => i >= 0));
+  FS.extra = j.terms.filter(t => !d?.terms.includes(t)); FS.limit = j.limit; FS.depth = j.depth; FS.emails = j.emails;
+  FS.name = j.name; FS.nameEdited = true; render(); window.scrollTo({ top: 0, behavior: 'smooth' });
+  toast('Settings loaded. Add the locations again, then press Start search');
+}
+
+/* ================================================================ industries */
+V.industries = () => `
+  <div class="head"><div><div class="eyebrow">Setup</div><h1>Industries</h1><p>Each industry has the search terms used on Google Maps and the Google categories that count as a match. Results in other categories are set aside, which keeps your leads accurate.</p></div>
+    <button class="btn primary" data-act="indnew">${ic('plus')}Add industry</button></div>
+  ${industriesTable()}`;
+function industriesTable() {
+  const counts = new Map(); for (const L of ST.leads) counts.set(L.industry_id, (counts.get(L.industry_id) || 0) + 1);
+  const last = new Map(); for (const s of ST.searches) if (s.industry_id && !last.has(s.industry_id)) last.set(s.industry_id, s.created_at);
+  const act = ST.industries.filter(d => !d.archived), arc = ST.industries.filter(d => d.archived);
+  return `<div id="ind-table" style="display:flex;flex-direction:column;gap:16px"><div class="card"><div class="tbl-wrap"><table><thead><tr><th>Industry</th><th>Search terms</th><th>Accepted Google categories</th><th style="text-align:right">Leads</th><th>Last searched</th><th></th></tr></thead><tbody>
+    ${act.map(d => `<tr><td class="biz">${esc(d.name)}</td><td style="white-space:normal;min-width:220px">${d.terms.map(t => `<span class="term">${esc(t)}</span>`).join('')}</td><td class="sub" style="white-space:normal;min-width:200px">${esc(d.categories.join(', ') || 'Any category')}</td><td class="num" style="text-align:right">${fmt(counts.get(d.id) || 0)}</td><td class="sub">${last.has(d.id) ? dayPT(last.get(d.id)) : 'Never'}</td>
+      <td><div class="row" style="gap:4px;flex-wrap:nowrap"><button class="btn sm ghost" data-indedit="${d.id}">${ic('edit', 14)}Edit</button><button class="btn sm ghost" data-indrm="${d.id}">Remove</button></div></td></tr>`).join('')}
+  </tbody></table></div><div class="card-h" style="border-top:1px solid var(--line);border-bottom:0"><p>${act.length} industries · ${fmt(act.reduce((a, d) => a + d.terms.length, 0))} search terms</p></div></div>
+  ${arc.length ? `<div class="card"><div class="card-h"><div><h3>Removed</h3><p>Their leads stay in your workspace and keep the industry label.</p></div></div><div class="tbl-wrap"><table><tbody>${arc.map(d => `<tr><td class="biz">${esc(d.name)}</td><td class="sub">${fmt(counts.get(d.id) || 0)} leads</td><td style="text-align:right"><button class="btn sm" data-indrestore="${d.id}">Restore</button></td></tr>`).join('')}</tbody></table></div></div>` : ''}</div>`;
+}
+let EDIT = null;
+function indModal() {
+  const e = EDIT;
+  const tok = (k, ph) => `<div class="tok" data-tokbox="${k}">${e[k].map((t, i) => `<span class="term">${esc(t)}<button data-tokdel="${k}:${i}" aria-label="Remove ${esc(t)}">×</button></span>`).join('')}<input id="tok-${k}" data-tok="${k}" placeholder="${ph}" autocomplete="off"></div>`;
+  $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Industry">
+    <div class="card-h"><div><h2>${e.id == null ? 'Add industry' : 'Edit ' + esc(e.orig)}</h2><p>Press Enter after each term.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
+    <div class="card-b" style="display:flex;flex-direction:column;gap:14px">
+      <div class="field"><label for="ind-name">Name</label><input class="input" id="ind-name" value="${esc(e.name)}" placeholder="e.g. Fence Installers"></div>
+      <div class="field"><span class="flabel">Search terms</span>${tok('terms', 'e.g. fence contractor')}<span class="help">What you'd type into Google Maps. Each term runs as its own search.</span></div>
+      <div class="field"><span class="flabel">Accepted Google categories</span>${tok('categories', 'e.g. Fence contractor')}<span class="help">Leave empty to accept every category. You can add categories later from a search's excluded list.</span></div>
+      <div id="ind-err" class="help" style="color:var(--bad)"></div></div>
+    <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="indsave">${e.id == null ? 'Add industry' : 'Save changes'}</button></div></div></div>`;
+  setTimeout(() => $(e.id == null ? '#ind-name' : '#tok-terms')?.focus(), 0);
+}
+async function saveIndustry() {
+  const e = EDIT; e.name = $('#ind-name').value.trim();
+  for (const k of ['terms', 'categories']) { const v = $('#tok-' + k).value.trim(); if (v) e[k].push(v); }
+  try {
+    const r = e.id == null ? await api('POST', '/api/industries', e) : await api('PUT', `/api/industries/${e.id}`, e);
+    const i = ST.industries.findIndex(x => x.id === r.industry.id); if (i >= 0) ST.industries[i] = r.industry; else ST.industries.push(r.industry);
+    ST.industries.sort((a, b) => a.name.localeCompare(b.name));
+    closeOverlay(); render(); toast(e.id == null ? `${r.industry.name} added` : 'Changes saved');
+  } catch (err) { $('#ind-err').textContent = err.message; }
+}
+
+/* ================================================================ events */
+document.addEventListener('click', async (e) => {
+  const t = e.target, ds = k => t.closest(`[data-${k}]`)?.dataset[k];
+  let v;
+  if (t.closest('[data-act="close"]') && (!t.closest('[data-stop]') || t.closest('button[data-act="close"]'))) { closeOverlay(); return; }
+  if (L$.openDD && !t.closest('.dd')) { L$.openDD = null; L$.ddq = ''; renderPanel(); }
+  if (FS.open && !t.closest('#combo')) { FS.open = false; renderPop(); }
+  if ((v = ds('copy')) !== undefined) { try { await navigator.clipboard.writeText(v); toast('Copied'); } catch { toast('Copy blocked by the browser', 'alert'); } return; }
+  if ((v = ds('sortcol')) !== undefined) { L$.sort = L$.sort === v ? 'reviews' : v; const s = $('#lsort'); if (s) s.value = L$.sort; leadsUpdate(false); $('#vt').scrollTop = 0; return; }
+  if ((v = ds('dd')) !== undefined) { L$.openDD = L$.openDD === v ? null : v; L$.ddq = ''; renderPanel(); setTimeout(() => $('#ddq-' + v)?.focus(), 0); return; }
+  if ((v = ds('ddonly')) !== undefined) { e.stopPropagation(); const [k, val] = v.split(':'); L$.F[k] = new Set([+val]); changed(); return; }
+  if ((v = ds('ddopt')) !== undefined) { const [k, val] = v.split(':'); const s = L$.F[k]; s.has(+val) ? s.delete(+val) : s.add(+val); changed(); return; }
+  if ((v = ds('ddclear')) !== undefined) { L$.F[v] = new Set(); changed(); return; }
+  if ((v = ds('view')) !== undefined) { applyView(v); return; }
+  if ((v = ds('viewdel')) !== undefined) { try { await api('DELETE', `/api/views/${v}`); ST.views = ST.views.filter(x => String(x.id) !== v); renderViews(); toast('View deleted'); } catch (err) { toast(err.message, 'alert'); } return; }
+  if ((v = ds('lsel')) !== undefined) { e.stopPropagation(); const id = +v; L$.sel.has(id) ? L$.sel.delete(id) : L$.sel.add(id); renderSel(); renderRows(); return; }
+  if ((v = ds('lead')) !== undefined) { leadDrawer(+v); return; }
+  if ((v = ds('xpreset')) !== undefined) { XP.preset = v; XP.cols = new Set(XPRESETS[v]); XP.file = $('#x-file').value; exportModal(); return; }
+  if ((v = ds('xfmt')) !== undefined) { XP.fmt = v; XP.file = $('#x-file').value; exportModal(); return; }
+  if ((v = ds('xact')) !== undefined) { doExport(v); return; }
+  if ((v = ds('ckgo')) !== undefined) { startCheck(v.split(',').map(Number)); return; }
+  if ((v = ds('excl')) !== undefined) { excludedModal(+v); return; }
+  if ((v = ds('acceptcat')) !== undefined) {
+    const indId = +t.closest('[data-ind]').dataset.ind;
+    try { const r = await api('POST', `/api/industries/${indId}/categories`, { category: v }); const i = ST.industries.findIndex(x => x.id === indId); if (i >= 0) ST.industries[i] = r.industry; t.closest('button').outerHTML = '<span class="pill c-ok">Accepted</span>'; } catch (err) { toast(err.message, 'alert'); }
+    return;
+  }
+  if ((v = ds('jact')) !== undefined) {
+    const id = +t.closest('[data-id]').dataset.id, j = ST.searches.find(x => x.id === id);
+    if (v === 'view') { L$.F = defaultF(); L$.F.src = new Set([id]); L$.view = null; location.hash = '#leads'; }
+    else if (v === 'export') openExport('search', id);
+    else if (v === 'again') loadIntoForm(j);
+    else if (v === 'cancel' || v === 'retry') {
+      try { const r = await api('POST', `/api/searches/${id}/${v}`); upsertSearch(r.search); renderJobs(); if (v === 'retry') { toast('Search restarted'); startPolling(); } else toast('Search cancelled. Leads found so far were kept'); }
+      catch (err) { toast(err.message, 'alert'); if (err.status === 502) refreshSearches(); }
+    }
+    return;
+  }
+  if ((v = ds('indedit')) !== undefined) { const d = ST.industries.find(x => x.id === +v); EDIT = { id: d.id, orig: d.name, name: d.name, terms: [...d.terms], categories: [...d.categories] }; indModal(); return; }
+  if ((v = ds('indrm')) !== undefined) {
+    const d = ST.industries.find(x => x.id === +v), n = ST.leads.filter(L => L.industry_id === d.id).length;
+    $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop><div class="card-h"><div><h2>Remove ${esc(d.name)}?</h2></div></div><div class="card-b"><p style="margin:0">It won't appear in Find leads anymore. Its <b>${fmt(n)} leads</b> stay in your workspace with the same label, and you can restore it later.</p></div>
+      <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-indrmok="${d.id}" style="background:var(--bad);border-color:var(--bad);color:#fff">Remove industry</button></div></div></div>`;
+    return;
+  }
+  if ((v = ds('indrmok')) !== undefined || (v = ds('indrestore')) !== undefined) {
+    const restore = t.closest('[data-indrestore]'), id = +v;
+    try { await api(restore ? 'POST' : 'DELETE', restore ? `/api/industries/${id}/restore` : `/api/industries/${id}`); ST.industries.find(x => x.id === id).archived = !restore; closeOverlay(); render(); toast(restore ? 'Industry restored' : 'Industry removed'); } catch (err) { toast(err.message, 'alert'); }
+    return;
+  }
+  if ((v = ds('tokdel')) !== undefined) { const [k, i] = v.split(':'); EDIT.name = $('#ind-name').value; EDIT[k].splice(+i, 1); indModal(); return; }
+  if (t.closest('[data-tokbox]') && !t.closest('button')) t.closest('[data-tokbox]').querySelector('input')?.focus();
+  if ((v = ds('limit')) !== undefined) { FS.limit = +v; $('#fs-limit').value = FS.limit || ''; document.querySelectorAll('[data-limit]').forEach(b => b.classList.toggle('on', +b.dataset.limit === FS.limit)); refreshFind([]); return; }
+  const term = t.closest('[data-fsterm]'); if (term) { const i = +term.dataset.fsterm; FS.terms.has(i) ? FS.terms.delete(i) : FS.terms.add(i); refreshFind(['what']); return; }
+  if ((v = ds('fsextra')) !== undefined) { FS.extra.splice(+v, 1); refreshFind(['what']); return; }
+  if (t.id === 'fs-loc') { FS.open = true; renderPop(); return; }
+  if ((v = ds('fsx')) !== undefined) {
+    const b = t.closest('[data-fsx]');
+    switch (v) {
+      case 'terms': FS.showTerms = !FS.showTerms; refreshFind(['what']); if (FS.showTerms) setTimeout(() => $('#fs-extra')?.focus(), 0); break;
+      case 'country': FS.country = b.dataset.c; FS.q = ''; FS.hi = 0; render(); setTimeout(() => { $('#fs-loc').focus(); FS.open = true; renderPop(); }, 0); break;
+      case 'addloc': { const it = FS.items[+b.dataset.li]; if (it && addLoc(it)) { FS.q = ''; $('#fs-loc').value = ''; FS.hi = 0; refreshFind(['where']); renderPop(); $('#fs-loc').focus(); } break; }
+      case 'rmloc': FS.locs.splice(+b.dataset.i, 1); refreshFind(['where']); break;
+      case 'clearlocs': FS.locs = []; refreshFind(['where']); break;
+      case 'pastetoggle': FS.paste = !FS.paste; FS.pasteMsg = ''; render(); setTimeout(() => $('#fs-paste')?.focus(), 0); break;
+      case 'pasteapply': pasteApply(); break;
+      case 'resetname': FS.nameEdited = false; FS.name = ''; $('#fs-name').value = autoName(); refreshFind([]); break;
+      case 'start': startSearch(); break;
+    }
+    return;
+  }
+  const a = ds('act'); if (!a) return;
+  switch (a) {
+    case 'logout': await api('POST', '/api/logout').catch(() => {}); showLogin(); break;
+    case 'theme': { const order = ['system', 'light', 'dark'], n = order[(order.indexOf(themeGet()) + 1) % 3]; try { localStorage.setItem('lh-theme', n); } catch { /* ignore */ } applyTheme(n); break; }
+    case 'sync': sync({ quiet: false }); break;
+    case 'reset': L$.F = defaultF(); L$.view = null; if ($('#lq')) $('#lq').value = ''; leadsUpdate(); break;
+    case 'fopen': L$.fopen = !L$.fopen; $('#lf-panel').classList.toggle('open', L$.fopen); break;
+    case 'selall': { const allIn = L$.res.length && L$.res.every(l => L$.sel.has(l.id)); if (allIn && t.closest('#cb-all')) L$.sel.clear(); else L$.res.forEach(l => L$.sel.add(l.id)); renderSel(); renderRows(); break; }
+    case 'clearsel': L$.sel.clear(); renderSel(); renderRows(); break;
+    case 'export': openExport(L$.sel.size ? 'sel' : 'view'); break;
+    case 'checkmodal': checkModal([...L$.sel]); break;
+    case 'checkone': checkModal([+t.closest('[data-id]').dataset.id]); break;
+    case 'bdnc': {
+      const ids = [...L$.sel];
+      try { await api('POST', '/api/leads/bulk', { ids, status: 3 }); toast(`${fmt(ids.length)} leads marked do not contact`, 'shield'); L$.sel.clear(); await sync(); } catch (err) { toast(err.message, 'alert'); }
+      break;
+    }
+    case 'saveview':
+      $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop><div class="card-h"><div><h2>Save view</h2><p>${esc(summaryParts().join(' · ') || 'All leads')}</p></div></div><div class="card-b"><div class="field"><label for="vname">Name</label><input class="input" id="vname" placeholder="e.g. Florida painters, 4.5+"></div><div id="verr" class="help" style="color:var(--bad)"></div></div><div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="saveviewok">Save view</button></div></div></div>`;
+      setTimeout(() => $('#vname').focus(), 0); break;
+    case 'saveviewok': {
+      const F = L$.F, d = defaultF(), f = {};
+      for (const k of Object.keys(d)) { if (F[k] instanceof Set) { if (F[k].size) f[k] = [...F[k]]; } else if (F[k] !== d[k] && k !== 'q') f[k] = F[k] === Infinity ? 'inf' : F[k]; }
+      for (const k of ['loc']) if (f[k]) f[k + 'Names'] = f[k].map(i => LOCS[i]);
+      try { const r = await api('POST', '/api/views', { name: $('#vname').value.trim(), filters: f }); ST.views.push(r.view); L$.view = r.view.id; closeOverlay(); renderViews(); toast('View saved'); } catch (err) { $('#verr').textContent = err.message; }
+      break;
+    }
+    case 'refreshjobs': refreshSearches(); break;
+    case 'allhist': FS.allHist = !FS.allHist; renderJobs(); break;
+    case 'indnew': EDIT = { id: null, name: '', terms: [], categories: [] }; indModal(); break;
+    case 'indsave': saveIndustry(); break;
+  }
+});
+function applyView(id) {
+  L$.F = defaultF(); L$.view = id === 'all' ? 'all' : +id;
+  const v = ST.views.find(x => x.id === +id);
+  if (v) {
+    const f = typeof v.filters === 'string' ? JSON.parse(v.filters) : v.filters;
+    for (const [k, val] of Object.entries(f)) {
+      if (k.endsWith('Names')) continue;
+      if (k === 'loc') { L$.F.loc = new Set((f.locNames || []).map(n => LOC_IDX.get(n)).filter(i => i !== undefined)); continue; }
+      L$.F[k] = Array.isArray(val) ? new Set(val) : val === 'inf' ? Infinity : val;
+    }
+  }
+  if ($('#lq')) $('#lq').value = L$.F.q;
+  leadsUpdate(); $('#vt').scrollTop = 0; renderViews();
+}
+document.addEventListener('keydown', (e) => {
+  const t = e.target;
+  if (t.dataset && t.dataset.tok && (e.key === 'Enter' || e.key === ',')) { e.preventDefault(); const v = t.value.trim(); if (!v) return; EDIT.name = $('#ind-name').value; EDIT[t.dataset.tok].push(v); const k = t.dataset.tok; indModal(); setTimeout(() => $('#tok-' + k)?.focus(), 0); return; }
+  if (t.dataset && t.dataset.tok && e.key === 'Backspace' && !t.value && EDIT[t.dataset.tok].length) { EDIT.name = $('#ind-name').value; EDIT[t.dataset.tok].pop(); const k = t.dataset.tok; indModal(); setTimeout(() => $('#tok-' + k)?.focus(), 0); return; }
+  if (t.classList && (t.classList.contains('dd-opt') || t.classList.contains('termrow')) && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); t.click(); return; }
+  if (t.id === 'fs-loc') {
+    const n = FS.items.length;
+    if (e.key === 'ArrowDown') { e.preventDefault(); FS.open = true; FS.hi = Math.min(n - 1, FS.hi + 1); renderPop(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); FS.hi = Math.max(0, FS.hi - 1); renderPop(); }
+    else if (e.key === 'Enter') { e.preventDefault(); const it = FS.items[FS.hi]; if (FS.open && it && addLoc(it)) { FS.q = ''; t.value = ''; FS.hi = 0; refreshFind(['where']); renderPop(); } }
+    else if (e.key === 'Escape') { FS.open = false; renderPop(); }
+    else if (e.key === 'Backspace' && !t.value && FS.locs.length) { FS.locs.pop(); refreshFind(['where']); }
+    return;
+  }
+  if (t.id === 'fs-extra' && e.key === 'Enter') { e.preventDefault(); const v = t.value.trim(); if (v && !activeTerms().includes(v)) { FS.extra.push(v); refreshFind(['what']); setTimeout(() => $('#fs-extra')?.focus(), 0); } return; }
+  if (e.key === 'Escape') { if (L$.openDD) { L$.openDD = null; renderPanel(); } else closeOverlay(); }
+});
+let noteTimer = 0;
+document.addEventListener('input', (e) => {
+  const t = e.target;
+  if (t.id === 'lq') { L$.F.q = t.value; changed(); return; }
+  if (t.id && t.id.startsWith('ddq-')) { L$.ddq = t.value; renderPanel(); return; }
+  if (t.id === 'fs-loc') { FS.q = t.value; FS.hi = 0; FS.open = true; renderPop(); return; }
+  if (t.id === 'fs-name') { FS.name = t.value; FS.nameEdited = true; const h = $('#fs-namehelp'); if (h) h.innerHTML = '<button class="linkbtn" data-fsx="resetname">Use suggested name</button>'; return; }
+  if (t.id === 'fs-limit') { const v = parseInt(t.value, 10); FS.limit = v > 0 ? v : 0; document.querySelectorAll('[data-limit]').forEach(b => b.classList.toggle('on', +b.dataset.limit === FS.limit)); $('#fs-sum').innerHTML = sumHTML(); return; }
+  if (t.dataset.lnote) { clearTimeout(noteTimer); $('#dnote-h').textContent = 'Saving…'; noteTimer = setTimeout(() => saveLead(+t.dataset.lnote, { notes: t.value }, () => { const h = $('#dnote-h'); if (h) h.textContent = 'Saved.'; }), 700); return; }
+  if (t.dataset.rng) {
+    const k = t.dataset.rng, F = L$.F; let v = +t.value;
+    if (k === 'rMin') { F.rMin = Math.min(v, F.rMax); t.value = F.rMin; $('#n-rMin').value = F.rMin.toFixed(1); }
+    if (k === 'rMax') { F.rMax = Math.max(v, F.rMin); t.value = F.rMax; $('#n-rMax').value = F.rMax.toFixed(1); }
+    if (k === 'vMin') { const b = rvIdxMax(F.vMax); v = Math.min(v, b - 1); t.value = v; F.vMin = RV_STOPS[v]; $('#n-vMin').value = F.vMin; }
+    if (k === 'vMax') { const a = rvIdxMin(F.vMin); v = Math.max(v, a + 1); t.value = v; F.vMax = v === 9 ? Infinity : RV_STOPS[v] - 1; $('#n-vMax').value = F.vMax === Infinity ? '' : F.vMax; }
+    const fr = $('#fill-rt'); if (fr) { fr.style.left = ((F.rMin - 1) / 4 * 100) + '%'; fr.style.right = (100 - (F.rMax - 1) / 4 * 100) + '%'; }
+    const fv = $('#fill-rv'); if (fv) { fv.style.left = (rvIdxMin(F.vMin) / 9 * 100) + '%'; fv.style.right = (100 - rvIdxMax(F.vMax) / 9 * 100) + '%'; }
+    changed(false);
+  }
+});
+document.addEventListener('change', async (e) => {
+  const t = e.target;
+  if (t.dataset.rng) { renderPanel(); return; }
+  if (t.dataset.num) {
+    const k = t.dataset.num, F = L$.F, v = t.value === '' ? null : +t.value;
+    if (k === 'rMin') F.rMin = Math.max(1, Math.min(v ?? 1, F.rMax)); if (k === 'rMax') F.rMax = Math.min(5, Math.max(v ?? 5, F.rMin));
+    if (k === 'vMin') F.vMin = Math.max(0, Math.min(v ?? 0, F.vMax)); if (k === 'vMax') F.vMax = v == null ? Infinity : Math.max(v, F.vMin);
+    changed(); return;
+  }
+  if (t.dataset.fsel) { const k = t.dataset.fsel; L$.F[k] = k === 'add' ? +t.value : t.value; changed(); return; }
+  if (t.dataset.fchk) { L$.F[t.dataset.fchk] = t.checked; changed(); return; }
+  if (t.id === 'lsort') { L$.sort = t.value; leadsUpdate(false); $('#vt').scrollTop = 0; return; }
+  if (t.dataset.lstatus) { saveLead(+t.dataset.lstatus, { status: +t.value }, () => toast('Status saved')); return; }
+  if (t.dataset.xscope) { XP.scope = t.dataset.xscope; XP.file = ''; exportModal(); return; }
+  if (t.dataset.xopt) { XP[t.dataset.xopt] = t.checked; XP.file = $('#x-file').value; exportModal(); return; }
+  if (t.dataset.xcol) { t.checked ? XP.cols.add(t.dataset.xcol) : XP.cols.delete(t.dataset.xcol); XP.preset = Object.entries(XPRESETS).find(([, a]) => a.length === XP.cols.size && a.every(c => XP.cols.has(c)))?.[0] || 'custom'; XP.file = $('#x-file').value; exportModal(); return; }
+  if (t.id === 'x-pfmt') { XP.pfmt = t.value; XP.file = $('#x-file').value; exportModal(); return; }
+  if (t.dataset.ck) { CK[t.dataset.ck] = t.checked; t.closest('.opt').classList.toggle('on', t.checked); return; }
+  if (t.id === 'fs-ind') { FS.ind = +t.value; FS.terms = new Set(curInd().terms.map((_, i) => i)); FS.extra = []; refreshFind(['what']); return; }
+  if (t.dataset.depth != null) { FS.depth = +t.dataset.depth; if (FS.depth === 0) FS.emails = false; $('#fs-collect').innerHTML = collectHTML(); refreshFind([]); return; }
+  if (t.id === 'fs-emails') { FS.emails = t.checked; if (FS.emails && FS.depth === 0) FS.depth = 1; $('#fs-collect').innerHTML = collectHTML(); refreshFind([]); return; }
+  if (t.dataset.locrad != null) { FS.locs[+t.dataset.locrad].rad = +t.value; refreshFind(['where']); return; }
+});
+async function saveLead(id, patch, done) {
+  try {
+    const r = await api('PATCH', `/api/leads/${id}`, patch);
+    applyRows(r.cols, [r.row]); saveCacheSoon(); bc && bc.postMessage('changed');
+    if ($('#vt')) leadsUpdate();
+    done && done();
+  } catch (err) { toast(err.message, 'alert'); }
+}
+
+/* ================================================================ boot */
+async function boot() {
+  let data;
+  try { data = await api('GET', '/api/bootstrap'); } catch (e) { if (e.status !== 401) $('#root').innerHTML = `<div class="boot"><div class="banner">${ic('alert', 18)}<div><b>LeadsHunter could not load</b>${esc(e.message)} <button class="linkbtn" onclick="location.reload()">Try again</button></div></div></div>`; return; }
+  ST.industries = data.industries; ST.searches = data.searches; ST.config = data.config; ST.cols = data.cols;
+  try { ST.views = (await api('GET', '/api/views')).views; } catch { ST.views = []; }
+  shell(); render();
+  await initLeads();
+  if (ST.searches.some(ACTIVE)) startPolling();
+  setInterval(() => { if (!document.hidden && !pollTimer) sync(); }, 60000);
+}
+boot();

@@ -1,0 +1,30 @@
+# Rendered into wrangler.toml by scripts/provision.mjs during deploy. Do not put secrets here.
+name = "leadshunter"
+main = "src/worker.js"
+compatibility_date = "2025-01-15"
+workers_dev = true
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "leadshunter"
+database_id = "__D1_ID__"
+migrations_dir = "migrations"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "__KV_ID__"
+
+[vars]
+GH_REPO = "__GH_REPO__"
+GH_REF = "main"
+
+[triggers]
+crons = ["*/10 * * * *"]
+
+[observability]
+enabled = true

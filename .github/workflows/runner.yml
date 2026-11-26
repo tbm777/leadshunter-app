@@ -1,0 +1,50 @@
+name: Runner
+
+# Started by the LeadsHunter Worker for each search or website check. Never prints lead data.
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: Job ID from LeadsHunter
+        required: true
+      api:
+        description: LeadsHunter URL (filled in by the app)
+        required: false
+
+concurrency:
+  group: job-${{ inputs.job_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Restore gosom
+        id: gosom
+        uses: actions/cache@v4
+        with:
+          path: gmaps
+          key: gosom-1.9.2
+      - name: Download gosom 1.9.2
+        if: steps.gosom.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL --retry 4 -o gmaps https://github.com/gosom/google-maps-scraper/releases/download/v1.9.2/google_maps_scraper-1.9.2-linux-amd64
+          chmod +x gmaps
+      - name: Run job
+        env:
+          LH_API: ${{ vars.LH_API || inputs.api }}
+          RUNNER_SECRET: ${{ secrets.RUNNER_SECRET }}
+          JOB_ID: ${{ inputs.job_id }}
+          GMAPS_BIN: ./gmaps
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          chmod +x gmaps
+          node runner/run.mjs
