@@ -4,6 +4,7 @@ import { getBrowser, closeBrowser } from './browser.mjs';
 import { submitForm } from './forms/filler.mjs';
 import { engineProfile, localizeProfile } from '../public/shared/fallbacks.js';
 import { isSocialHost } from '../public/shared/normalize.js';
+import { Metrics } from './lib/metrics.mjs';
 
 const CONCURRENCY = +process.env.OUTREACH_CONCURRENCY || 3;
 const ITEM_TIMEOUT = 150000;
@@ -32,7 +33,7 @@ async function contactPages(page, base) {
   return out.sort((a, b) => (/contact/i.test(b) ? 1 : 0) - (/contact/i.test(a) ? 1 : 0)).slice(0, 3);
 }
 
-async function attempt(ctx, item, profile, dryRun) {
+async function attempt(ctx, item, profile, dryRun, stat = {}) {
   const lead = item.lead;
   const tried = new Set();
   // Directory and social profile pages (Houzz, Yelp…) only have the platform's own forms, like signups: never fill those.
@@ -43,8 +44,11 @@ async function attempt(ctx, item, profile, dryRun) {
     if (tried.has(url)) return null;
     tried.add(url);
     const page = await ctx.newPage();
+    stat.pages = (stat.pages || 0) + 1;
+    const marks = {};
     try {
-      const r = await submitForm(page, url, profile, { lead, dryRun });
+      const r = await submitForm(page, url, profile, { lead, dryRun, marks });
+      marks.end = Date.now(); stat.marks = marks;
       r.form_url = page.url();
       if (r.status === 'failed' && r.reason === 'no-form') { last = r; return { r, links: await contactPages(page, url) }; }
       return { r, done: true };
@@ -63,11 +67,29 @@ async function attempt(ctx, item, profile, dryRun) {
   return last;
 }
 
+/** One form's timings and outcome, aggregated only. */
+function record(M, r, stat, totalMs) {
+  M.time('total', totalMs);
+  const k = stat.marks || {};
+  if (k.dom) M.time('open', k.dom - k.start);
+  if (k.loaded) M.time('settle', k.loaded - k.dom);
+  if (k.scanned) M.time('find', k.scanned - k.loaded);
+  if (k.filled) M.time('fill', k.filled - k.scanned);
+  if (k.filled && k.end) M.time('submit', k.end - k.filled);
+  M.count('outcome', r.status);
+  if (r.reason) M.count('reason', r.reason);
+  M.count('pages', String(Math.min(stat.pages || 0, 5)));
+  const tool = k.tool || 'unknown';
+  M.group('tool', tool, 'n');
+  M.group('tool', tool, r.status);
+}
+
 export async function runOutreach({ api, JOB, log, isCancelled }) {
   const data = await api('GET', `/api/runner/jobs/${JOB}/outreach`);
   const dryRun = data.mode === 'test';
   const profile = profileFrom(data.sender, data.campaign);
   const items = [...data.items];
+  const M = new Metrics('outreach');
   log(`${dryRun ? 'Testing' : 'Sending'} ${items.length} form${items.length === 1 ? '' : 's'}.`);
   if (!items.length) return { requeue: [] };
   const browser = await getBrowser();
@@ -91,14 +113,15 @@ export async function runOutreach({ api, JOB, log, isCancelled }) {
       unattempted.delete(item.oid);
       const ctx = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: 'en-US' });
       await ctx.route('**/*', route => (['media'].includes(route.request().resourceType()) ? route.abort() : route.continue()));
-      let r;
+      let r; const stat = {}, t0 = Date.now();
       // Each lead gets the text for the step it's on (follow-ups have their own message).
       const stepText = (data.campaign.steps || {})[item.step];
       // No address in the profile: use this business's own city, state and ZIP.
       const local = localizeProfile(profile, data.sender, item.lead);
       const prof = stepText && item.step > 1 ? { ...local, subject: stepText.subject || local.subject, message: stepText.message || local.message } : local;
-      try { r = await withTimeout(attempt(ctx, item, prof, dryRun), ITEM_TIMEOUT); }
+      try { r = await withTimeout(attempt(ctx, item, prof, dryRun, stat), ITEM_TIMEOUT); }
       catch { r = { status: 'failed', reason: 'site-too-slow' }; }
+      record(M, r, stat, Date.now() - t0);
       await ctx.close().catch(() => {});
       tally[r.status] = (tally[r.status] || 0) + 1;
       await report(item.oid, r);
@@ -107,5 +130,7 @@ export async function runOutreach({ api, JOB, log, isCancelled }) {
   await chain;
   await closeBrowser();
   log('Done:', Object.entries(tally).map(([k, v]) => `${v} ${k}`).join(', ') || 'nothing');
-  return { requeue: [...unattempted] };
+  const metrics = M.toJSON({ mode: data.mode, items: data.items.length, concurrency: CONCURRENCY });
+  log('Timing (s):', Object.entries(metrics.stages).map(([k, v]) => `${k} p50 ${(v.p50 / 1000).toFixed(1)} p95 ${(v.p95 / 1000).toFixed(1)}`).join(' · '));
+  return { requeue: [...unattempted], metrics };
 }

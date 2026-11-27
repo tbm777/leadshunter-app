@@ -1,0 +1,32 @@
+name: Scorecard
+
+# Prints the engine scorecard (pass/fail per production target) and free-tier usage. Aggregates only, never lead data.
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Days to look back
+        required: false
+        default: '7'
+  schedule:
+    - cron: '17 15 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  scorecard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/scorecard.mjs
+        env:
+          LH_API: ${{ vars.LH_API }}
+          RUNNER_SECRET: ${{ secrets.RUNNER_SECRET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DAYS: ${{ inputs.days || '7' }}

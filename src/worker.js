@@ -1,6 +1,7 @@
 // LeadsHunter API Worker. Serves the app (static assets), the JSON API and the runner endpoints.
 import { buildCells } from '../public/shared/grid.js';
 import * as O from './outreach.js';
+import { scorecard } from './scorecard.js';
 import { cleanWebsite, domainOf, isSharedDomain, isSocialHost, phoneE164, countryCode, categoryAccepted, parseAddress, prettyPhone } from '../public/shared/normalize.js';
 
 const MAX_TASKS = 6000;              // map searches per search job
@@ -100,6 +101,7 @@ async function route(req, env, url, ctx) {
   if (p === '/api/checks' && m === 'POST') return createCheck(env, await body(req));
 
   if (p === '/api/usage' && m === 'GET') return usage(env);
+  if (p === '/api/scorecard' && m === 'GET') return json(await scorecard(env, Math.min(90, Math.max(1, +url.searchParams.get('days') || 7))));
   if (p === '/api/snapshot' && m === 'GET') return getSnapshot(env);
   if (p === '/api/changes' && m === 'GET') return getChanges(env, url);
   if ((mm = p.match(/^\/api\/leads\/(\d+)$/)) && m === 'PATCH') return patchLead(env, +mm[1], await body(req));
@@ -404,6 +406,15 @@ async function bulkLeads(env, b) {
 async function runnerRoute(req, env, url) {
   const p = url.pathname, m = req.method;
   let mm;
+  if (p === '/api/runner/scorecard' && m === 'GET') return json(await scorecard(env, Math.min(90, Math.max(1, +url.searchParams.get('days') || 7))));
+  // Results of the accuracy and delivery tests: a percentage and a sample size, nothing else.
+  if (p === '/api/runner/score' && m === 'POST') {
+    const b = await body(req);
+    if (!['detection', 'fields', 'false_sent', 'seed'].includes(b.id)) throw new HttpError(400, 'Unknown score.');
+    const v = { pct: Math.round(Math.max(0, Math.min(100, +b.pct || 0)) * 10) / 10, n: Math.max(0, Math.floor(+b.n || 0)), at: new Date().toISOString().slice(0, 10) };
+    await env.DB.prepare('INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)').bind('score:' + b.id, JSON.stringify(v)).run();
+    return json({ ok: true, ...v });
+  }
   if (p === '/api/runner/export' && m === 'GET') {
     const after = Math.max(0, +url.searchParams.get('after') || 0);
     const limit = Math.min(5000, +url.searchParams.get('limit') || 3000);
@@ -469,10 +480,30 @@ async function runnerRoute(req, env, url) {
     }
     if (s.kind === 'outreach') await O.runnerFinishOutreach(env, s);
     const status = s.status === 'cancelled' ? 'cancelled' : b.error ? 'failed' : 'done';
+    await saveMetrics(env, s, params, b.metrics, status);
     await env.DB.prepare(`UPDATE searches SET status = ?, error = ?, finished_at = ?, heartbeat_at = ?${status === 'done' ? ", cells = '[]', done_bits = ''" : ''} WHERE id = ?`).bind(status, b.error ? String(b.error).slice(0, 500) : null, now(), now(), id).run();
     return json({ status });
   }
   throw new HttpError(404, 'Not found.');
+}
+
+/** Store a job's timing stats. Numbers and short keys only; anything else is dropped. */
+async function saveMetrics(env, s, params, m, status) {
+  if (!m || typeof m !== 'object') return;
+  const clean = (v, depth = 0) => {
+    if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'string') return v.slice(0, 40);
+    if (Array.isArray(v)) return depth < 4 ? v.slice(0, 400).map(x => (typeof x === 'number' ? x : null)) : null;
+    if (v && typeof v === 'object' && depth < 4) return Object.fromEntries(Object.entries(v).slice(0, 60).map(([k, x]) => [String(k).slice(0, 40), clean(x, depth + 1)]));
+    return null;
+  };
+  const data = JSON.stringify(clean(m));
+  if (data.length > 60000) return;
+  try {
+    await env.DB.prepare('INSERT OR REPLACE INTO job_metrics (job_id, kind, mode, campaign_id, started_at, finished_at, status, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(s.id, s.kind, params.mode || null, params.campaign_id || null, s.started_at || null, now(), status, data).run();
+  } catch (e) { console.error('metrics', e); }
 }
 
 /* bitset helpers for finished cells */

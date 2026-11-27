@@ -9,6 +9,9 @@ import { splitCell } from '../public/shared/grid.js';
 import { checkSite, FORM } from './check.mjs';
 import { browserFormCheck, closeBrowser } from './browser.mjs';
 import { runOutreach } from './outreach.mjs';
+import { Metrics } from './lib/metrics.mjs';
+
+const SM = new Metrics('search');
 
 const API = (process.env.LH_API || '').replace(/\/$/, '');
 const SECRET = process.env.RUNNER_SECRET;
@@ -60,7 +63,9 @@ function runGosom(cell, term, dir) {
     let stderr = '';
     child.stderr.on('data', d => { stderr = (stderr + d).slice(-4000); });
     const killer = setTimeout(() => child.kill('SIGKILL'), 150000);
+    const started = Date.now();
     child.on('close', async (code) => {
+      SM.time('map_search', Date.now() - started);
       clearTimeout(killer);
       let places = [];
       try {
@@ -75,6 +80,7 @@ function runGosom(cell, term, dir) {
       rm(qfile, { force: true }); rm(out, { force: true });
       // Only treat it as a block when nothing came back AND the output clearly shows Google refusing.
       const valid = places.filter(p => p.place_id && p.name);
+      SM.time('map_results', valid.length);
       const blocked = !valid.length && /(status(?: code)?[: ]+429|HTTP\/\d(?:\.\d)? 429|\b429 Too Many|unusual traffic|google\.com\/sorry|recaptcha)/i.test(stderr);
       if (blocked && !runGosom.loggedBlock) { runGosom.loggedBlock = true; console.log('Block signal from gosom:', stderr.split('\n').filter(l => /429|unusual|sorry|captcha/i.test(l)).slice(-2).join(' | ').slice(0, 300)); }
       resolve({ places: valid, code, blocked, stderr });
@@ -152,17 +158,23 @@ async function withBrowserSlot(fn) {
   try { return await fn(); } finally { browserSlots++; const w = browserWaiters.shift(); if (w) w(); }
 }
 async function checkOne([id, website]) {
+  const t0 = Date.now();
   try {
     const r = await checkSite(website, checkOpts);
+    SM.time('site_check', Date.now() - t0);
     // Forms built by JavaScript need a browser. Forms that look open get a second look too: many sites load their CAPTCHA with JavaScript.
     // The browser sees the page as a person does, so when it finds the form its verdict wins (CAPTCHA or not, in both directions).
     if (checkOpts.form && [FORM.NEEDS_BROWSER, FORM.OPEN, FORM.CAPTCHA].includes(r.form)) {
       try {
+        const tb = Date.now();
         const b = await withBrowserSlot(() => browserFormCheck(r.form_url || website));
+        SM.time('browser_check', Date.now() - tb);
         if (b.form === FORM.OPEN || b.form === FORM.CAPTCHA || r.form === FORM.NEEDS_BROWSER) Object.assign(r, b);
       } catch (e) { log('browser check failed', e.message); }
     }
     checkResults.push({ id, ...r });
+    SM.time('check_total', Date.now() - t0);
+    SM.count('site', String(r.site)); if (r.form != null) SM.count('form', String(r.form));
   } catch (e) {
     log('A website check failed:', e.message);
     checkResults.push({ id, site: 3, form: checkOpts.form ? 3 : null });
@@ -206,12 +218,12 @@ async function main() {
   const start = await api('POST', `/api/runner/jobs/${JOB}/start`, { run_url: process.env.RUN_URL || '' });
   if (!start.proceed) { log(`Nothing to do: job is ${start.status}.`); return; }
   if (job.kind === 'outreach') {
-    let cancelled = false, error = null, requeue = [];
+    let cancelled = false, error = null, requeue = [], metrics = null;
     const hb = setInterval(() => api('POST', `/api/runner/jobs/${JOB}/heartbeat`).then(r => { if (r.status === 'cancelled') cancelled = true; }).catch(() => {}), 60000);
-    try { ({ requeue } = await runOutreach({ api, JOB, log, isCancelled: () => cancelled })); }
+    try { ({ requeue, metrics } = await runOutreach({ api, JOB, log, isCancelled: () => cancelled })); }
     catch (e) { error = 'The outreach run failed: ' + String(e.message || e).slice(0, 200); }
     clearInterval(hb);
-    await api('POST', `/api/runner/jobs/${JOB}/finish`, { error, requeue });
+    await api('POST', `/api/runner/jobs/${JOB}/finish`, { error, requeue, metrics });
     if (error) { log(error); process.exitCode = 1; }
     return;
   }
@@ -241,6 +253,7 @@ async function main() {
         const cell = cells[idx];
         const term = job.params.terms[cell[4]];
         const res = await searchCell(cell, term, dir);
+        if (res.blocked) SM.count('blocked', 'yes');
         if (res.blocked) { stop = true; error = 'Google is limiting requests right now. Leads found so far are saved. Press Retry in an hour to continue.'; break; }
         // Post results in order, one at a time, so the server's counters stay exact.
         chain = chain.then(async () => {
@@ -271,7 +284,10 @@ async function main() {
   if (wantChecks) log(`${checksPosted} websites checked.`);
 
   clearInterval(heartbeat);
-  await api('POST', `/api/runner/jobs/${JOB}/finish`, { error });
+  const metrics = SM.toJSON({ checks: checksPosted, form_check: checkOpts.form });
+  const st = metrics.stages;
+  if (st.map_search) log(`Timing: map search p50 ${(st.map_search.p50 / 1000).toFixed(1)}s, ${st.map_search.n} searches; site check p50 ${st.check_total ? (st.check_total.p50 / 1000).toFixed(1) : '-'}s.`);
+  await api('POST', `/api/runner/jobs/${JOB}/finish`, { error, metrics });
   try { await rebuildSnapshot(); } catch (e) { log('Snapshot failed (the app still syncs changes):', e.message); }
   if (error) { log(error); process.exitCode = 1; }
 }

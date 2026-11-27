@@ -1173,7 +1173,7 @@ async function saveIndustry() {
 }
 
 /* ================================================================ usage */
-let USAGE = null, USAGE_ERR = '';
+let USAGE = null, USAGE_ERR = '', SCORE = null;
 V.usage = () => `
   <div class="head"><div><div class="eyebrow">Workspace</div><h1>Usage</h1><p>Cloudflare's free daily limits reset at 4:00 PM PT (midnight UTC). Numbers can lag a few minutes.</p></div>
     <button class="btn" data-act="usagerefresh">${ic('retry', 14)}Refresh</button></div>
@@ -1182,7 +1182,9 @@ MOUNT.usage = () => loadUsage();
 async function loadUsage() {
   USAGE_ERR = '';
   const el = $('#usage'); if (el && !USAGE) el.innerHTML = usageHTML();
+  const sc = api('GET', '/api/scorecard?days=7').then(r => { SCORE = r; }).catch(() => {});
   try { USAGE = await api('GET', '/api/usage'); } catch (e) { USAGE_ERR = e.message; }
+  await sc;
   const e2 = $('#usage'); if (e2) e2.innerHTML = usageHTML();
 }
 function meter(label, used, limit, note) {
@@ -1192,6 +1194,16 @@ function meter(label, used, limit, note) {
     <div class="um-bar"><i style="width:${Math.max(pct, used ? 1.5 : 0)}%;background:var(--${tone})"></i></div><div class="um-sub"><span>${pct < 1 && used ? '<1' : Math.round(pct)}% used</span>${note ? `<span>${note}</span>` : ''}</div></div>`;
 }
 const mb = b => b == null ? '—' : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
+/** Engine scorecard: each production target, pass or fail, over the last 7 days. */
+function scoreCard() {
+  if (!SCORE) return '';
+  const d = SCORE.detail, tag = p => p === true ? '<span class="sc-tag ok">Pass</span>' : p === false ? '<span class="sc-tag bad">Fail</span>' : '<span class="sc-tag">Not measured</span>';
+  const st = Object.entries(d.stages).filter(([, v]) => v.p50 != null);
+  const label = { open: 'Open page', settle: 'Page settles', find: 'Find form', fill: 'Fill fields', submit: 'Submit and confirm' };
+  return `<div class="card ucard sc"><div class="card-h"><div><h3>Engine scorecard</h3><p>Last 7 days · ${fmt(d.forms)} forms in ${fmt(d.outreach_jobs)} runs · ${fmt(d.runner_minutes)} runner minutes</p></div></div>
+    <div class="card-b"><div class="sc-rows">${SCORE.lines.map(l => `<div class="sc-row"><span>${esc(l.label)}</span><b class="num">${l.value == null ? '—' : esc(String(l.value)) + (l.unit ? ' ' + esc(l.unit) : '')}</b>${tag(l.pass)}<small>${esc(l.note)}</small></div>`).join('')}</div>
+    ${st.length ? `<div class="sc-stages"><h6>Where the time goes (typical / slowest 5%)</h6>${st.map(([k, v]) => `<div><span>${label[k] || k}</span><b class="num">${v.p50} s</b><small class="num">${v.p95} s</small></div>`).join('')}</div>` : ''}</div></div>`;
+}
 function usageHTML() {
   if (USAGE_ERR) return `<div class="banner">${ic('alert', 18)}<div><b>Couldn't load usage</b>${esc(USAGE_ERR)}</div></div>`;
   if (!USAGE) return `<div class="card card-b"><span class="spin"></span>&nbsp; Loading usage…</div>`;
@@ -1214,6 +1226,7 @@ function usageHTML() {
       <div><b class="num">${fmt(gh.runner.today)}</b><span>jobs today</span></div>
       <div><b class="num">${fmt(gh.deploy.runs)}</b><span>deploys (${fmt(gh.deploy.minutes)} min)</span></div>`}</div></div>` : '';
   return `<div class="ulayout">
+    ${scoreCard()}
     ${cfCard}
     <div class="card ucard"><div class="card-h"><div><h3>Storage</h3><p>Cloudflare D1 database</p></div></div><div class="card-b ugrid">
       ${u.storage.bytes != null ? meter('Database size', u.storage.bytes / 1048576, u.storage.limit / 1048576, `${mb(u.storage.bytes)} of 500 MB`).replace(/<b>[^<]*<\/b> \/ [^<]*<\/span>/, `<b>${mb(u.storage.bytes)}</b> / 500 MB</span>`) : '<div class="help">Size not reported yet.</div>'}

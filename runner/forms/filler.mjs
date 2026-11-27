@@ -248,6 +248,27 @@ export function valueFor(f, cls, profile) {
 }
 
 /* ------------------------------------------------------------------ the engine */
+/** Which form tool the page uses (for accuracy stats by tool). Runs in the page. */
+export function detectFormTool() {
+  const h = document.documentElement.innerHTML.slice(0, 400000);
+  const has = (re) => re.test(h);
+  if (has(/wpforms/i)) return 'wpforms';
+  if (has(/gform_wrapper|gravityforms/i)) return 'gravity';
+  if (has(/wpcf7/i)) return 'cf7';
+  if (has(/elementor-form/i)) return 'elementor';
+  if (has(/ninja-forms|nf-form/i)) return 'ninja';
+  if (has(/frm_form|formidable/i)) return 'formidable';
+  if (has(/hsforms|hs-form|hbspt\.forms/i)) return 'hubspot';
+  if (has(/jotform/i)) return 'jotform';
+  if (has(/formspree/i)) return 'formspree';
+  if (has(/static\.wixstatic|wix-forms|_wixCssImports|wixapps/i)) return 'wix';
+  if (has(/squarespace/i)) return 'squarespace';
+  if (has(/godaddy|wsimg\.com/i)) return 'godaddy';
+  if (has(/typeform/i)) return 'typeform';
+  if (has(/wp-content|wp-includes/i)) return 'wordpress-other';
+  return 'other';
+}
+
 export async function submitForm(page, url, profile, opts = {}) {
   // Fill merge tags like [Company Name] from the lead (also used inside the uploaded file).
   if (opts.lead) profile = { ...profile, subject: personalize(profile.subject, opts.lead), message: personalize(profile.message, opts.lead), leadCompany: cleanCompanyName(opts.lead.name) };
@@ -255,8 +276,12 @@ export async function submitForm(page, url, profile, opts = {}) {
   const T0 = Date.now(); const note = (m) => { log.push(m); if (opts.debug) console.log('   ·', ((Date.now() - T0) / 1000).toFixed(1) + 's', m); };
   const timeout = opts.timeout || 25000;
   page.setDefaultTimeout(opts.actionTimeout || 5000);
+  const mk = (k) => { if (opts.marks) opts.marks[k] = Date.now(); };
+  mk('start');
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+  mk('dom');
   await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
+  mk('loaded');
 
   // Find the best contact container across the page and its frames.
   let frame = null, scan = null, maxId = 0, login = false;
@@ -272,6 +297,8 @@ export async function submitForm(page, url, profile, opts = {}) {
     }
   };
   await rescan();
+  mk('scanned');
+  if (opts.marks) opts.marks.tool = await page.evaluate(detectFormTool).catch(() => null);
   if (!scan) return login ? { status: 'manual', reason: 'login-required', log } : { status: 'failed', reason: 'no-form', log };
   if (scan.captcha) return { status: 'manual', reason: 'captcha', captcha: scan.captchaType || 'reCAPTCHA', log };
   maxId = scan.maxId;
@@ -461,6 +488,7 @@ export async function submitForm(page, url, profile, opts = {}) {
     if (els.length >= 2 && els.filter(e => !e.value).length / els.length >= 0.8) return 'cleared';
     return null;
   }, [...filled.keys()].filter(k => !String(k).includes(':'))).catch(() => null);
+  mk('filled');
   // Test run: everything is filled and valid, but nothing is sent.
   if (opts.dryRun) {
     const btn = pickSubmit(scan.buttons), bad = await invalidFields().catch(() => []);
