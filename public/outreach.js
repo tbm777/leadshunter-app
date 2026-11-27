@@ -1,7 +1,7 @@
 // LeadsHunter outreach pages: campaigns, manual queue, messages, sender profiles. Plugs into app.js through install().
 import { personalize, cleanCompanyName, MERGE_TAGS, unknownTags } from './shared/personalize.js';
 import { render as renderFile, ASSETS } from './shared/templates/bat-marketing.js';
-import { SENDER_FALLBACKS, OTHER_FIELDS, engineProfile } from './shared/fallbacks.js';
+import { SENDER_FALLBACKS, OTHER_FIELDS, engineProfile, DEFAULT_ADDRESS } from './shared/fallbacks.js';
 
 let A;                       // helpers from app.js
 const OS = { loaded: false, senders: [], campaigns: [], manual: 0 };
@@ -738,15 +738,41 @@ async function ntPointerUp() {
 /* ------------------------------------------------------------------ sender profiles */
 function sendersView() {
   if (!OS.loaded) { loadOutreach().then(() => A.currentView() === 'senders' && A.render()); return loading(); }
-  const used = id => OS.campaigns.filter(c => c.sender_id === id).length;
-  return `<div class="head"><div><div class="eyebrow">Outreach</div><h1>Sender profiles</h1><p>Who the message comes from. These details go into every form: name, email and phone always, the rest only when a form asks for it.</p></div>
+  const camps = id => OS.campaigns.filter(c => c.sender_id === id && c.status !== 'archived');
+  const row = (icon, val, auto, label) => `<div class="spc-row"><span class="spc-ic" title="${label}">${A.ic(icon, 15)}</span><span class="spc-v ${auto ? 'auto' : ''}">${A.esc(val)}</span>${auto ? '<span class="spc-auto" title="Empty in your profile, so forms get this default">auto</span>' : ''}</div>`;
+  const card = s => {
+    const cs = camps(s.id), name = [s.first_name, s.last_name].filter(Boolean).join(' ');
+    const hasAddr = [s.address, s.city, s.state, s.zip].some(Boolean);
+    const addr = hasAddr ? [s.address, s.city, [s.state, s.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ') : `${DEFAULT_ADDRESS.address}, ${DEFAULT_ADDRESS.city} ${DEFAULT_ADDRESS.state} ${DEFAULT_ADDRESS.zip}`;
+    const opt = [s.company, s.website, hasAddr].filter(Boolean).length, done = 3 + opt;
+    const sub = [name, s.company && s.company !== s.label ? s.company : ''].filter(Boolean).join(' · ');
+    return `<article class="card spc">
+      <div class="spc-top">
+        <div class="spc-av">${A.esc(initials(s))}</div>
+        <div class="spc-id"><h3>${A.esc(s.label || name || 'Sender')}</h3>${sub ? `<span>${A.esc(sub)}</span>` : ''}
+        <span class="spc-use ${cs.length ? 'on' : ''}" title="${A.esc(cs.map(c => c.name).join(', '))}">${cs.length ? `In ${cs.length} campaign${cs.length === 1 ? '' : 's'}` : 'Not used yet'}</span></div>
+      </div>
+      <div class="spc-rows">
+        ${row('mail', s.email, false, 'Email')}${row('phone', s.phone, false, 'Phone')}
+        ${row('building', s.company || fbHint('company', s).replace(/ \(.*\)$/, ''), !s.company, 'Company')}
+        ${row('globe', s.website || fbHint('website', s).replace(/ \(.*\)$/, ''), !s.website, 'Website')}
+        ${row('pin', addr.replace(/^Placeholder: /, ''), !hasAddr, 'Address')}
+      </div>
+      <div class="spc-foot">
+        <div class="spc-meter" title="Name, email and phone are required. Empty optional fields use safe defaults."><div><i style="width:${Math.round(done / 6 * 100)}%"></i></div><span>${done === 6 ? 'Complete' : `${done} of 6 filled`}</span></div>
+        <button class="btn sm" data-o="editsender" data-sid="${s.id}">${A.ic('edit', 13)}Edit</button>
+      </div>
+    </article>`;
+  };
+  return `<div class="head"><div><div class="eyebrow">Outreach</div><h1>Sender profiles</h1><p>Who your messages come from. The robot types these details into every contact form it fills.</p></div>
     <div class="row"><button class="btn primary" data-o="newsender">${A.ic('plus')}New profile</button></div></div>
-  <div class="profiles">${OS.senders.map(s => `<div class="card profile">
-      <div class="who"><div class="avatar">${A.esc(initials(s))}</div><div style="min-width:0"><b>${A.esc(s.label)}</b><div class="help">${used(s.id) ? `Used by ${used(s.id)} campaign${used(s.id) === 1 ? '' : 's'}` : 'Not used yet'}</div></div></div>
-      <dl class="ld-dl"><div class="dk"><dt>Name</dt><dd>${A.esc(s.first_name)} ${A.esc(s.last_name)}</dd></div><div class="dk"><dt>Email</dt><dd>${A.esc(s.email)}</dd></div><div class="dk"><dt>Phone</dt><dd>${A.esc(s.phone)}</dd></div><div class="dk"><dt>Company</dt><dd>${s.company ? A.esc(s.company) : `<span class="faint">${A.esc(fbHint('company', s))}</span>`}</dd></div><div class="dk"><dt>Website</dt><dd>${s.website ? A.esc(s.website) : `<span class="faint">${A.esc(fbHint('website', s))}</span>`}</dd></div>
-        <div class="dk"><dt>Address</dt><dd>${[s.address, s.city, s.state, s.zip].some(Boolean) ? A.esc([s.address, s.city, [s.state, s.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')) : `<span class="faint">Placeholder: 100 Congress Ave, Austin TX 78701</span>`}</dd></div></dl>
-      <div class="row" style="justify-content:flex-end;margin-top:auto"><button class="btn sm" data-o="editsender" data-sid="${s.id}">${A.ic('edit', 13)}Edit</button></div></div>`).join('')}
-    <button class="card profile padd" data-o="newsender">${A.ic('plus', 20)}<b>New profile</b><span>Another name or brand to send as</span></button></div>`;
+  <div class="spc-how">
+    <div><span class="spc-hi">${A.ic('check', 14)}</span><b>Always sent</b><small>Name, email and phone</small></div>
+    <div><span class="spc-hi">${A.ic('building', 14)}</span><b>When a form asks</b><small>Company, website and address</small></div>
+    <div><span class="spc-hi">${A.ic('shield', 14)}</span><b>Never blank</b><small>Empty fields get a safe default, marked <em>auto</em></small></div>
+  </div>
+  <div class="spcs">${OS.senders.map(card).join('')}
+    <button class="spc spc-add" data-o="newsender"><span class="spc-plus">${A.ic('plus', 20)}</span><b>New profile</b><span>Another name or brand to send as</span></button></div>`;
 }
 const fbHint = (k, s) => SENDER_FALLBACKS[k] ? SENDER_FALLBACKS[k].hint(s) : '';
 function senderDrawer(s = {}, onSaved) {
@@ -756,7 +782,7 @@ function senderDrawer(s = {}, onSaved) {
       ${fb ? `<span class="help fbh" data-fb="${k}" ${String(s[k] || '').trim() ? 'hidden' : ''}>If left empty, forms get: <b>${A.esc(fbHint(k, s))}</b></span>` : help ? `<span class="help">${help}</span>` : ''}</div>`;
   };
   A.$('#overlay').innerHTML = `<div class="scrim" data-act="close"><div class="drawer" data-stop role="dialog" aria-label="Sender profile">
-    <div class="drawer-h"><div><div class="eyebrow" style="margin:0 0 4px">${s.id ? 'Edit sender profile' : 'New sender profile'}</div><h2>${A.esc(s.label || 'Sender profile')}</h2></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
+    <div class="drawer-h"><div class="spc-dh"><div class="spc-av sm">${s.first_name ? A.esc(initials(s)) : A.ic('senders', 18)}</div><div><div class="eyebrow" style="margin:0 0 4px">${s.id ? 'Edit sender profile' : 'New sender profile'}</div><h2>${A.esc(s.label || 'Sender profile')}</h2></div></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
     <section><h5>Always used</h5><div class="fsrow2">${f('first_name', 'First name', 'Dustin')}${f('last_name', 'Last name', 'Morgan')}</div>${f('email', 'Email', 'you@company.com', 'email', 'Replies from businesses arrive here.')}${f('phone', 'Phone', '(512) 555-0142', 'tel', 'Typed in the format each form expects.')}</section>
     <section><h5>Your business</h5>${f('company', 'Company')}${f('website', 'Website')}</section>
     <section><h5>Address</h5><span class="help" style="margin-top:-4px">Only typed in when a form insists on an address. With no address at all, the whole placeholder address is used so city, state and ZIP match.</span>${f('address', 'Street')}<div class="fsrow2">${f('city', 'City')}${f('state', 'State')}</div>${f('zip', 'ZIP code')}</section>

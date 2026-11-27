@@ -23,6 +23,10 @@ function dayPT(ms) {
   return k === dayKey.format(new Date()) ? 'Today' : k === dayKey.format(new Date(Date.now() - 864e5)) ? 'Yesterday' : dateFmt.format(new Date(ms));
 }
 const P = {
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m4 7 8 6 8-6"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z"/>',
+  pin: '<path d="M12 21s-7-6.1-7-11.5a7 7 0 0 1 14 0C19 14.9 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/>',
+  building: '<path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16M16 9h2a2 2 0 0 1 2 2v10M3 21h18M8 7h4M8 11h4M8 15h4"/>',
   drag: '<circle cx="9" cy="6" r="1.2"/><circle cx="15" cy="6" r="1.2"/><circle cx="9" cy="12" r="1.2"/><circle cx="15" cy="12" r="1.2"/><circle cx="9" cy="18" r="1.2"/><circle cx="15" cy="18" r="1.2"/>',
   phone: '<path d="M5 3.5h3.2l1.6 4.2-2.1 1.4a11 11 0 0 0 5.7 5.7l1.4-2.1 4.2 1.6v3.2A2 2 0 0 1 17 20.5 14.5 14.5 0 0 1 3.5 7 2 2 0 0 1 5 3.5Z"/>',
   find: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
