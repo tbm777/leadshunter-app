@@ -9,6 +9,10 @@ on:
         description: Leads to check (max 150)
         required: false
         default: '60'
+      search:
+        description: Which leads (all, or latest = the most recent search only)
+        required: false
+        default: 'all'
 
 permissions:
   contents: read
@@ -38,4 +42,5 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           SAMPLE: ${{ inputs.sample }}
+          SEARCH: ${{ inputs.search }}
         run: node scripts/precision.mjs

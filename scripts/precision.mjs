@@ -11,7 +11,9 @@ const cf = async (path, body) => { const r = await fetch(`https://api.cloudflare
 const db = (await cf('/d1/database?name=leadshunter')).find(d => d.name === 'leadshunter');
 const q = async (sql) => (await cf(`/d1/database/${db.uuid}/query`, { sql }))[0].results;
 const LABEL = ['open', 'captcha', 'none'];
-const pick = async (fs, n) => q(`SELECT name, city, region, website, form_url, form_status FROM leads WHERE deleted = 0 AND website IS NOT NULL AND form_status = ${fs} ORDER BY RANDOM() LIMIT ${n}`);
+// SEARCH=latest limits the sample to the most recent search's leads.
+const scope = process.env.SEARCH === 'latest' ? " AND search_id = (SELECT MAX(id) FROM searches WHERE kind = 'search')" : '';
+const pick = async (fs, n) => q(`SELECT name, city, region, website, form_url, form_status FROM leads WHERE deleted = 0 AND website IS NOT NULL AND form_status = ${fs}${scope} ORDER BY RANDOM() LIMIT ${n}`);
 const leads = [...await pick(0, Math.round(N * 0.6)), ...await pick(1, Math.round(N * 0.2)), ...await pick(2, Math.round(N * 0.2))];
 const profile = { firstName: 'Test', lastName: 'Visitor', email: 'test@example.com', phone: '(512) 555-0100', company: 'Example Co', website: 'example.com', city: 'Austin', state: 'TX', stateName: 'Texas', zip: '78701', country: 'United States', address: '100 Congress Ave', subject: 'Quick question', message: 'Hello, this is a test message that is never sent.' };
 

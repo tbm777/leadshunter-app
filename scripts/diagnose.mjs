@@ -19,3 +19,20 @@ for (const s of sites) { let h; try { h = new URL(s.website).hostname.replace(/^
 table('Website hosts shared by 3+ leads (host | leads | marked open form)', Object.entries(hosts).filter(([, v]) => v.n >= 3).sort((a, b) => b[1].n - a[1].n).slice(0, 40).map(([h, v]) => ({ h, n: v.n, o: v.open })));
 table('Form URL path patterns for open forms (path shape | count)', Object.entries((await q('SELECT form_url FROM leads WHERE deleted = 0 AND form_status = 0 AND form_url IS NOT NULL')).reduce((a, r) => { let p = '/'; try { p = new URL(r.form_url).pathname.toLowerCase().split('/').filter(Boolean).slice(0, 1).join('/') || '/'; } catch { } p = /contact|quote|estimate|request|book|schedule|appoint/.test(p) ? p.replace(/[^a-z-]/g, '').slice(0, 30) : p === '/' ? '/' : '(other)'; a[p] = (a[p] || 0) + 1; return a; }, {})).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([p, n]) => ({ p, n })));
 table('Searches with a form filter (filter | searches | qualified)', (await q("SELECT json_extract(params,'$.form') f, COUNT(*) n, SUM(qualified) q FROM searches WHERE kind = 'search' GROUP BY 1")));
+
+// The latest search: yield per map search, duplicates and form-check outcomes (totals only).
+const last = (await q("SELECT id, status, total_tasks, done_tasks, found, new_count, dup, excluded, filtered, qualified, to_check, checked, limit_n, params FROM searches WHERE kind = 'search' ORDER BY id DESC LIMIT 1"))[0];
+if (last) {
+  const p = JSON.parse(last.params || '{}');
+  table('Latest search (status | map searches done/total | results found | new | duplicates | excluded by category | filtered | qualified | websites to check/checked | limit)', [{ a: last.status, b: `${last.done_tasks}/${last.total_tasks}`, c: last.found, d: last.new_count, e: last.dup, f: last.excluded, g: last.filtered, h: last.qualified, i: `${last.to_check}/${last.checked}`, j: last.limit_n }]);
+  table('Latest search settings (terms | form filter | website | reviews)', [{ t: (p.terms || []).length + ' terms', f: p.form || 'any', w: p.website || 'any', r: `${p.minReviews || 0}-${p.maxReviews ?? 'any'}` }]);
+  const m = (await q(`SELECT data FROM job_metrics WHERE job_id = ${last.id}`))[0];
+  if (m) {
+    const d = JSON.parse(m.data), res = (d.raw?.map_results || []).map(x => x * 100);   // stored in tenths
+    const zero = res.filter(x => x === 0).length, avg = res.length ? res.reduce((a, b) => a + b, 0) / res.length : 0;
+    table('Latest search: results per map search (searches | average results | returned nothing | 20 or more)', [{ n: res.length, avg: avg.toFixed(1), zero: `${zero} (${Math.round(zero / Math.max(1, res.length) * 100)}%)`, full: res.filter(x => x >= 20).length }]);
+    table('Latest search: website check outcomes (site status | count)', Object.entries(d.counts?.site || {}).map(([k, v]) => ({ k: ['loads', 'slow', 'down', 'not checked', 'no site', 'blocked', 'parked', 'social'][+k] || k, v })));
+    table('Latest search: form check outcomes (form | count)', Object.entries(d.counts?.form || {}).map(([k, v]) => ({ k: FORM[+k] || k, v })));
+  }
+  table('Latest search leads by form check (form | count)', (await q(`SELECT form_status, COUNT(*) n FROM leads WHERE search_id = ${last.id} AND deleted = 0 GROUP BY 1`)).map(r => ({ f: FORM[r.form_status], n: r.n })));
+}
