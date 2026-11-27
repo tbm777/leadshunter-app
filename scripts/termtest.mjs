@@ -41,7 +41,7 @@ const search = ([lat, lon], term) => new Promise(async (resolve) => {
   const killer = setTimeout(() => child.kill('SIGKILL'), 120000);
   child.on('close', async () => {
     clearTimeout(killer); const out = [];
-    try { for (const line of (await readFile(of, 'utf8')).split('\n')) { if (!line.trim()) continue; let v; try { v = JSON.parse(line); } catch { continue; } for (const o of (Array.isArray(v) ? v : [v])) if (o && (o.place_id || o.cid)) { const cats = Array.isArray(o.categories) ? o.categories : []; out.push({ id: o.place_id || o.cid, name: o.title || '', main: (typeof o.category === 'string' && o.category) || cats[0] || null, cats: [...new Set([o.category, ...cats].filter(Boolean))] }); } } } catch { /* none */ }
+    try { for (const line of (await readFile(of, 'utf8')).split('\n')) { if (!line.trim()) continue; let v; try { v = JSON.parse(line); } catch { continue; } for (const o of (Array.isArray(v) ? v : [v])) if (o && (o.place_id || o.data_id || o.cid || o.title)) { const cats = Array.isArray(o.categories) ? o.categories : []; out.push({ id: o.place_id || o.data_id || o.cid || `${o.title}|${o.address || ''}`, name: o.title || '', main: (typeof o.category === 'string' && o.category) || cats[0] || null, cats: [...new Set([o.category, ...cats].filter(Boolean))] }); } } } catch { /* none */ }
     rm(qf, { force: true }); rm(of, { force: true }); resolve(out);
   });
 });
