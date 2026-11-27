@@ -82,6 +82,7 @@ async function route(req, env, url, ctx) {
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/remove$/)) && m === 'POST') return O.removeItems(env, +mm[1], await body(req));
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/run$/)) && m === 'POST') return O.runCampaign(env, +mm[1], await body(req));
   if (p === '/api/industries' && m === 'POST') return saveIndustry(env, await body(req));
+  if (p === '/api/industries/order' && m === 'PUT') return orderIndustries(env, await body(req));
   if ((mm = p.match(/^\/api\/industries\/(\d+)$/))) {
     if (m === 'PUT') return saveIndustry(env, await body(req), +mm[1]);
     if (m === 'DELETE') return archiveIndustry(env, +mm[1], 1);
@@ -180,7 +181,7 @@ export async function reserveSeq(env, n) {
 }
 const parse = (s, d) => { try { return JSON.parse(s); } catch { return d; } };
 function industryOut(r) {
-  return { id: r.id, name: r.name, terms: parse(r.terms, []), categories: parse(r.categories, []), archived: !!r.archived };
+  return { id: r.id, name: r.name, terms: parse(r.terms, []), categories: parse(r.categories, []), archived: !!r.archived, position: r.position || 0 };
 }
 function searchOut(r) {
   const params = parse(r.params, {});
@@ -197,9 +198,14 @@ export const inList = (n) => Array(n).fill('?').join(',');
 export function chunk(arr, n) { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; }
 
 /* ------------------------------------------------------------------ bootstrap, industries, views */
+async function orderIndustries(env, b) {
+  const ids = (Array.isArray(b.ids) ? b.ids : []).map(Number).filter(Number.isInteger).slice(0, 1000);
+  for (let i = 0; i < ids.length; i += 100) await env.DB.batch(ids.slice(i, i + 100).map((id, j) => env.DB.prepare('UPDATE industries SET position = ? WHERE id = ?').bind(i + j + 1, id)));
+  return json({ ok: true });
+}
 async function bootstrap(env) {
   const [ind, srch, hid, seq] = await env.DB.batch([
-    env.DB.prepare('SELECT * FROM industries ORDER BY name COLLATE NOCASE'),
+    env.DB.prepare('SELECT * FROM industries ORDER BY position, name COLLATE NOCASE'),
     env.DB.prepare(`SELECT ${SEARCH_COLS} FROM searches WHERE hidden = 0 AND kind != 'outreach' ORDER BY id DESC LIMIT 60`),
     env.DB.prepare('SELECT id, name FROM searches WHERE hidden = 1 OR id <= (SELECT COALESCE(MIN(id), 0) FROM (SELECT id FROM searches WHERE hidden = 0 AND kind != \'outreach\' ORDER BY id DESC LIMIT 60))'),
     env.DB.prepare("SELECT CAST(v AS INTEGER) AS v FROM meta WHERE k = 'seq'"),
@@ -217,7 +223,7 @@ async function saveIndustry(env, b, id) {
   if (!terms.length) throw new HttpError(400, 'Add at least one search term.');
   try {
     if (id) await env.DB.prepare('UPDATE industries SET name = ?, terms = ?, categories = ? WHERE id = ?').bind(name, JSON.stringify(terms), JSON.stringify(categories), id).run();
-    else id = (await env.DB.prepare('INSERT INTO industries (name, terms, categories, created_at) VALUES (?, ?, ?, ?) RETURNING id').bind(name, JSON.stringify(terms), JSON.stringify(categories), now()).first()).id;
+    else id = (await env.DB.prepare('INSERT INTO industries (name, terms, categories, position, created_at) VALUES (?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM industries), ?) RETURNING id').bind(name, JSON.stringify(terms), JSON.stringify(categories), now()).first()).id;
   } catch (e) {
     if (String(e).includes('UNIQUE')) throw new HttpError(409, `An industry called “${name}” already exists.`);
     throw e;

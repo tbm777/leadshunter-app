@@ -23,6 +23,7 @@ function dayPT(ms) {
   return k === dayKey.format(new Date()) ? 'Today' : k === dayKey.format(new Date(Date.now() - 864e5)) ? 'Yesterday' : dateFmt.format(new Date(ms));
 }
 const P = {
+  drag: '<circle cx="9" cy="6" r="1.2"/><circle cx="15" cy="6" r="1.2"/><circle cx="9" cy="12" r="1.2"/><circle cx="15" cy="12" r="1.2"/><circle cx="9" cy="18" r="1.2"/><circle cx="15" cy="18" r="1.2"/>',
   phone: '<path d="M5 3.5h3.2l1.6 4.2-2.1 1.4a11 11 0 0 0 5.7 5.7l1.4-2.1 4.2 1.6v3.2A2 2 0 0 1 17 20.5 14.5 14.5 0 0 1 3.5 7 2 2 0 0 1 5 3.5Z"/>',
   find: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
@@ -399,7 +400,7 @@ function industryName(id) { return ST.industries.find(i => i.id === id)?.name ||
 function searchName(id) { const s = ST.searches.find(x => x.id === id); return s ? s.name : (ST.hiddenNames && ST.hiddenNames[id]) || `Search #${id}`; }
 function ddOpts(key) {
   const C = L$.C;
-  if (key === 'ind') { const ids = new Set([...ST.industries.map(i => i.id), ...C[0].keys()]); return [...ids].map(id => ({ v: id, l: industryName(id), n: C[0].get(id) || 0 })).filter(o => o.n || !ST.industries.find(i => i.id === o.v)?.archived).sort((a, b) => a.l.localeCompare(b.l)); }
+  if (key === 'ind') { const ids = new Set([...ST.industries.map(i => i.id), ...C[0].keys()]); return [...ids].map(id => ({ v: id, l: industryName(id), n: C[0].get(id) || 0 })).filter(o => o.n || !ST.industries.find(i => i.id === o.v)?.archived).sort((a, b) => indRank(a.v) - indRank(b.v)); }
   if (key === 'loc') return LOCS.map((l, i) => ({ v: i, l, n: C[1][i] })).filter(o => o.n || L$.F.loc.has(o.v)).sort((a, b) => b.n - a.n);
   if (key === 'site') return SS.map((l, i) => ({ v: i, l, n: C[5][i] }));
   if (key === 'form') return FM.map((l, i) => ({ v: i, l, n: C[6][i] }));
@@ -598,63 +599,55 @@ const XCOLS = [
   ['form', 'Contact form', 'Contact', L => FM[L.form_status]], ['formurl', 'Form page', 'Contact', L => L.form_url || ''], ['captcha', 'CAPTCHA type', 'Contact', L => L.form_status === 1 ? (L.captcha || '') : ''], ['email', 'Email', 'Contact', L => L.email || ''],
   ['status', 'Lead status', 'Pipeline', L => LS[L.status]], ['search', 'Found by search', 'Pipeline', L => searchName(L.search_id)], ['added', 'Date added', 'Pipeline', L => dayKey.format(new Date(L.created_at))], ['notes', 'Notes', 'Pipeline', L => L.notes || ''],
 ];
-const XPRESETS = { contact: ['name', 'phone', 'website'], outreach: ['name', 'phone', 'website', 'city', 'region', 'rating', 'reviews', 'site', 'form', 'formurl', 'captcha', 'email', 'status'], full: XCOLS.map(c => c[0]) };
-const XP = (() => { try { const s = JSON.parse(localStorage.getItem('lh-export') || 'null'); if (s) return { ...s, cols: new Set(s.cols), scope: 'view', src: null }; } catch { /* default */ } return { scope: 'view', src: null, cols: new Set(XPRESETS.outreach), preset: 'outreach', phone: false, web: false, email: false, form: 'any', skipDnc: true, skipContacted: false, dedupePhone: false, dedupeSite: false, pfmt: 'nat', fmt: 'csv' }; })();
-function saveXP() { try { localStorage.setItem('lh-export', JSON.stringify({ ...XP, cols: [...XP.cols], scope: undefined, src: undefined, step: undefined, custom: undefined, file: undefined })); } catch { /* ignore */ } }
-function phoneOut(L) { if (!L.phone) return ''; if (XP.pfmt !== 'e164') return L.phone; const d = L.phone.replace(/\D/g, ''); return L.phone.trim().startsWith('+') ? '+' + d : (L.country === 'AU' ? '+61' + d.replace(/^0/, '') : L.country === 'AE' ? '+971' + d.replace(/^0/, '') : '+1' + d.replace(/^1(?=\d{10}$)/, '')); }
+const XPRESETS = { basic: ['name', 'phone', 'website'], standard: ['name', 'phone', 'website', 'email', 'city', 'region', 'rating', 'reviews', 'form', 'formurl', 'status'], full: XCOLS.map(c => c[0]) };
+const XPRESET_INFO = { basic: ['Basic', 'Name, phone, website'], standard: ['Standard', 'Adds email, location, reviews and form'], full: ['Everything', 'All columns'] };
+// One screen: which leads, which columns, which format. Filtering happens on the Leads page itself.
+const XP = (() => { const d = { scope: 'view', src: null, preset: 'standard', cols: new Set(XPRESETS.standard), skipDnc: true, fmt: 'csv' };
+  try { const s = JSON.parse(localStorage.getItem('lh-export2') || 'null'); if (s) return { ...d, skipDnc: s.skipDnc !== false, fmt: ['csv', 'xlsx', 'copy'].includes(s.fmt) ? s.fmt : 'csv' }; } catch { /* default */ }
+  return d; })();
+function saveXP() { try { localStorage.setItem('lh-export2', JSON.stringify({ skipDnc: XP.skipDnc, fmt: XP.fmt })); } catch { /* ignore */ } }
+const phoneOut = L => L.phone || '';
 const xCols = () => XCOLS.filter(c => XP.cols.has(c[0]));
 function defaultFile() {
-  const base = XP.scope === 'search' ? searchName(XP.src) : XP.scope === 'sel' ? 'selected leads' : XP.scope === 'view' && summaryParts().length ? summaryParts().slice(0, 2).join(' ') : 'all leads';
+  const base = XP.scope === 'search' ? searchName(XP.src) : XP.scope === 'sel' ? 'selected' : XP.scope === 'view' && summaryParts().length ? summaryParts().slice(0, 2).join(' ') : 'all';
   return ('leads ' + base).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) + '-' + dayKey.format(new Date());
 }
-function openExport(scope, src) { if (scope) XP.scope = scope; if (src != null) XP.src = src; else if (scope !== 'search') XP.src = null; if (XP.scope === 'sel' && !L$.sel.size) XP.scope = 'view'; if (XP.scope === 'view' && !$('#vt')) { runFilter(); } XP.file = ''; XP.step = 1; XP.custom = false; exportModal(); }
-function xRows() {
-  let base = XP.scope === 'sel' ? [...L$.sel].map(id => ST.byId.get(id)).filter(Boolean) : XP.scope === 'view' ? L$.res : XP.scope === 'search' ? ST.leads.filter(L => L.search_id === XP.src) : ST.leads;
-  if (XP.phone) base = base.filter(L => L.phone);
-  if (XP.web) base = base.filter(L => L.website);
-  if (XP.email) base = base.filter(L => L.email);
-  if (XP.form && XP.form !== 'any') base = base.filter(L => XP.form === 'open' ? L.form_status === 0 : XP.form === 'captcha' ? L.form_status === 1 : XP.form === 'anyform' ? (L.form_status === 0 || L.form_status === 1) : L.form_status === 2);
-  if (XP.skipDnc) base = base.filter(L => L.status !== 3);
-  if (XP.skipContacted) base = base.filter(L => L.status !== 2 && L.status !== 1);
-  const once = (keyFn) => { const seen = new Set(); base = base.filter(L => { const k = keyFn(L); if (!k) return true; if (seen.has(k)) return false; seen.add(k); return true; }); };
-  if (XP.dedupePhone) once(L => L.phone ? L.phone.replace(/\D/g, '') : null);
-  if (XP.dedupeSite) once(L => L.website ? hostOf(L.website) : null);
-  return base;
+function openExport(scope, src) {
+  XP.src = scope === 'search' ? src : null;
+  XP.scope = scope || 'view';
+  if (XP.scope === 'sel' && !L$.sel.size) XP.scope = 'view';
+  if (XP.scope === 'view' && !$('#vt')) runFilter();
+  XP.preset = 'standard'; XP.cols = new Set(XPRESETS.standard); XP.custom = false;   // always opens on Standard
+  exportModal();
 }
-const XPRESET_INFO = { contact: ['Contact list', 'Name, phone and website. For calling or a quick list.'], outreach: ['Outreach', 'Contact details, location, reviews, site and form status. For campaigns.'], full: ['Everything', 'Every column the app has.'] };
+function xBase(scope) { return scope === 'sel' ? [...L$.sel].map(id => ST.byId.get(id)).filter(Boolean) : scope === 'view' ? L$.res : scope === 'search' ? ST.leads.filter(L => L.search_id === XP.src) : ST.leads; }
+function xRows() { const base = xBase(XP.scope); return XP.skipDnc ? base.filter(L => L.status !== 3) : base; }
 function exportModal() {
-  XP.step = XP.step || 1;
   const rows = xRows(), cols = xCols(), groups = [...new Set(XCOLS.map(c => c[2]))];
-  const scopes = [['view', 'Current filters', L$.res.length], ['sel', 'Selected', L$.sel.size], ['all', 'All leads', ST.leads.length]];
-  if (XP.src != null) scopes.unshift(['search', searchName(XP.src), ST.leads.filter(L => L.search_id === XP.src).length]);
-  const tog = (k, l) => `<button type="button" class="fx-pill ${XP[k] ? 'on' : ''}" data-xtog="${k}" aria-pressed="${!!XP[k]}"><span class="fx-tick">${XP[k] ? ic('check', 12) : ''}</span>${l}</button>`;
-  const steps = ['Leads', 'Columns', 'Download'];
-  const body = XP.step === 1 ? `
-    <div class="xm-sec"><span class="fx-k">Start from</span><div class="xm-scopes">${scopes.map(([k, l, n]) => `<button type="button" class="xm-scope ${XP.scope === k ? 'on' : ''}" data-xscopebtn="${k}" ${n ? '' : 'disabled'}><b>${esc(l)}</b><span class="num">${fmt(n)} leads</span></button>`).join('')}</div></div>
-    <div class="xm-sec"><span class="fx-k">Contact form</span><div class="seg-c xm-seg">${[['any', 'Any'], ['open', 'Open form'], ['captcha', 'CAPTCHA'], ['anyform', 'Any form'], ['none', 'No form']].map(([k, l]) => `<button type="button" class="${(XP.form || 'any') === k ? 'on' : ''}" data-xform="${k}">${l}</button>`).join('')}</div></div>
-    <div class="xm-sec"><span class="fx-k">Must have</span><div class="fx-pills">${tog('phone', 'Phone')}${tog('web', 'Website')}${tog('email', 'Email')}</div></div>
-    <div class="xm-sec"><span class="fx-k">Leave out</span><div class="fx-pills">${tog('skipDnc', 'Do not contact')}${tog('skipContacted', 'Already contacted or in a campaign')}</div></div>
-    <div class="xm-sec"><span class="fx-k">Duplicates</span><div class="fx-pills">${tog('dedupePhone', 'One row per phone number')}${tog('dedupeSite', 'One row per website')}</div></div>`
-  : XP.step === 2 ? `
-    <div class="xm-presetcards">${Object.entries(XPRESET_INFO).map(([k, [t, d]]) => `<button type="button" class="xm-pcard ${XP.preset === k ? 'on' : ''}" data-xpreset="${k}"><b>${t}</b><span>${d}</span><small>${XPRESETS[k].length} columns</small></button>`).join('')}
-      <button type="button" class="xm-pcard ${XP.preset === 'custom' || XP.custom ? 'on' : ''}" data-xcustom="1"><b>Custom</b><span>Pick exactly the columns you want.</span><small>${XP.preset === 'custom' ? cols.length + ' columns' : 'Choose below'}</small></button></div>
-    ${XP.custom || XP.preset === 'custom' ? `<div class="xcols">${groups.map(g => `<div><h6>${g}</h6>${XCOLS.filter(c => c[2] === g).map(c => `<label class="ck"><input type="checkbox" data-xcol="${c[0]}" ${XP.cols.has(c[0]) ? 'checked' : ''}>${c[1]}</label>`).join('')}</div>`).join('')}</div>`
-      : `<div class="xm-colsum">${cols.map(c => `<span class="fx-term">${c[1]}</span>`).join('')}</div>`}`
-  : `
-    <div class="xm-sec"><span class="fx-k">File name</span><div class="xm-file"><input class="input" id="x-file" value="${esc(XP.file || defaultFile())}" aria-label="File name"><span>.${XP.fmt}</span></div></div>
-    <div class="xm-sec xm-opts">
-      <div><span class="fx-k">Format</span><div class="seg-c">${[['csv', 'CSV'], ['xlsx', 'Excel']].map(([k, l]) => `<button type="button" class="${XP.fmt === k ? 'on' : ''}" data-xfmt="${k}">${l}</button>`).join('')}</div></div>
-      <div><span class="fx-k">Phone format</span><div class="seg-c">${[['nat', 'As listed'], ['e164', '+15125550148']].map(([k, l]) => `<button type="button" class="${XP.pfmt === k ? 'on' : ''}" data-xpfmt="${k}" title="${k === 'e164' ? 'International format for dialers and CRMs' : 'As shown on Google'}">${l}</button>`).join('')}</div></div>
-    </div>
-    <div class="xm-sec"><span class="fx-k">Preview · first 4 of ${fmt(rows.length)}</span><div class="tbl-wrap xprev">${cols.length && rows.length ? `<table><thead><tr>${cols.map(c => `<th>${c[1]}</th>`).join('')}</tr></thead><tbody>${rows.slice(0, 4).map(L => `<tr>${cols.map(c => `<td>${esc(c[3](L)) || '<span class="none">—</span>'}</td>`).join('')}</tr>`).join('')}</tbody></table>` : `<div class="empty" style="padding:16px">${cols.length ? 'No leads match. Go back and loosen the filters.' : 'Go back and pick at least one column.'}</div>`}</div></div>`;
-  const canNext = XP.step === 1 ? rows.length > 0 : XP.step === 2 ? cols.length > 0 : true;
+  const filtered = summaryParts().length > 0;
+  const scopes = [
+    XP.src != null && ['search', searchName(XP.src)],
+    L$.sel.size && ['sel', 'Selected'],
+    ['view', filtered ? 'Filtered view' : 'All leads'],
+    filtered && ['all', 'All leads'],
+  ].filter(Boolean);
+  const dnc = xBase(XP.scope).filter(L => L.status === 3).length;
+  const ok = rows.length && cols.length;
+  const go = XP.fmt === 'copy' ? `${ic('copy', 14)}Copy ${fmt(rows.length)} rows` : `${ic('download', 14)}Download ${XP.fmt === 'xlsx' ? 'Excel' : 'CSV'}`;
   $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal xm" data-stop role="dialog" aria-label="Export leads">
-   <div class="xm-h"><h2>Export leads</h2><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
-   <div class="xm-steps">${steps.map((t, i) => `<button type="button" class="xm-step ${XP.step === i + 1 ? 'on' : XP.step > i + 1 ? 'done' : ''}" data-xstep="${i + 1}" ${i + 1 > XP.step && !canNext ? 'disabled' : ''}><i>${XP.step > i + 1 ? ic('check', 11) : i + 1}</i>${t}</button>`).join('<span class="xm-line"></span>')}</div>
-   <div class="xm-b">${body}</div>
-   <div class="xm-f"><span class="xm-count num"><b>${fmt(rows.length)}</b> lead${rows.length === 1 ? '' : 's'} · ${cols.length} columns</span>
-     <div class="row" style="gap:8px;margin-left:auto">${XP.step > 1 ? `<button class="btn ghost" data-xstep="${XP.step - 1}">${ic('back', 14)}Back</button>` : ''}
-     ${XP.step < 3 ? `<button class="btn primary" data-xstep="${XP.step + 1}" ${canNext ? '' : 'disabled'}>Next ${ic('arrow', 14)}</button>` : `<button class="btn" data-xact="copy" ${rows.length && cols.length ? '' : 'disabled'}>${ic('copy', 14)}Copy for Sheets</button><button class="btn primary" data-xact="download" ${rows.length && cols.length ? '' : 'disabled'}>${ic('download', 14)}Download</button>`}</div></div>
+   <div class="xm-h"><div><h2>Export leads</h2><p class="help">${filtered && XP.scope === 'view' ? `Uses your filters: ${esc(summaryParts().join(' · '))}` : 'Narrow it down with the filters on the Leads page first.'}</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
+   <div class="xm-b">
+    <div class="xm-sec"><span class="fx-k">Leads</span>
+      <div class="xm-scopes">${scopes.map(([k, l]) => `<button type="button" class="xm-scope ${XP.scope === k ? 'on' : ''}" data-xscopebtn="${k}"><b>${esc(l)}</b><span class="num">${fmt(xBase(k).length)} leads</span></button>`).join('')}</div>
+      ${dnc || XP.skipDnc === false ? `<label class="ck xm-dnc"><input type="checkbox" data-xopt="skipDnc" ${XP.skipDnc ? 'checked' : ''}>Leave out ${fmt(dnc)} marked Do not contact</label>` : ''}</div>
+    <div class="xm-sec"><div class="xm-row"><span class="fx-k">Columns</span><button type="button" class="linkbtn" data-xcustom="1">${XP.custom ? 'Hide columns' : 'Choose columns'}</button></div>
+      <div class="xm-presetcards">${Object.entries(XPRESET_INFO).map(([k, [t, d]]) => `<button type="button" class="xm-pcard ${XP.preset === k ? 'on' : ''}" data-xpreset="${k}"><b>${t}</b><span>${d}</span></button>`).join('')}</div>
+      ${XP.custom ? `<div class="xcols">${groups.map(g => `<div><h6>${g}</h6>${XCOLS.filter(c => c[2] === g).map(c => `<label class="ck"><input type="checkbox" data-xcol="${c[0]}" ${XP.cols.has(c[0]) ? 'checked' : ''}>${c[1]}</label>`).join('')}</div>`).join('')}</div>` : ''}</div>
+    <div class="xm-sec"><span class="fx-k">Format</span>
+      <div class="seg-c xm-seg">${[['csv', 'CSV'], ['xlsx', 'Excel'], ['copy', 'Copy for Google Sheets']].map(([k, l]) => `<button type="button" class="${XP.fmt === k ? 'on' : ''}" data-xfmt="${k}">${l}</button>`).join('')}</div></div>
+   </div>
+   <div class="xm-f"><span class="xm-count num"><b>${fmt(rows.length)}</b> lead${rows.length === 1 ? '' : 's'} · ${cols.length} column${cols.length === 1 ? '' : 's'}</span>
+     <button class="btn primary" style="margin-left:auto" data-xact="go" ${ok ? '' : 'disabled'}>${go}</button></div>
   </div></div>`;
 }
 function delimited(sep) {
@@ -670,21 +663,20 @@ function loadXLSX() {
   return xlsxLib;
 }
 async function doExport(kind) {
-  XP.file = ($('#x-file').value || defaultFile()).replace(/[\\/:*?"<>|]+/g, '-');
   saveXP();
-  const n = xRows().length;
-  if (kind === 'copy') {
-    try { await navigator.clipboard.writeText(delimited('\t')); toast(`Copied ${fmt(n)} rows. Paste into Google Sheets or Excel`); } catch { toast('Your browser blocked copying. Use Download instead', 'alert'); }
+  const n = xRows().length, file = defaultFile();
+  if (XP.fmt === 'copy') {
+    try { await navigator.clipboard.writeText(delimited('\t')); closeOverlay(); toast(`Copied ${fmt(n)} rows. Paste into Google Sheets or Excel`); } catch { toast('Your browser blocked copying. Choose CSV instead', 'alert'); }
     return;
   }
-  if (XP.fmt === 'csv') { saveFile(new Blob(['﻿' + delimited(',')], { type: 'text/csv;charset=utf-8' }), XP.file + '.csv'); }
+  if (XP.fmt === 'csv') { saveFile(new Blob(['﻿' + delimited(',')], { type: 'text/csv;charset=utf-8' }), file + '.csv'); }
   else {
     try {
       const X = await loadXLSX(), cols = xCols();
       const data = [cols.map(c => c[1]), ...xRows().map(L => cols.map(c => c[3](L)))];
       const ws = X.utils.aoa_to_sheet(data), wb = X.utils.book_new();
       X.utils.book_append_sheet(wb, ws, 'Leads');
-      X.writeFile(wb, XP.file + '.xlsx');
+      X.writeFile(wb, file + '.xlsx');
     } catch (e) { toast(e.message, 'alert'); return; }
   }
   closeOverlay(); toast(`Exported ${fmt(n)} leads`, 'download');
@@ -1068,13 +1060,14 @@ function loadIntoForm(j) {
 }
 
 /* ================================================================ industries */
-const IP = { q: '', sort: 'name', showRemoved: false, menu: null };
+const IP = { q: '', sort: 'mine', showRemoved: false, menu: null };
+const byPos = (a, b) => (a.position || 0) - (b.position || 0) || a.name.localeCompare(b.name);
 V.industries = () => `
   <div class="head"><div><div class="eyebrow">Setup</div><h1>Industries</h1><p>What to search for, and which Google categories count as a match.</p></div>
     <button class="btn primary" data-act="indnew">${ic('plus')}Add industry</button></div>
   <div class="indtools">
     <div class="lsearch">${ic('find', 15)}<input id="ind-q" placeholder="Search industries or terms" value="${esc(IP.q)}" autocomplete="off"></div>
-    <div class="seg-c" role="radiogroup" aria-label="Sort">${[['name', 'A–Z'], ['leads', 'Most leads'], ['recent', 'Recently searched']].map(([k, l]) => `<button role="radio" aria-checked="${IP.sort === k}" class="${IP.sort === k ? 'on' : ''}" data-indsort="${k}">${l}</button>`).join('')}</div>
+    <div class="seg-c" role="radiogroup" aria-label="Sort">${[['mine', 'Your order'], ['leads', 'Most leads'], ['recent', 'Recently searched'], ['name', 'A–Z']].map(([k, l]) => `<button role="radio" aria-checked="${IP.sort === k}" class="${IP.sort === k ? 'on' : ''}" data-indsort="${k}">${l}</button>`).join('')}</div>
   </div>
   <div id="indgrid">${industriesGrid()}</div>`;
 function industryStats() {
@@ -1089,11 +1082,12 @@ function industryStats() {
 function industriesGrid() {
   const { counts, last } = industryStats(), q = IP.q.trim().toLowerCase();
   let act = ST.industries.filter(d => !d.archived && (!q || d.name.toLowerCase().includes(q) || d.terms.some(t => t.toLowerCase().includes(q))));
-  act.sort(IP.sort === 'leads' ? (a, b) => (counts.get(b.id) || 0) - (counts.get(a.id) || 0) || a.name.localeCompare(b.name) : IP.sort === 'recent' ? (a, b) => (last.get(b.id) || 0) - (last.get(a.id) || 0) || a.name.localeCompare(b.name) : (a, b) => a.name.localeCompare(b.name));
+  act.sort(IP.sort === 'leads' ? (a, b) => (counts.get(b.id) || 0) - (counts.get(a.id) || 0) || a.name.localeCompare(b.name) : IP.sort === 'recent' ? (a, b) => (last.get(b.id) || 0) - (last.get(a.id) || 0) || a.name.localeCompare(b.name) : IP.sort === 'name' ? (a, b) => a.name.localeCompare(b.name) : byPos);
+  const canDrag = IP.sort === 'mine' && !q;
   const arc = ST.industries.filter(d => d.archived);
   const card = d => {
     const n = counts.get(d.id) || 0, ls = last.get(d.id);
-    return `<article class="indcard">
+    return `<article class="indcard${canDrag ? ' inddrag' : ''}" data-indid="${d.id}">
       <div class="indcard-top"><h3>${esc(d.name)}</h3>
         <div class="kebab"><button class="iconbtn sm" data-indmenu="${d.id}" aria-label="More actions for ${esc(d.name)}" aria-haspopup="true">⋯</button>${IP.menu === d.id ? `<div class="menu" role="menu"><button role="menuitem" data-indedit="${d.id}">${ic('edit', 14)}Edit</button><button role="menuitem" class="danger" data-indrm="${d.id}">${ic('trash', 14)}Remove</button></div>` : ''}</div></div>
       <div class="indcard-stats"><span><b class="num">${fmt(n)}</b> lead${n === 1 ? '' : 's'}</span><span class="dotsep">·</span><span>${ls ? 'Searched ' + dayPT(ls).toLowerCase().replace(/^(\w)/, (m) => /\d/.test(m) ? m : m) : 'Never searched'}</span></div>
@@ -1102,11 +1096,50 @@ function industriesGrid() {
       <div class="indcard-acts"><button class="btn sm" data-indfind="${d.id}">${ic('find', 13)}Find leads</button><button class="btn sm ghost" data-indedit="${d.id}">Edit</button>${n ? `<button class="btn sm ghost" data-indleads="${d.id}">View leads</button>` : ''}</div>
     </article>`;
   };
-  return `<div class="indgrid">${act.map(card).join('')}${!q ? `<button class="indcard indadd" data-act="indnew">${ic('plus', 20)}<b>Add industry</b><span>Any trade you want to find</span></button>` : ''}</div>
+  return `${canDrag && act.length > 1 ? `<p class="help indhint">${ic('drag', 13)}Drag cards to put the trades you use most first. This order is used everywhere you pick an industry.</p>` : ''}<div class="indgrid">${act.map(card).join('')}${!q ? `<button class="indcard indadd" data-act="indnew">${ic('plus', 20)}<b>Add industry</b><span>Any trade you want to find</span></button>` : ''}</div>
     ${!act.length && q ? `<div class="empty"><b>No industry matches “${esc(IP.q)}”</b><button class="linkbtn" data-act="indnew">Add it as a new industry</button></div>` : ''}
     ${arc.length ? `<div class="indremoved"><button class="linkbtn muted" data-act="indshowrm">${IP.showRemoved ? 'Hide' : 'Show'} ${arc.length} removed industr${arc.length === 1 ? 'y' : 'ies'}</button>
       ${IP.showRemoved ? `<div class="card">${arc.map(d => `<div class="indrm-row"><b>${esc(d.name)}</b><span class="sub">${fmt(counts.get(d.id) || 0)} leads kept</span><button class="btn sm" data-indrestore="${d.id}">Restore</button></div>`).join('')}</div>` : ''}</div>` : ''}`;
 }
+function indRank(id) { const i = ST.industries.findIndex(x => x.id === id); return i < 0 ? 1e9 : i; }
+/* drag to reorder industry cards (mouse and touch; long-press on phones) */
+const indDrag = { justDropped: false };
+document.addEventListener('pointerdown', e => {
+  const card = e.target.closest('.indcard.inddrag');
+  if (!card || e.button > 0 || e.target.closest('button, a, input, .menu')) return;
+  Object.assign(indDrag, { card, x: e.clientX, y: e.clientY, started: false, armed: e.pointerType !== 'touch' });
+  if (e.pointerType === 'touch') indDrag.timer = setTimeout(() => { indDrag.armed = true; card.classList.add('ind-lift'); }, 280);
+});
+document.addEventListener('pointermove', e => {
+  const d = indDrag; if (!d.card) return;
+  if (!d.started) {
+    const dist = Math.hypot(e.clientX - d.x, e.clientY - d.y);
+    if (!d.armed) { if (dist > 8) { clearTimeout(d.timer); d.card = null; } return; }
+    if (dist < 6) return;
+    const r = d.card.getBoundingClientRect(), g = d.card.cloneNode(true);
+    g.classList.add('ind-ghost'); g.style.width = r.width + 'px'; g.style.height = r.height + 'px'; document.body.appendChild(g);
+    Object.assign(d, { started: true, ghost: g, offX: e.clientX - r.left, offY: e.clientY - r.top });
+    d.card.classList.add('ind-placeholder'); d.card.classList.remove('ind-lift'); document.body.classList.add('dragging-notes');
+  }
+  e.preventDefault();
+  d.ghost.style.transform = `translate(${e.clientX - d.offX}px, ${e.clientY - d.offY}px) rotate(1.5deg)`;
+  const over = document.elementFromPoint(e.clientX, e.clientY)?.closest('.indcard.inddrag');
+  if (over && over !== d.card) { const r = over.getBoundingClientRect(); over.parentNode.insertBefore(d.card, e.clientX > r.left + r.width / 2 ? over.nextSibling : over); }
+  const edge = 70; if (e.clientY < edge) scrollBy(0, -12); else if (e.clientY > innerHeight - edge) scrollBy(0, 12);
+}, { passive: false });
+document.addEventListener('pointerup', async () => {
+  const d = indDrag; clearTimeout(d.timer); if (!d.card) return;
+  d.card.classList.remove('ind-lift');
+  if (!d.started) { d.card = null; return; }
+  d.ghost.remove(); d.card.classList.remove('ind-placeholder'); document.body.classList.remove('dragging-notes'); d.card = null;
+  d.justDropped = true; setTimeout(() => { d.justDropped = false; }, 60);
+  const shown = [...document.querySelectorAll('.indcard[data-indid]')].map(x => +x.dataset.indid);
+  const rest = ST.industries.filter(x => !shown.includes(x.id)).map(x => x.id);   // removed industries keep their place at the end
+  const ids = [...shown, ...rest];
+  ids.forEach((id, i) => { const x = ST.industries.find(y => y.id === id); if (x) x.position = i + 1; });
+  ST.industries.sort(byPos); rerenderInd();
+  try { await api('PUT', '/api/industries/order', { ids }); } catch (err) { toast(err.message, 'alert'); }
+});
 function rerenderInd() { const g = $('#indgrid'); if (g) g.innerHTML = industriesGrid(); }
 let EDIT = null;
 function indModal() {
@@ -1130,7 +1163,7 @@ async function saveIndustry() {
   try {
     const r = e.id == null ? await api('POST', '/api/industries', e) : await api('PUT', `/api/industries/${e.id}`, e);
     const i = ST.industries.findIndex(x => x.id === r.industry.id); if (i >= 0) ST.industries[i] = r.industry; else ST.industries.push(r.industry);
-    ST.industries.sort((a, b) => a.name.localeCompare(b.name));
+    ST.industries.sort(byPos);
     closeOverlay(); if ($('#indgrid')) rerenderInd(); else render(); toast(e.id == null ? `${r.industry.name} added` : 'Changes saved');
   } catch (err) { $('#ind-err').textContent = err.message; }
 }
@@ -1236,14 +1269,10 @@ document.addEventListener('click', async (e) => {
     saveLead(lid, { status: st }, () => { toast(st === 4 ? 'Marked replied. Follow-ups for this lead are stopped.' : st === 3 ? 'Marked do not contact. Unsent campaign messages are skipped.' : st === 2 && cur?.status === 1 ? 'Marked contacted. Unsent campaign messages are skipped.' : 'Status saved'); if (DRAWER_ID === lid) leadDrawer(lid); });
     return;
   }
-  if ((v = ds('xpreset')) !== undefined) { XP.preset = v; XP.custom = false; XP.cols = new Set(XPRESETS[v]); exportModal(); return; }
-  if ((v = ds('xscopebtn')) !== undefined) { XP.scope = v; XP.file = ''; exportModal(); return; }
-  if ((v = ds('xstep')) !== undefined) { const f = $('#x-file'); if (f) XP.file = f.value; XP.step = +v; exportModal(); return; }
-  if ((v = ds('xform')) !== undefined) { XP.form = v; exportModal(); return; }
-  if ((v = ds('xtog')) !== undefined) { XP[v] = !XP[v]; exportModal(); return; }
-  if ((v = ds('xpfmt')) !== undefined) { const f = $('#x-file'); if (f) XP.file = f.value; XP.pfmt = v; exportModal(); return; }
-  if ((v = ds('xcustom')) !== undefined) { XP.custom = true; XP.preset = 'custom'; exportModal(); return; }
-  if ((v = ds('xfmt')) !== undefined) { const f = $('#x-file'); if (f) XP.file = f.value; XP.fmt = v; exportModal(); return; }
+  if ((v = ds('xpreset')) !== undefined) { XP.preset = v; XP.cols = new Set(XPRESETS[v]); exportModal(); return; }
+  if ((v = ds('xscopebtn')) !== undefined) { XP.scope = v; exportModal(); return; }
+  if ((v = ds('xcustom')) !== undefined) { XP.custom = !XP.custom; exportModal(); return; }
+  if ((v = ds('xfmt')) !== undefined) { XP.fmt = v; saveXP(); exportModal(); return; }
   if ((v = ds('xact')) !== undefined) { doExport(v); return; }
   if ((v = ds('ckgo')) !== undefined) { startCheck(v.split(',').map(Number)); return; }
   if ((v = ds('excl')) !== undefined) { excludedModal(+v); return; }
@@ -1502,10 +1531,8 @@ document.addEventListener('change', async (e) => {
   if (t.dataset.fchk) { L$.F[t.dataset.fchk] = t.checked; changed(); return; }
   if (t.id === 'lsort') { L$.sort = t.value; leadsUpdate(false); $('#vt').scrollTop = 0; return; }
   if (t.dataset.lstatus) { saveLead(+t.dataset.lstatus, { status: +t.value }, () => toast('Status saved')); return; }
-  if (t.dataset.xscope) { XP.scope = t.dataset.xscope; XP.file = ''; exportModal(); return; }
-  if (t.dataset.xopt) { XP[t.dataset.xopt] = t.checked; XP.file = $('#x-file').value; exportModal(); return; }
+  if (t.dataset.xopt) { XP[t.dataset.xopt] = t.checked; exportModal(); return; }
   if (t.dataset.xcol) { t.checked ? XP.cols.add(t.dataset.xcol) : XP.cols.delete(t.dataset.xcol); XP.preset = Object.entries(XPRESETS).find(([, a]) => a.length === XP.cols.size && a.every(c => XP.cols.has(c)))?.[0] || 'custom'; exportModal(); return; }
-  if (t.id === 'x-pfmt') { XP.pfmt = t.value; XP.file = $('#x-file').value; exportModal(); return; }
   if (t.name === 'lmpick') { lmPick(t.value === 'new' ? 'new' : +t.value); return; }
   if (t.dataset.ck) { CK[t.dataset.ck] = t.checked; t.closest('.opt').classList.toggle('on', t.checked); return; }
   if (t.id === 'fs-ind') { FS.ind = +t.value; FS.terms = new Set(curInd().terms.map((_, i) => i)); FS.extra = []; refreshFind(['what']); return; }
