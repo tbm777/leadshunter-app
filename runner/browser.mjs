@@ -48,6 +48,7 @@ export async function browserFormCheck(url) {
   });
   const page = await ctx.newPage();
   page.setDefaultTimeout(5000);
+  const killer = setTimeout(() => ctx.close().catch(() => {}), 55000);   // a page that never settles is closed, which ends any wait on it
   try {
     const tried = new Set(), queue = [url];
     let loaded = false;
@@ -70,6 +71,7 @@ export async function browserFormCheck(url) {
   } catch {
     return { form: FORM.NEEDS_BROWSER, captcha: null, form_url: url };
   } finally {
+    clearTimeout(killer);
     await ctx.close().catch(() => {});
   }
 }

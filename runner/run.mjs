@@ -169,7 +169,8 @@ async function checkOne([id, website]) {
     if (checkOpts.form && ([FORM.NEEDS_BROWSER, FORM.OPEN, FORM.CAPTCHA].includes(r.form) || (r.form === FORM.NONE && loads))) {
       try {
         const tb = Date.now();
-        const b = await withBrowserSlot(() => browserFormCheck(r.form_url || website));
+        // A hard time limit per site: one page that never settles must not stall the whole job.
+        const b = await withBrowserSlot(() => Promise.race([browserFormCheck(r.form_url || website), new Promise(res => setTimeout(() => res({ form: FORM.NEEDS_BROWSER }), 60000))]));
         SM.time('browser_check', Date.now() - tb);
         if (b.form !== FORM.NEEDS_BROWSER) Object.assign(r, b);
       } catch (e) { log('browser check failed', e.message); }
@@ -274,7 +275,9 @@ async function main() {
   }
 
   // Website checks: leads queued during the search plus anything left unchecked (resumed jobs, check jobs).
-  if (wantChecks && !error) {
+  // Stopped by you: end here. Don't start the website checks that were still waiting (they could take a long time).
+  if (!error) { try { const j = await api('GET', `/api/runner/jobs/${JOB}`); if (j.status === 'cancelled') { cancelled = true; stopChecks = true; checkQueue.length = 0; log('Cancelled: skipping the remaining website checks.'); } } catch { /* keep going */ } }
+  if (wantChecks && !error && !cancelled) {
     const pending = await api('GET', `/api/runner/jobs/${JOB}/pending-checks`);
     for (const l of pending.leads) enqueueCheck(l);
     log(`Checking ${everQueued.size} websites (${checkOpts.form ? 'with' : 'without'} contact forms${checkOpts.email ? ', with emails' : ''}).`);
