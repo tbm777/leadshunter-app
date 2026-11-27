@@ -7,7 +7,8 @@ import { appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { checkSite, FORM, SITE } from '../runner/check.mjs';
-import { browserFormCheck, closeBrowser } from '../runner/browser.mjs';
+import { browserFormCheck, closeBrowser, getBrowser } from '../runner/browser.mjs';
+import { submitForm } from '../runner/forms/filler.mjs';
 
 const GMAPS = process.env.GMAPS_BIN || './gmaps';
 const TERMS = (process.env.TERMS || 'plumber,roofing contractor,hvac contractor,electrician,landscaper').split(',').map(s => s.trim()).filter(Boolean);
@@ -55,6 +56,7 @@ rm(dir, { recursive: true, force: true });
 
 // Website checks on a sample of the leads that have a website (same check as a search with "contact form" on).
 const sites = [...leads.values()].filter(Boolean).sort(() => Math.random() - 0.5).slice(0, CHECKS);
+const openForms = [];
 const tally = { open: 0, captcha: 0, none: 0, down: 0, other: 0 }, ctimes = [];
 let ci = 0; const t1 = Date.now();
 await Promise.all(Array.from({ length: 16 }, async () => {
@@ -64,9 +66,22 @@ await Promise.all(Array.from({ length: 16 }, async () => {
       const r = await checkSite(url, { form: true, email: false });
       if ([FORM.NEEDS_BROWSER, FORM.OPEN, FORM.CAPTCHA].includes(r.form) || (r.form === FORM.NONE && (r.site === SITE.LOADS || r.site === SITE.SLOW))) { try { const b = await browserFormCheck(r.form_url || url); if (b.form !== FORM.NEEDS_BROWSER) Object.assign(r, b); } catch { /* keep */ } }
       if (r.site === SITE.DOWN || r.site === SITE.PARKED || r.site === SITE.BLOCKED) tally.down++;
-      else if (r.form === FORM.OPEN) tally.open++; else if (r.form === FORM.CAPTCHA) tally.captcha++; else if (r.form === FORM.NONE) tally.none++; else tally.other++;
+      else if (r.form === FORM.OPEN) { tally.open++; openForms.push(r.form_url || url); } else if (r.form === FORM.CAPTCHA) tally.captcha++; else if (r.form === FORM.NONE) tally.none++; else tally.other++;
     } catch { tally.other++; }
     ctimes.push(Date.now() - s0);
+  }
+}));
+// Precision: can the robot actually fill the forms the check marked open? Test mode, nothing is submitted.
+const sample = openForms.sort(() => Math.random() - 0.5).slice(0, 40), prec = { fillable: 0, captcha: 0, none: 0, other: 0 };
+const profile = { firstName: 'Test', lastName: 'Visitor', email: 'test@example.com', phone: '(512) 555-0100', company: 'Example Co', website: 'example.com', city: 'Austin', state: 'TX', stateName: 'Texas', zip: '78701', country: 'United States', address: '100 Congress Ave', subject: 'Quick question', message: 'Hello, this is a test message that is never sent.' };
+let pi = 0;
+const br = await getBrowser();
+await Promise.all(Array.from({ length: 4 }, async () => {
+  while (pi < sample.length) {
+    const u = sample[pi++], ctx = await br.newContext({ viewport: { width: 1280, height: 900 } }), pg = await ctx.newPage();
+    let r; try { r = await Promise.race([submitForm(pg, u, profile, { lead: { name: 'Test' }, dryRun: true }), new Promise((_, rej) => setTimeout(() => rej(new Error('t')), 90000))]); } catch { r = { status: 'failed', reason: 'error' }; }
+    if (r.status === 'ready') prec.fillable++; else if (r.reason === 'captcha') prec.captcha++; else if (r.reason === 'no-form') prec.none++; else prec.other++;
+    await ctx.close().catch(() => {});
   }
 }));
 await closeBrowser();
@@ -86,6 +101,7 @@ say(`| New businesses per search | ${perSearch.toFixed(0)} |`);
 say(`| With a website | ${Math.round(siteRate * 100)}% |`);
 say(`| Website checks | ${sites.length} in ${checkMin.toFixed(1)} min, typical ${(q(ctimes, 0.5) / 1000).toFixed(1)} s |`);
 say(`| Of checked sites | ${Math.round(tally.open / n * 100)}% open form, ${Math.round(tally.captcha / n * 100)}% CAPTCHA, ${Math.round(tally.none / n * 100)}% no form, ${Math.round(tally.down / n * 100)}% down or parked |`);
+say(`| Robot could fill the "open form" sites (test mode, ${sample.length} checked) | ${prec.fillable} (${Math.round(prec.fillable / Math.max(1, sample.length) * 100)}%), ${prec.captcha} CAPTCHA, ${prec.none} no form, ${prec.other} other |`);
 say(`| Usable leads (open form) per business found | ${Math.round(usable * 100)}% |`);
 const need = usable ? Math.ceil(1000 / usable) : null, searches = need ? Math.ceil(need / Math.max(1, perSearch)) : null;
 const minutes = searches ? Math.ceil(searches / jobs.length * mapMin + need * (checkMin / n)) : null;
