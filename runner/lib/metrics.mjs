@@ -15,7 +15,7 @@ export class Metrics {
   toJSON(extra = {}) {
     const stages = Object.fromEntries(Object.entries(this.series).map(([k, v]) => [k, summarize(v)]));
     // Raw durations (rounded to 0.1 s, capped) let the scorecard compute exact percentiles across jobs.
-    const raw = Object.fromEntries(Object.entries(this.series).map(([k, v]) => [k, v.slice(0, 400).map(x => Math.round(x / 100))]));
+    const raw = Object.fromEntries(Object.entries(this.series).filter(([k]) => !k.endsWith('_results')).map(([k, v]) => [k, v.slice(0, 400).map(x => Math.round(x / 100))]));   // durations only
     return { kind: this.kind, wall_ms: Date.now() - this.t0, stages, counts: this.counts, groups: this.groups, raw, ...extra };
   }
 }

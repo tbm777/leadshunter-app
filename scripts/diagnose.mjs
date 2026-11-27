@@ -28,9 +28,8 @@ if (last) {
   table('Latest search settings (terms | form filter | website | reviews)', [{ t: (p.terms || []).length + ' terms', f: p.form || 'any', w: p.website || 'any', r: `${p.minReviews || 0}-${p.maxReviews ?? 'any'}` }]);
   const m = (await q(`SELECT data FROM job_metrics WHERE job_id = ${last.id}`))[0];
   if (m) {
-    const d = JSON.parse(m.data), res = (d.raw?.map_results || []).map(x => x * 100);   // stored in tenths
-    const zero = res.filter(x => x === 0).length, avg = res.length ? res.reduce((a, b) => a + b, 0) / res.length : 0;
-    table('Latest search: results per map search (searches | average results | returned nothing | 20 or more)', [{ n: res.length, avg: avg.toFixed(1), zero: `${zero} (${Math.round(zero / Math.max(1, res.length) * 100)}%)`, full: res.filter(x => x >= 20).length }]);
+    const d = JSON.parse(m.data), mr = d.stages?.map_results || {}, ms = d.stages?.map_search || {};
+    table('Latest search: results per map search (searches | typical | average | most | typical time s)', [{ n: mr.n, p50: mr.p50, avg: mr.mean, max: mr.max, t: ms.p50 ? (ms.p50 / 1000).toFixed(1) : '-' }]);
     table('Latest search: website check outcomes (site status | count)', Object.entries(d.counts?.site || {}).map(([k, v]) => ({ k: ['loads', 'slow', 'down', 'not checked', 'no site', 'blocked', 'parked', 'social'][+k] || k, v })));
     table('Latest search: form check outcomes (form | count)', Object.entries(d.counts?.form || {}).map(([k, v]) => ({ k: FORM[+k] || k, v })));
   }
