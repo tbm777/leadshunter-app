@@ -80,6 +80,8 @@ function jobOut(j) {
   let mode = 'send'; try { mode = JSON.parse(j.params).mode || 'send'; } catch { /* default */ }
   return { id: j.id, status: j.status, mode, total: j.to_check, done: j.checked, created_at: j.created_at, started_at: j.started_at, finished_at: j.finished_at, error: j.error, run_url: j.run_url };
 }
+// Step types: the robot sends 'form'; the others become tasks in your Manual queue.
+const CHANNELS = ['form', 'email', 'call', 'voicedrop', 'sms'];
 const stepOut = s => ({ step: s.step, channel: s.channel, delay_days: s.delay_days, subject: s.subject, message: s.message });
 const senderOut = s => ({ id: s.id, label: s.label, first_name: s.first_name, last_name: s.last_name, email: s.email, phone: s.phone, company: s.company, website: s.website, address: s.address, city: s.city, state: s.state, zip: s.zip, country: s.country });
 function campaignOut(c, counts = {}, today = 0, job = null, steps = [], seq = {}) {
@@ -172,7 +174,7 @@ export async function saveSteps(env, id, b) {
   const c = await env.DB.prepare('SELECT * FROM campaigns WHERE id = ?').bind(id).first();
   if (!c) throw new HttpError(404, 'Campaign not found.');
   const steps = (Array.isArray(b.steps) ? b.steps : []).slice(0, 2).map((x, i) => ({
-    step: i + 2, channel: x.channel === 'call' ? 'call' : 'form', delay_days: Math.max(1, Math.min(30, Math.floor(+x.delay_days || 3))),
+    step: i + 2, channel: CHANNELS.includes(x.channel) ? x.channel : 'form', delay_days: Math.max(1, Math.min(30, Math.floor(+x.delay_days || 3))),
     subject: str(x.subject, 200), message: String(x.message ?? '').slice(0, 5000),
   }));
   const old = await stepsOf(env, id), oldMax = 1 + old.length, newMax = 1 + steps.length, t = now();
@@ -339,7 +341,7 @@ export async function listItems(env, url) {
   const order = q.get('order') === 'sent' ? 'o.sent_at DESC, o.id DESC' : q.get('order') === 'recent' ? 'o.updated_at DESC, o.id DESC' : 'o.id';
   const limit = Math.min(500, +q.get('limit') || 200), offset = Math.max(0, +q.get('offset') || 0);
   const sql = `SELECT o.id, o.campaign_id, o.lead_id, o.status, o.reason, o.evidence, o.form_url, o.test_status, o.test_reason, o.test_at, o.shot_at, o.review, o.answers, o.sent_at, o.updated_at, o.step, o.next_at, l.status AS lead_status,
-      l.name, l.website, l.city, l.region, l.postal, l.country, l.phone, l.category, l.industry_id, c.name AS campaign
+      l.name, l.website, l.city, l.region, l.postal, l.country, l.phone, l.email, l.category, l.industry_id, c.name AS campaign
     FROM outreach o JOIN leads l ON l.id = o.lead_id JOIN campaigns c ON c.id = o.campaign_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${order} LIMIT ? OFFSET ?`;
   const r = await env.DB.prepare(sql).bind(...vals, limit + 1, offset).all();
@@ -354,7 +356,8 @@ export async function itemAction(env, oid, b) {
   if (b.action === 'sent' || b.action === 'call') {
     if (SENT.includes(o.status)) return json({ ok: true });
     const CALL = { talked: 'Talked to them', voicemail: 'Left a voicemail', noanswer: 'No answer' };
-    const ev = b.action === 'call' ? `Call: ${CALL[b.outcome] || 'Called'}` : null;
+    const DONE = { email: 'Email sent', sms: 'Text sent', voicedrop: 'Voicemail dropped' };
+    const ev = b.action === 'call' ? `Call: ${CALL[b.outcome] || 'Called'}` : DONE[b.outcome] || null;
     await env.DB.prepare("UPDATE outreach SET status = 'sent_manual', reason = NULL, evidence = COALESCE(?, evidence), sent_at = ?, updated_at = ? WHERE id = ?").bind(ev, t, t, oid).run();
     await setLeadStatus(env, [o.lead_id], 2, [0, 1]);
     await afterSent(env, oid, b.action === 'call' ? `call_${CALL[b.outcome] ? b.outcome : 'talked'}` : 'sent_manual', ev);
@@ -582,10 +585,11 @@ async function tickCampaign(env, c) {
 /** Due steps that need a person: calls (any campaign) and every step of a manual campaign go to the Manual queue. */
 async function promoteDue(env, c) {
   const steps = await stepsOf(env, c.id); if (!steps.length) return;
-  const toQueue = steps.filter(x => x.channel === 'call' || c.mode === 'manual').map(x => x.step);
+  const toQueue = steps.filter(x => x.channel !== 'form' || c.mode === 'manual').map(x => x.step);
   if (!toQueue.length) return;
-  const calls = steps.filter(x => x.channel === 'call').map(x => x.step).concat(0).join(',');
-  await env.DB.prepare(`UPDATE outreach SET prev_status = status, status = 'manual', reason = CASE WHEN step IN (${calls}) THEN 'call' ELSE 'followup' END, next_at = NULL, updated_at = ?
+  // The task's reason is its type (call, email, sms, voicedrop); form steps of a manual campaign are 'followup'.
+  const reasonCase = 'CASE step ' + steps.map(x => `WHEN ${x.step} THEN '${x.channel === 'form' ? 'followup' : x.channel}'`).join(' ') + " ELSE 'followup' END";
+  await env.DB.prepare(`UPDATE outreach SET prev_status = status, status = 'manual', reason = ${reasonCase}, next_at = NULL, updated_at = ?
     WHERE campaign_id = ? AND next_at IS NOT NULL AND next_at <= ? AND status IN ('sent','submitted','sent_manual') AND step IN (${toQueue.join(',')}) AND lead_id NOT IN ${STOP}`).bind(now(), c.id, now()).run();
 }
 export async function runSchedules(env) {

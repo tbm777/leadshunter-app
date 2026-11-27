@@ -349,11 +349,21 @@ async function flushSave() {
 
 /* sequence tab: step 1 is the campaign message; follow-ups are steps 2 and 3 */
 const stepText = (c, n) => { if (!n || n <= 1) return { channel: 'form', subject: c.subject, message: c.message }; const st = (c.steps || []).find(x => x.step === n); return st ? { channel: st.channel, subject: st.subject || c.subject, message: st.message, delay_days: st.delay_days } : { channel: 'form', subject: c.subject, message: c.message }; };
+// Step types, in menu order. Only 'form' is sent by the robot; the rest become tasks in your Manual queue.
+const CH = {
+  form: { label: 'Contact form', title: 'Follow-up', icon: 'messages', body: 'Message', ph: 'Hi [Company Name] team,&#10;&#10;Just following up on my note from last week…&#10;&#10;Best,&#10;Alfred' },
+  email: { label: 'Email', title: 'Email', icon: 'mail', body: 'Email', subject: true, ph: 'Hi [Company Name] team,&#10;&#10;I sent a note through your website last week…' },
+  call: { label: 'Call', title: 'Call', icon: 'phone', body: 'Call script', ph: 'Hi, this is Alfred from The Bat Marketing. I sent a note through your website about…' },
+  voicedrop: { label: 'Voice drop', title: 'Voice drop', icon: 'phone', body: 'Voicemail script', ph: 'Hi, this is Alfred from The Bat Marketing, following up on my note…' },
+  sms: { label: 'SMS', title: 'SMS', icon: 'messages', body: 'Text message', ph: 'Hi, Alfred here from The Bat Marketing. Following up on my note about [Company Name]…' },
+};
+const chOf = k => CH[k] || CH.form;
+const TASKS = ['call', 'email', 'sms', 'voicedrop'];
 function seqBar(c) {
   const P = cp(c.id), steps = c.steps || [];
   const chip = (n, ch, day) => `<button class="seqstep ${P.step === n ? 'on' : ''}" data-seqstep="${n}" aria-pressed="${P.step === n}">
-    <span class="seqic">${A.ic(ch === 'call' ? 'phone' : 'messages', 15)}</span>
-    <span class="seqtx"><small>Step ${n} · Day ${day}</small><b>${n === 1 ? 'First message' : ch === 'call' ? 'Call' : 'Follow-up'}</b></span></button>`;
+    <span class="seqic">${A.ic(chOf(ch).icon, 15)}</span>
+    <span class="seqtx"><small>Step ${n} · Day ${day}</small><b>${n === 1 ? 'First message' : chOf(ch).title}</b></span></button>`;
   let day = 0;
   return `<div class="card seqbar"><div class="seqtrack">${chip(1, 'form', 0)}${steps.map(x => { day += x.delay_days; return `<span class="seqlink"><em>+${x.delay_days} day${x.delay_days === 1 ? '' : 's'}</em></span>${chip(x.step, x.channel, day)}`; }).join('')}
     ${steps.length < 2 ? `<span class="seqlink ghost"></span><button class="seqadd" data-o="addstep">${A.ic('plus', 14)}Add step</button>` : ''}</div>
@@ -365,21 +375,25 @@ function sequenceTab(c) {
   return `${seqBar(c)}${P.step === 1 ? messageTab(c) : stepEditor(c, (c.steps || []).find(x => x.step === P.step))}`;
 }
 function stepEditor(c, st) {
-  const isCall = st.channel === 'call';
+  const ch = chOf(st.channel), task = st.channel !== 'form', lead = previewLeads(c)[0];
+  const showSubj = st.channel === 'form' || st.channel === 'email';
+  const contact = st.channel === 'email' ? `${A.ic('mail', 15)}${A.esc(lead.email || 'office@' + (domain(lead.website) || 'their-website.com'))}` : `${A.ic('phone', 15)}(512) 555-0142`;
   return `<div class="msgrid">
-    <div class="card"><div class="card-h st-head"><h3>Step ${st.step} · ${isCall ? 'Call' : 'Follow-up'}</h3><div class="st-head-r"><span class="help" id="st-save"></span><button class="iconbtn sm st-rm" data-o="rmstep" title="Remove this step" aria-label="Remove this step">${A.ic('trash', 14)}</button></div></div>
+    <div class="card"><div class="card-h st-head"><h3>Step ${st.step} · ${ch.title}</h3><div class="st-head-r"><span class="help" id="st-save"></span><button class="iconbtn sm st-rm" data-o="rmstep" title="Remove this step" aria-label="Remove this step">${A.ic('trash', 14)}</button></div></div>
       <div class="card-b" style="display:flex;flex-direction:column;gap:14px">
         <div class="st-row">
-          <div class="field"><span class="flabel">Type</span><div class="seg-c"><button class="${!isCall ? 'on' : ''}" data-stch="form">${A.ic('messages', 13)}Contact form</button><button class="${isCall ? 'on' : ''}" data-stch="call">${A.ic('phone', 13)}Call</button></div></div>
+          <div class="field"><label class="flabel" for="st-ch">Type</label><select class="input" id="st-ch">${Object.entries(CH).map(([k, v]) => `<option value="${k}" ${k === (st.channel || 'form') ? 'selected' : ''}>${v.label}${k === 'form' ? '' : ' (manual)'}</option>`).join('')}</select></div>
           <div class="field"><label class="flabel" for="st-delay">Wait</label><div class="sset-suffix"><input class="input" id="st-delay" type="number" min="1" max="30" value="${st.delay_days}"><span>business days</span></div></div>
         </div>
-        ${isCall ? '' : `<div class="field"><label for="st-subj">Subject</label><input class="input big" id="st-subj" value="${A.esc(st.subject)}" maxlength="200" placeholder="Same as step 1"></div>`}
-        <div class="field"><div class="row" style="justify-content:space-between"><label for="st-body">${isCall ? 'Call script' : 'Message'}</label><button class="linkbtn muted" data-o="frombook">${A.ic('playbook', 13)} Use from Playbook</button></div>
-          <textarea class="input mbody" id="st-body" maxlength="5000" placeholder="${isCall ? 'Hi, this is Alfred from The Bat Marketing. I sent a note through your website about…' : 'Hi [Company Name] team,&#10;&#10;Just following up on my note from last week…&#10;&#10;Best,&#10;Alfred'}">${A.esc(st.message)}</textarea></div>
+        ${task ? `<p class="help st-task">${A.ic('manual', 13)}A task in your Manual queue when it's due. You send it, then mark it done.</p>` : ''}
+        ${showSubj ? `<div class="field"><label for="st-subj">Subject</label><input class="input big" id="st-subj" value="${A.esc(st.subject)}" maxlength="200" placeholder="Same as step 1"></div>` : ''}
+        <div class="field"><div class="row" style="justify-content:space-between"><label for="st-body">${ch.body}</label><button class="linkbtn muted" data-o="frombook">${A.ic('playbook', 13)} Use from Playbook</button></div>
+          <textarea class="input mbody${st.channel === 'sms' ? ' sms' : ''}" id="st-body" maxlength="${st.channel === 'sms' ? 480 : 5000}" placeholder="${ch.ph}">${A.esc(st.message)}</textarea>
+          ${st.channel === 'sms' ? `<span class="help num" id="st-count">${(st.message || '').length} / 160 characters (one text)</span>` : ''}</div>
         <div class="tagbar"><span class="help">Insert</span>${MERGE_TAGS.map(t => `<button class="chip" data-tag="[${t}]">[${t}]</button>`).join('')}</div>
-        ${isCall ? '' : `<div id="st-warn">${checkHTML(st.subject || c.subject, st.message)}</div>`}
+        ${showSubj ? `<div id="st-warn">${checkHTML(st.subject || c.subject, st.message)}</div>` : ''}
       </div></div>
-    ${isCall ? `<div class="card pvcard"><div class="card-h"><h3>How it looks in your queue</h3></div><div class="card-b"><div class="callprev"><span class="pill" style="--c:var(--info)">Call</span><b>${A.esc(cleanCompanyName(previewLeads(c)[0].name))}</b><a class="callnum">${A.ic('phone', 15)}(512) 555-0142</a><p>${A.esc(personalize(st.message || 'Your script appears here.', previewLeads(c)[0]))}</p><div class="row" style="gap:6px"><span class="btn sm">Talked</span><span class="btn sm">Voicemail</span><span class="btn sm">No answer</span></div></div></div></div>`
+    ${task ? `<div class="card pvcard"><div class="card-h"><h3>How it looks in your queue</h3></div><div class="card-b"><div class="callprev"><span class="pill" style="--c:var(--info)">${ch.label}</span><b>${A.esc(cleanCompanyName(lead.name))}</b><a class="callnum">${contact}</a>${st.channel === 'email' ? `<p><b>${A.esc(personalize(st.subject || c.subject, lead))}</b></p>` : ''}<p>${A.esc(personalize(st.message || 'Your text appears here.', lead))}</p><div class="row" style="gap:6px">${st.channel === 'call' ? '<span class="btn sm">Talked</span><span class="btn sm">Voicemail</span><span class="btn sm">No answer</span>' : `<span class="btn sm">${st.channel === 'email' ? 'Mark sent' : st.channel === 'sms' ? 'Mark texted' : 'Mark dropped'}</span>`}<span class="btn sm">They replied</span></div></div></div></div>`
       : `<div class="card pvcard"><div class="card-h"><div class="seg-c"><button class="${cp(c.id).previewMode === 'text' ? 'on' : ''}" data-pvmode="text">Form text</button><button class="${cp(c.id).previewMode === 'file' ? 'on' : ''}" data-pvmode="file">File</button></div>
       <div class="row pvnav"><button class="iconbtn sm" data-pvnav="-1" aria-label="Previous lead">${A.ic('back', 14)}</button><span id="pv-who" class="help"></span><button class="iconbtn sm" data-pvnav="1" aria-label="Next lead">${A.ic('arrow', 14)}</button></div></div><div id="pv" class="card-b"></div></div>`}
   </div>`;
@@ -532,11 +546,11 @@ function extGuide() {
       <p class="help" style="margin:12px 0 0">Updating: download again, replace the folder's files, then click the reload icon on the extension in <code>opera://extensions</code>. The extension only acts on pages you open with Fill form, and it never solves CAPTCHAs.</p></div>
     <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Done</button></div></div></div>`;
 }
-const MQ_REASONS = [['all', 'All'], ['call', 'Calls'], ['followup', 'Follow-ups'], ['manual', 'Manual campaigns'], ['captcha', 'CAPTCHA'], ['interrupted', 'Interrupted'], ['login-required', 'Login'], ['other', 'Other']];
-const mqGroup = r => ['call', 'followup', 'manual', 'captcha', 'interrupted', 'login-required'].includes(r) ? r : 'other';
+const MQ_REASONS = [['all', 'All'], ['call', 'Calls & messages'], ['followup', 'Follow-ups'], ['manual', 'Manual campaigns'], ['captcha', 'CAPTCHA'], ['interrupted', 'Interrupted'], ['login-required', 'Login'], ['other', 'Other']];
+const mqGroup = r => ['email', 'sms', 'voicedrop'].includes(r) ? 'call' : ['call', 'followup', 'manual', 'captcha', 'interrupted', 'login-required'].includes(r) ? r : 'other';
 const ageLbl = t => { const m = Math.round((Date.now() - t) / 60000); return m < 60 ? `${Math.max(1, m)}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`; };
 const REASON_C = { call: 'var(--info)', followup: 'var(--ok)', manual: 'var(--accent)', captcha: 'var(--manual)', interrupted: 'var(--warn)', 'login-required': 'var(--info)', other: 'var(--idle)' };
-const REASON_SHORT = { call: 'Call', followup: 'Follow-up', manual: 'Manual', captcha: 'CAPTCHA', interrupted: 'Interrupted', 'login-required': 'Login', 'file-type': 'Word file', 'directory-page': 'Directory page' };
+const REASON_SHORT = { call: 'Call', email: 'Email', sms: 'SMS', voicedrop: 'Voice drop', followup: 'Follow-up', manual: 'Manual', captcha: 'CAPTCHA', interrupted: 'Interrupted', 'login-required': 'Login', 'file-type': 'Word file', 'directory-page': 'Directory page' };
 function mqFiltered() {
   const q = (MQ.q || '').trim().toLowerCase();
   return MQ.items.filter(it => (MQ.reason === 'all' || mqGroup(it.reason) === MQ.reason) && (!MQ.camp || it.campaign_id === MQ.camp) && (!q || `${it.name} ${it.website || ''}`.toLowerCase().includes(q)));
@@ -584,6 +598,7 @@ function mqDetail() {
   const url = it.form_url || it.website;
   const list = mqFiltered(), pos = list.indexOf(it);
   if (it.reason === 'call') return mqCall(it, c, lead, msg, pos, list);
+  if (['email', 'sms', 'voicedrop'].includes(it.reason)) return mqTask(it, c, lead, subj, msg, pos, list);
   const canFill = hasExt() && it.fill_token && snd && subj && msg && url && it.reason !== 'login-required';
   const f = (k, v) => v ? `<div class="mfield"><span class="k">${k}</span><span class="val">${A.esc(v)}</span><button class="dcopy" data-copy="${A.esc(v)}">${A.ic('copy', 12)}<span>Copy</span></button></div>` : '';
   const why = it.reason === 'followup' ? `Follow-up (step ${it.step}) for a manual campaign. Fill form opens it with the follow-up message.` : it.reason === 'manual' ? 'This campaign is manual, so you send each form yourself. Fill form opens it already filled in.' : it.reason === 'captcha' ? 'This form has a CAPTCHA you need to solve. Everything else is filled in for you.' : it.reason === 'interrupted' ? 'The robot stopped while sending this one. Open the form and check whether it went through before sending again.' : reasonText(it.reason);
@@ -606,6 +621,22 @@ function mqCall(it, c, lead, script, pos, list) {
       <div class="callscript"><h6>Script</h6><p>${A.esc(script || 'No script written for this step.')}</p></div>
     </div>
     <div class="mqw-f"><span class="help" style="width:100%">How did it go?</span><button class="btn primary" data-mqcall="talked">Talked</button><button class="btn" data-mqcall="voicemail">Left voicemail</button><button class="btn" data-mqcall="noanswer">No answer</button><button class="btn" data-mqact="replied" title="Stops their sequence">${A.ic('messages', 14)}They replied</button><button class="btn ghost" data-mqact="skip" style="margin-left:auto">Skip</button></div>`;
+}
+/** Email, SMS and voice-drop steps: everything to send it yourself, then mark it done. */
+function mqTask(it, c, lead, subj, msg, pos, list) {
+  const tel = String(it.phone || '').replace(/[^\d+]/g, ''), k = it.reason, ch = chOf(k);
+  const copy = (label, v) => v ? `<div class="mfield"><span class="k">${label}</span><span class="val">${A.esc(v)}</span><button class="dcopy" data-copy="${A.esc(v)}">${A.ic('copy', 12)}<span>Copy</span></button></div>` : '';
+  const main = k === 'email' ? (it.email ? `<a class="btn primary mqopen" href="mailto:${A.esc(it.email)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(msg)}">${A.ic('mail', 15)}Email ${A.esc(it.email)}</a>` : `<div class="note">${A.ic('alert')}<div>No email found for this business. Use their contact form or skip it.</div></div>`)
+    : it.phone ? (k === 'sms' ? `<a class="btn primary mqopen" href="sms:${A.esc(tel)}?&body=${encodeURIComponent(msg)}">${A.ic('messages', 15)}Text ${A.esc(it.phone)}</a>` : `<a class="btn primary mqopen" href="tel:${A.esc(tel)}">${A.ic('phone', 15)}Call ${A.esc(it.phone)} to leave the voicemail</a>`)
+    : `<div class="note">${A.ic('alert')}<div>No phone number for this business. Skip it.</div></div>`;
+  const done = { email: 'Mark sent', sms: 'Mark texted', voicedrop: 'Mark dropped' }[k];
+  return `<div class="mqw-h"><div><h2>${A.esc(cleanCompanyName(it.name))}</h2><p>${ch.label} · step ${it.step} · ${A.esc(it.campaign)}</p></div><div class="mqw-nav"><button class="iconbtn sm" data-mqnav="-1" aria-label="Previous" ${pos <= 0 ? 'disabled' : ''}>${A.ic('back', 14)}</button><span class="num">${pos + 1} / ${list.length}</span><button class="iconbtn sm" data-mqnav="1" aria-label="Next" ${pos >= list.length - 1 ? 'disabled' : ''}>${A.ic('arrow', 14)}</button></div></div>
+    <div class="mqw-b">
+      ${main}
+      ${it.website ? `<a class="linkbtn muted" href="${A.esc(it.website)}" target="_blank" rel="noopener">${A.esc(domain(it.website))}</a>` : ''}
+      <div class="mqfields"><div>${k === 'email' ? copy('To', it.email) + copy('Subject', subj) : copy('Phone', it.phone)}${copy(k === 'voicedrop' ? 'Script' : 'Message', msg || 'No text written for this step.')}</div></div>
+    </div>
+    <div class="mqw-f"><button class="btn primary" data-mqtask="${k}">${A.ic('check', 14)}${done}</button><button class="btn" data-mqact="replied" title="Stops their sequence">${A.ic('messages', 14)}They replied</button><button class="btn" data-mqact="skip">Skip</button></div>`;
 }
 function mqRender(parts = ['list', 'detail', 'bulk']) {
   if (parts.includes('list')) { const el = A.$('#mq-list'); if (el) el.innerHTML = mqList(); }
@@ -865,8 +896,6 @@ async function onClick(e) {
   if (ldr) { try { await A.api('POST', `/api/outreach/${+ldr.dataset.ldreplied}`, { action: 'replied' }); A.toast('Marked replied. Follow-ups stopped.'); A.sync(); loadOutreach(); setTimeout(() => { const L = A.ST.byId.get(+document.querySelector('#ld-out')?.dataset.lid); if (L) A.openLead(L.id); }, 700); } catch (err) { A.toast(err.message, 'alert'); } return; }
   const sst = t.closest('[data-seqstep]');
   if (sst) { const c = curCampaign(); await flushSave(); flushSteps(); cp(c.id).step = +sst.dataset.seqstep; A.$('#c-tab').innerHTML = tabHTML(c); renderPreview(c); return; }
-  const stch = t.closest('[data-stch]');
-  if (stch) { const c = curCampaign(), st = c.steps.find(x => x.step === cp(c.id).step); queueSteps(c, true); st.channel = stch.dataset.stch; A.$('#c-tab').innerHTML = tabHTML(c); renderPreview(c); return; }
   const pbn = t.closest('[data-pbnote]');
   if (pbn) { const c = curCampaign(), n = NT.notes.find(x => x.id === +pbn.dataset.pbnote), P = cp(c.id); A.closeOverlay();
     if (P.step === 1) { A.$('#m-subj').value = n.subject || A.$('#m-subj').value; A.$('#m-body').value = n.body; queueSave(c); }
@@ -894,6 +923,8 @@ async function onClick(e) {
   if (mq) { MQ.sel = +mq.dataset.mq; mqRender(['list', 'detail']); return; }
   const mqc = t.closest('[data-mqcall]');
   if (mqc) { mqAction('call', mqc.dataset.mqcall); return; }
+  const mqt = t.closest('[data-mqtask]');
+  if (mqt) { mqAction('sent', mqt.dataset.mqtask); return; }
   const mqa = t.closest('[data-mqact]');
   if (mqa) { mqAction(mqa.dataset.mqact); return; }
   const nrow = t.closest('[data-note]');
@@ -1095,6 +1126,8 @@ function insertTag(tag) {
 }
 function onInput(e) {
   const t = e.target, c = curCampaign();
+  if (c && t.id === 'st-ch') { const st = c.steps.find(x => x.step === cp(c.id).step); queueSteps(c, true); st.channel = t.value; A.$('#c-tab').innerHTML = tabHTML(c); try { renderPreview(c); } catch { /* task preview */ } return; }
+  if (c && t.id === 'st-body' && A.$('#st-count')) A.$('#st-count').textContent = `${t.value.length} / 160 characters${t.value.length > 160 ? ` (${Math.ceil(t.value.length / 153)} texts)` : ' (one text)'}`;
   if (c && ['st-subj', 'st-body', 'st-delay'].includes(t.id)) { lastField = t.id; const sw = A.$('#st-warn'); if (sw) sw.innerHTML = checkHTML(A.$('#st-subj')?.value || c.subject, A.$('#st-body').value); queueSteps(c); try { renderPreview(c); } catch { /* preview optional */ } return; }
   if (t.id === 'mq-q') { MQ.q = t.value; mqRender(['list', 'detail']); return; }
   if (t.id === 'nt-q') { NT.q = t.value; A.$('#nt-list').innerHTML = ntList(); return; }
@@ -1156,7 +1189,7 @@ function seqTimeline(it, L) {
   if (total < 2 && !(it.events || []).length) return '';
   const rows = (it.events || []).map(e => `<li class="ev-${e.kind.replace(/_.*/, '')}"><b>Step ${e.step}</b> ${EVK[e.kind] || e.kind}${e.detail && !/^Call:/.test(e.detail) ? ` <span>“${A.esc(e.detail.slice(0, 80))}”</span>` : ''}<small>${A.esc(A.whenPT(e.at).replace(' PT', ''))}</small></li>`);
   const nextSt = (it.steps || []).find(x => x.step === it.step);
-  if (it.next_at && nextSt) rows.push(`<li class="ev-next"><b>Step ${it.step}</b> ${nextSt.channel === 'call' ? 'Call' : 'Follow-up'} scheduled<small>${A.esc(A.whenPT(it.next_at).replace(' PT', ''))}</small></li>`);
+  if (it.next_at && nextSt) rows.push(`<li class="ev-next"><b>Step ${it.step}</b> ${chOf(nextSt.channel).title} scheduled<small>${A.esc(A.whenPT(it.next_at).replace(' PT', ''))}</small></li>`);
   else if (L.status === 4 && total > 1) rows.push(`<li class="ev-stopped"><b>Replied</b> follow-ups stopped</li>`);
   return rows.length ? `<div class="ldo-tl"><h6>Sequence${total > 1 ? ` · ${total} steps` : ''}</h6><ul>${rows.join('')}</ul></div>` : '';
 }
