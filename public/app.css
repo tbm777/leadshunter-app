@@ -1621,3 +1621,4 @@ input[type=checkbox]:disabled,input[type=radio]:disabled{opacity:.55;cursor:defa
 .fx-note{font-size:12.5px;color:var(--muted)}
 .fx-termhint{margin:0 0 8px;font-size:12px}
 .fx-term.def{border-color:color-mix(in srgb,var(--accent) 45%,var(--line));color:var(--accent-text);background:var(--accent-soft)}
+.fx-term.def{border-color:var(--faint);color:var(--ink);background:var(--surface);font-weight:600}
