@@ -1524,3 +1524,9 @@ input[type=checkbox]:disabled,input[type=radio]:disabled{opacity:.55;cursor:defa
 .rv-empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:48px 24px;text-align:center;color:var(--muted)}
 .rv-empty b{color:var(--ink);font-size:16px}
 @media (max-width:760px){.rv-b{grid-template-columns:1fr;overflow-y:auto}.rv-shot{border-right:0;border-bottom:1px solid var(--line);max-height:50vh}}
+/* ---------- tool-wide sending limits (Campaigns page) */
+.limbar{display:flex;align-items:flex-start;gap:10px;margin:0 0 14px;padding:11px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);font-size:13px;line-height:1.45;color:var(--muted)}
+.limbar svg{flex:none;margin-top:2px;color:var(--faint)}
+.limbar b{color:var(--ink)}
+.limbar span{flex:1}
+.limbar .linkbtn{flex:none;text-decoration:none;font-size:13px;margin-top:1px}

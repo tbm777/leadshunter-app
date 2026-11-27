@@ -107,6 +107,7 @@ async function route(req, env, url, ctx) {
   if ((mm = p.match(/^\/api\/leads\/(\d+)$/)) && m === 'PATCH') return patchLead(env, +mm[1], await body(req));
   if (p === '/api/leads/bulk' && m === 'POST') return bulkLeads(env, await body(req));
   if ((mm = p.match(/^\/api\/leads\/(\d+)\/outreach$/)) && m === 'GET') return O.leadOutreach(env, +mm[1]);
+  if (p === '/api/outreach/settings' && m === 'PUT') return O.saveOutreachSettings(env, await body(req));
   if ((mm = p.match(/^\/api\/outreach\/(\d+)\/shot$/)) && m === 'GET') return O.getShot(env, +mm[1]);
   if ((mm = p.match(/^\/api\/outreach\/(\d+)\/review$/)) && m === 'POST') return O.reviewItem(env, +mm[1], await body(req));
 

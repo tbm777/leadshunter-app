@@ -53,13 +53,29 @@ const SAMPLE = { name: 'Summit Roofing Co. - #1 Roofer in Austin', city: 'Austin
 export async function loadOutreach() {
   try {
     const r = await A.api('GET', '/api/outreach');
-    OS.senders = r.senders; OS.campaigns = r.campaigns; OS.manual = r.manual; OS.loaded = true;
+    OS.senders = r.senders; OS.campaigns = r.campaigns; OS.manual = r.manual; OS.limits = r.limits || null; OS.loaded = true;
     A.renderNav(A.currentView());
   } catch (e) { if (e.status !== 401) console.warn('Outreach unavailable', e); }
 }
 function upsertCampaign(c) { const i = OS.campaigns.findIndex(x => x.id === c.id); if (i >= 0) OS.campaigns[i] = c; else OS.campaigns.unshift(c); }
 
 /* ------------------------------------------------------------------ campaigns list */
+/** Tool-wide sending limits: the daily cap across all campaigns and the warm-up for new sender profiles. */
+function limitsBar() {
+  const L = OS.limits; if (!L) return '';
+  const warming = L.senders.filter(x => x.cap).map(x => { const sd = OS.senders.find(y => y.id === x.id); return sd ? `${A.esc(sd.label)}: day ${x.warmup_day}, ${A.fmt(x.cap)} today` : ''; }).filter(Boolean);
+  return `<div class="limbar">${A.ic('shield', 15)}<span>Up to <b class="num">${A.fmt(L.tool.cap)}</b> forms a day across all campaigns, spread evenly through each campaign's sending hours.${L.tool.ramp ? ` New sender profiles warm up over 4 weeks${warming.length ? ` (${warming.join(' · ')})` : ''}.` : ' Warm-up is off.'}</span><button class="linkbtn" data-o="limitsedit">Change</button></div>`;
+}
+function limitsModal() {
+  const L = OS.limits;
+  A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Sending limits">
+    <div class="card-h"><div><h2>Sending limits</h2><p>These apply on top of each campaign's own daily limit.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
+    <div class="card-b" style="display:flex;flex-direction:column;gap:14px">
+      <div class="field"><label for="lim-cap">Most forms a day, all campaigns together</label><input class="input big" id="lim-cap" type="number" min="1" max="5000" value="${L.tool.cap}"><span class="help">Resets at midnight Pacific. ${A.fmt(L.tool.today)} sent so far today.</span></div>
+      <label class="opt ${L.tool.ramp ? 'on' : ''}"><input type="checkbox" id="lim-ramp" ${L.tool.ramp ? 'checked' : ''}><div><b>Warm up new sender profiles</b><span>100 a day the first week, then 250, 500 and 750, and the full limit from week 5. A steady start protects the sender's reputation with spam filters.</span></div></label>
+      <div class="help" id="lim-err" style="color:var(--bad)"></div></div>
+    <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-o="limitssave">Save</button></div></div></div>`;
+}
 function campaignsView() {
   if (!OS.loaded) { loadOutreach().then(() => A.currentView() === 'campaigns' && A.render()); return loading(); }
   const cs = OS.campaigns;
@@ -68,8 +84,9 @@ function campaignsView() {
     <div class="row"><button class="btn primary" data-o="newcamp">${A.ic('plus')}New campaign</button></div></div>
   ${!OS.senders.length ? `<div class="note">${A.ic('alert')}<div><b>Start with a sender profile.</b> Forms ask for your name, email and phone, so the campaign needs them before it can send. <button class="linkbtn" data-o="newsender">Create sender profile</button></div></div>` : ''}
   ${cs.length ? `<div class="card ministats ostats">
-    <div><span>Sent today</span><b class="num">${A.fmt(today)}</b></div><div><span>Sent all time</span><b class="num">${A.fmt(all)}</b></div>
+    <div><span>Sent today</span><b class="num">${A.fmt(today)}${OS.limits ? ` <small>/ ${A.fmt(OS.limits.tool.cap)}</small>` : ''}</b></div><div><span>Sent all time</span><b class="num">${A.fmt(all)}</b></div>
     <div><span>Queued</span><b class="num">${A.fmt(queued)}</b></div><a href="#manual" class="${OS.manual ? 'hot' : ''}"><span>Needs you</span><b class="num">${A.fmt(OS.manual)}</b></a></div>
+  ${limitsBar()}
   <div class="card camps">${cs.map(campRow).join('')}</div>` : emptyCampaigns()}`;
 }
 function campRow(c) {
@@ -371,7 +388,7 @@ function settingsTab(c) {
       <div class="field"><label for="s-name">Campaign name</label><input class="input" id="s-name" data-ssave="name" value="${A.esc(c.name)}" maxlength="80"></div>
       <div class="field"><label for="s-sender">Send as</label><div class="sset-inline"><select class="input" id="s-sender" data-ssave="sender_id"><option value="">Choose a sender profile</option>${OS.senders.map(s => `<option value="${s.id}" ${s.id === c.sender_id ? 'selected' : ''}>${A.esc(s.label)} · ${A.esc(s.email)}</option>`).join('')}</select><button class="btn" data-o="newsender">${A.ic('plus', 13)}New</button></div></div>`)}
     ${sec('How it sends', 'Switching moves leads that are waiting: to your Manual queue, or back to the robot.', modeOpts(c.mode || 'auto', 'smode'))}
-    ${c.mode === 'manual' ? '' : sec('Schedule', 'When the robot sends, in Los Angeles time. Business hours look the most natural.', `
+    ${c.mode === 'manual' ? '' : sec('Schedule', 'When the robot sends, in Los Angeles time. The daily limit is spread evenly across the sending hours, within the tool-wide limit and the sender profile\'s warm-up.', `
       <div class="sset-sched">
         <div class="field"><label for="s-limit">Daily limit</label><div class="sset-suffix"><input class="input" id="s-limit" type="number" min="1" max="2000" data-ssave="daily_limit" value="${c.daily_limit}"><span>forms a day</span></div></div>
         <div class="field"><label>Sending hours</label><div class="sset-inline"><select class="input" data-ssave="window_start" aria-label="From">${hours(c.window_start, 0, 23)}</select><span class="help">to</span><select class="input" data-ssave="window_end" aria-label="Until">${hours(c.window_end, 1, 24)}</select></div></div>
@@ -905,6 +922,12 @@ async function onClick(e) {
       break;
     }
     case 'sendnow': CMENU.open = false; sendNowModal(c); break;
+    case 'limitsedit': limitsModal(); break;
+    case 'limitssave': {
+      try { const r = await A.api('PUT', '/api/outreach/settings', { daily_cap: +A.$('#lim-cap').value, ramp: A.$('#lim-ramp').checked }); OS.limits = { tool: r.tool, senders: r.senders }; A.closeOverlay(); A.render(); A.toast('Sending limits saved'); }
+      catch (err) { A.$('#lim-err').textContent = err.message; }
+      break;
+    }
     case 'cmenu': CMENU.open = !CMENU.open; A.$('#c-actions').innerHTML = actionsHTML(c); break;
     case 'sendnowok': {
       const n = Math.max(1, +A.$('#sn-n').value || 0); b.disabled = true;
@@ -1019,11 +1042,11 @@ function startModal(c) {
     <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-o="startok">${A.ic('play', 13)}<span id="st-go">Start campaign</span></button></div></div></div>`;
 }
 function sendNowModal(c) {
-  const left = Math.max(0, c.daily_limit - c.today), n = Math.min(40, left, c.counts.queued);
+  const left = Math.max(0, c.daily_limit - c.today), n = Math.min(5, left, c.counts.queued);
   A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Send now">
     <div class="card-h"><div><h2>Send now</h2><p>Sends to the next queued leads right away, even outside the schedule. Today's limit still applies.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
     <div class="card-b" style="display:flex;flex-direction:column;gap:10px"><div class="field"><label for="sn-n">How many</label><input class="input big" id="sn-n" type="number" min="1" max="${Math.min(left, 200)}" value="${n}"></div>
-      <span class="help">${A.fmt(c.counts.queued)} queued · ${A.fmt(left)} left today. A batch of 40 takes about 3 minutes.</span><div class="help" id="sn-err" style="color:var(--bad)"></div></div>
+      <span class="help">${A.fmt(c.counts.queued)} queued · ${A.fmt(left)} left today. Starting with a few lets you check the results before the schedule takes over.</span><div class="help" id="sn-err" style="color:var(--bad)"></div></div>
     <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-o="sendnowok">${A.ic('campaigns', 14)}Send</button></div></div></div>`;
   setTimeout(() => A.$('#sn-n')?.select(), 0);
 }

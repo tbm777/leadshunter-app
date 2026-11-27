@@ -3,7 +3,7 @@ import { isSocialHost } from '../public/shared/normalize.js';
 import { json, HttpError, reserveSeq, dispatch, ptMidnight, chunk, inList, LEAD_COLS } from './worker.js';
 
 const now = () => Date.now();
-const BATCH = 40;                        // forms per runner job
+import { BATCH, TOOL_CAP, rampCap, paceAllowance, allowedNow } from './pacing.js';
 const TEST_MAX = 25;
 const SENT = ['sent', 'submitted', 'sent_manual'];
 const STATUSES = ['queued', 'sending', 'sent', 'submitted', 'manual', 'sent_manual', 'failed', 'skipped'];
@@ -60,6 +60,7 @@ export async function outreachOverview(env) {
     senders: snd.results.map(senderOut),
     campaigns: cmp.results.map(c => campaignOut(c, by[c.id] || {}, td[c.id] || 0, jb[c.id] || null, stepsBy[c.id] || [], seqBy[c.id] || {})),
     manual: manual.results[0].n,
+    limits: await limitsSummary(env),
   });
 }
 function jobOut(j) {
@@ -451,9 +452,6 @@ export async function listLeads(env, id, b) {
 async function activeJob(env, cid) {
   return env.DB.prepare("SELECT id, status FROM searches WHERE kind = 'outreach' AND campaign_id = ? AND status IN ('queued','running') ORDER BY id DESC LIMIT 1").bind(cid).first();
 }
-async function sentToday(env, cid) {
-  return (await env.DB.prepare(`SELECT COUNT(*) AS n FROM outreach WHERE campaign_id = ? AND ((sent_at >= ? AND status IN ('sent','submitted','sent_manual')) OR status = 'sending')`).bind(cid, ptMidnight()).first()).n;
-}
 /** Create an outreach job. Send: claims queued rows. Test: marks rows to try without sending. Returns an error string or null. */
 async function startJob(env, c, mode, count) {
   if (await activeJob(env, c.id)) return { error: 'A run is already in progress for this campaign.' };
@@ -496,9 +494,11 @@ export async function runCampaign(env, id, b) {
   let count = Math.max(1, Math.floor(+b.count || 0));
   if (mode === 'test') count = Math.min(TEST_MAX, count || 10);
   else {
-    const left = c.daily_limit - await sentToday(env, id);
-    if (left <= 0) throw new HttpError(409, `Today's limit of ${c.daily_limit} is reached. Raise the daily limit in Settings to send more today.`);
-    count = Math.min(count || BATCH, left, BATCH * 5);
+    const L = await limitsFor(env, c);
+    if (L.campaignLeft <= 0) throw new HttpError(409, `Today's limit of ${c.daily_limit} is reached. Raise the daily limit in Settings to send more today.`);
+    if (L.toolLeft <= 0) throw new HttpError(409, `The tool-wide limit of ${L.toolCap} forms a day is reached. It resets at midnight Pacific.`);
+    if (L.senderLeft <= 0) throw new HttpError(409, `This sender profile is warming up (day ${L.warmupDay}): ${L.senderCap} forms today. More tomorrow.`);
+    count = Math.min(count || 5, L.campaignLeft, L.senderLeft, L.toolLeft, BATCH * 5);
   }
   const r = await startJob(env, c, mode, count);
   if (r.empty) throw new HttpError(409, 'Nothing queued. Add leads to this campaign first.');
@@ -508,15 +508,51 @@ export async function runCampaign(env, id, b) {
 
 /** Scheduler: start the next batch for an active campaign if it's inside its sending window and under today's limit. */
 function ptNow() {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23', weekday: 'short' }).formatToParts(new Date()).map(x => [x.type, x.value]));
-  return { hour: +p.hour, day: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday) };
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: 'numeric', hourCycle: 'h23', weekday: 'short' }).formatToParts(new Date()).map(x => [x.type, x.value]));
+  return { hour: +p.hour, minute: +p.minute, day: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday) };
+}
+const SENT_SQL = "((o.sent_at >= ? AND o.status IN ('sent','submitted','sent_manual')) OR o.status = 'sending')";
+/** Tool-wide sending settings: the daily cap across all campaigns and the warm-up for new sender profiles. */
+export async function outreachSettings(env) {
+  let v = {}; try { v = JSON.parse((await env.DB.prepare("SELECT v FROM meta WHERE k = 'outreach_settings'").first())?.v || '{}'); } catch { /* defaults */ }
+  return { daily_cap: Number.isFinite(+v.daily_cap) && +v.daily_cap > 0 ? Math.min(5000, Math.floor(+v.daily_cap)) : TOOL_CAP, ramp: v.ramp !== false };
+}
+export async function saveOutreachSettings(env, b) {
+  const cur = await outreachSettings(env);
+  const next = { daily_cap: b.daily_cap !== undefined ? Math.max(1, Math.min(5000, Math.floor(+b.daily_cap || 0))) : cur.daily_cap, ramp: b.ramp !== undefined ? !!b.ramp : cur.ramp };
+  await env.DB.prepare("INSERT OR REPLACE INTO meta (k, v) VALUES ('outreach_settings', ?)").bind(JSON.stringify(next)).run();
+  return json({ settings: next, ...(await limitsSummary(env)) });
+}
+/** Every limit that applies to a campaign right now: its own, its sender profile's warm-up, and the tool-wide cap. */
+async function limitsFor(env, c) {
+  const day = ptMidnight(), set = await outreachSettings(env);
+  const [camp, snd, tool] = await env.DB.batch([
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM outreach o WHERE o.campaign_id = ? AND ${SENT_SQL}`).bind(c.id, day),
+    env.DB.prepare(`SELECT COUNT(*) AS n, (SELECT MIN(o2.sent_at) FROM outreach o2 JOIN campaigns c2 ON c2.id = o2.campaign_id WHERE c2.sender_id = ? AND o2.status IN ('sent','submitted','sent_manual')) AS first FROM outreach o JOIN campaigns cc ON cc.id = o.campaign_id WHERE cc.sender_id = ? AND ${SENT_SQL}`).bind(c.sender_id, c.sender_id, day),
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM outreach o WHERE ${SENT_SQL}`).bind(day),
+  ]);
+  const campSent = camp.results[0].n, sndSent = snd.results[0].n, first = snd.results[0].first, toolSent = tool.results[0].n;
+  const days = first ? Math.floor((day - ptMidnight(new Date(first))) / 864e5) : null;
+  const senderCap = set.ramp ? rampCap(days) : Infinity;
+  return { campSent, campaignLeft: c.daily_limit - campSent, senderCap, senderLeft: senderCap - sndSent, toolCap: set.daily_cap, toolLeft: set.daily_cap - toolSent, warmupDay: days == null ? 1 : days + 1 };
+}
+export async function limitsSummary(env) {
+  const day = ptMidnight(), set = await outreachSettings(env);
+  const tool = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM outreach o WHERE ${SENT_SQL}`).bind(day).first()).n;
+  const senders = (await env.DB.prepare(`SELECT s.id, (SELECT MIN(o.sent_at) FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE c.sender_id = s.id AND o.status IN ('sent','submitted','sent_manual')) AS first,
+    (SELECT COUNT(*) FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE c.sender_id = s.id AND ${SENT_SQL}) AS today FROM senders s`).bind(day).all()).results;
+  return { tool: { cap: set.daily_cap, today: tool, ramp: set.ramp }, senders: senders.map(x => { const days = x.first ? Math.floor((day - ptMidnight(new Date(x.first))) / 864e5) : null, cap = set.ramp ? rampCap(days) : null; return { id: x.id, today: x.today, cap: cap === Infinity ? null : cap, warmup_day: cap && cap !== Infinity ? (days == null ? 1 : days + 1) : null }; }) };
 }
 export function inWindow(c) { const { hour, day } = ptNow(); return c.weekdays.includes(String(day)) && hour >= c.window_start && hour < c.window_end; }
 async function tickCampaign(env, c) {
   if (c.status !== 'active' || c.mode === 'manual' || !inWindow(c) || (c.start_at && c.start_at > now())) return null;
-  const left = c.daily_limit - await sentToday(env, c.id);
-  if (left <= 0) return null;
-  const r = await startJob(env, c, 'send', Math.min(BATCH, left));
+  if (await activeJob(env, c.id)) return null;
+  const L = await limitsFor(env, c), t = ptNow();
+  // Spread the day's limit evenly across the sending window, within the sender's warm-up and the tool-wide cap.
+  const pace = paceAllowance({ limit: Math.min(c.daily_limit, L.campSent + Math.max(0, Math.min(L.senderLeft, L.toolLeft))), sent: L.campSent, startH: c.window_start, endH: c.window_end, nowH: t.hour + t.minute / 60 });
+  const n = allowedNow({ pace, campaignLeft: L.campaignLeft, senderLeft: L.senderLeft, toolLeft: L.toolLeft });
+  if (n <= 0) return null;
+  const r = await startJob(env, c, 'send', n);
   return r.error && !r.error.startsWith('A run') ? r.error : null;
 }
 /** Due steps that need a person: calls (any campaign) and every step of a manual campaign go to the Manual queue. */
