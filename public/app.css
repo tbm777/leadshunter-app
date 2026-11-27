@@ -1551,3 +1551,13 @@ input[type=checkbox]:disabled,input[type=radio]:disabled{opacity:.55;cursor:defa
 .mc-row.tip svg{color:var(--info)}
 .mcheck.ok{flex-direction:row;align-items:center;gap:8px;font-size:12.5px;color:var(--muted)}
 .mcheck.ok svg{color:var(--ok)}
+/* ---------- A/B test */
+.abcard{margin-top:16px}
+.abempty{display:flex;align-items:center;gap:14px;padding:14px 16px}
+.abempty>div{flex:1;display:flex;flex-direction:column;gap:2px}
+.abempty span{font-size:13px;color:var(--muted)}
+.abstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:14px}
+.abstats>div{border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.abstats>div.win{border-color:var(--ok)}
+.abstats span{font-size:12.5px;color:var(--muted)}
+.abv{display:flex;flex-direction:column;gap:8px;padding:14px 0;border-top:1px solid var(--line)}

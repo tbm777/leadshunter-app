@@ -127,10 +127,10 @@ export async function runOutreach({ api, JOB, log, isCancelled }) {
       await ctx.route('**/*', route => (shouldBlock(route.request().url(), route.request().resourceType()) ? route.abort() : route.continue()));
       let r; const stat = {}, t0 = Date.now();
       // Each lead gets the text for the step it's on (follow-ups have their own message).
-      const stepText = (data.campaign.steps || {})[item.step];
+      const stepText = item.text || (item.step > 1 ? (data.campaign.steps || {})[item.step] : null);   // A/B version or follow-up text
       // No address in the profile: use this business's own city, state and ZIP.
       const local = localizeProfile(profile, data.sender, item.lead);
-      const prof = stepText && item.step > 1 ? { ...local, subject: stepText.subject || local.subject, message: stepText.message || local.message } : local;
+      const prof = stepText ? { ...local, subject: stepText.subject || local.subject, message: stepText.message || local.message } : local;
       try { r = await withTimeout(attempt(ctx, item, prof, dryRun, stat), ITEM_TIMEOUT); }
       catch { r = { status: 'failed', reason: 'site-too-slow' }; }
       record(M, r, stat, Date.now() - t0);
