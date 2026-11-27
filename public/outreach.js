@@ -28,7 +28,9 @@ const pill = (st) => `<span class="pill" style="--c:${ST_COLOR[st] || 'var(--idl
 const CSTATUS = { draft: ['Draft', 'var(--idle)'], active: ['Active', 'var(--ok)'], paused: ['Paused', 'var(--warn)'], archived: ['Archived', 'var(--idle)'] };
 const scheduled = c => c.status === 'active' && c.mode !== 'manual' && c.start_at && c.start_at > Date.now();
 const modePill = c => c.mode === 'manual' ? '<span class="pill plain modepill">Manual</span>' : '';
-const cpill = c => scheduled(c) ? '<span class="pill" style="--c:var(--info)">Scheduled</span>' : `<span class="pill" style="--c:${CSTATUS[c.status][1]}">${CSTATUS[c.status][0]}</span>`;
+// Launched, and nothing left to do: no leads waiting, none being sent, no follow-ups scheduled (manual campaigns: none in the queue).
+const finished = c => c.status !== 'draft' && c.status !== 'archived' && c.counts.total > 0 && !c.counts.queued && !c.counts.sending && !(c.counts.scheduled || 0) && !jobActive(c.job) && (c.mode !== 'manual' || !c.counts.manual);
+const cpill = c => finished(c) ? '<span class="pill" style="--c:var(--ok)">Finished</span>' : scheduled(c) ? '<span class="pill" style="--c:var(--info)">Scheduled</span>' : `<span class="pill" style="--c:${CSTATUS[c.status][1]}">${CSTATUS[c.status][0]}</span>`;
 const startLbl = c => scheduled(c) ? `Starts ${new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(c.start_at))} PT` : '';
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const hourLbl = h => h === 0 || h === 24 ? '12am' : h === 12 ? '12pm' : h < 12 ? `${h}am` : `${h - 12}pm`;
@@ -165,6 +167,8 @@ function cmeta(c) {
   return `${cpill(c)}${modePill(c)}${scheduled(c) ? `<span style="color:var(--info);font-weight:550">${startLbl(c)}</span>` : ''}<span>${senderOf(c) ? 'Sends as ' + A.esc(senderOf(c).label) : 'No sender yet'}</span>${c.mode === 'manual' ? '<span>You send each form from the Manual queue</span>' : `<span>${c.daily_limit} a day</span><span>${schedLbl(c)}</span>`}`;
 }
 function actionsHTML(c) {
+  // Done: offer the next useful step, not a Pause or Resume that would do nothing.
+  if (finished(c)) return `${c.counts.manual ? `<a class="btn" href="#manual">${A.ic('manual', 14)}Manual queue <span class="n num">${A.fmt(c.counts.manual)}</span></a>` : ''}<button class="btn primary" data-o="addleads">${A.ic('plus', 13)}Add leads</button>`;
   if (c.mode === 'manual') {
     return `${c.status === 'active' ? `<a class="btn" href="#manual" data-o="toqueue">${A.ic('manual', 14)}Open Manual queue${c.counts.manual ? ` <span class="n num">${A.fmt(c.counts.manual)}</span>` : ''}</a><button class="btn" data-o="pause">Pause</button>` : `<button class="btn primary" data-o="launchmanual">${A.ic('play', 13)}${c.status === 'paused' ? 'Resume' : 'Launch campaign'}</button>`}`;
   }
