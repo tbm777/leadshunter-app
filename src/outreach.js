@@ -182,6 +182,31 @@ export async function removeItems(env, id, b) {
   return json({ removed: leadIds.length });
 }
 
+/** Delete a campaign for good. Stops any run, frees leads that were only waiting, keeps contacted leads marked Contacted. */
+export async function deleteCampaign(env, id, b) {
+  if (String(b.confirm || '') !== 'DELETE') throw new HttpError(400, 'Type DELETE to confirm.');
+  const c = await env.DB.prepare('SELECT id FROM campaigns WHERE id = ?').bind(id).first();
+  if (!c) throw new HttpError(404, 'Campaign not found.');
+  const running = await env.DB.prepare("SELECT id FROM searches WHERE kind = 'outreach' AND campaign_id = ? AND status = 'running'").bind(id).first();
+  if (running) throw new HttpError(409, 'A batch is sending right now. Pause the campaign, wait about a minute for the current form to finish, then delete it.');
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE campaigns SET status = 'archived', updated_at = ? WHERE id = ?").bind(t, id),
+    env.DB.prepare("UPDATE searches SET status = 'cancelled', finished_at = ? WHERE kind = 'outreach' AND campaign_id = ? AND status IN ('queued','running')").bind(t, id),
+  ]);
+  // Leads whose only open place was this campaign go back to New.
+  const free = (await env.DB.prepare(`SELECT DISTINCT o.lead_id AS id FROM outreach o JOIN leads l ON l.id = o.lead_id
+    WHERE o.campaign_id = ? AND l.status = 1 AND o.status NOT IN ('sent','submitted','sent_manual')
+    AND NOT EXISTS (SELECT 1 FROM outreach x WHERE x.lead_id = o.lead_id AND x.campaign_id != ? AND x.status IN ('queued','sending','manual','failed'))`).bind(id, id).all()).results.map(r => r.id);
+  await setLeadStatus(env, free, 0, [1]);
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM outreach WHERE campaign_id = ?').bind(id),
+    env.DB.prepare('UPDATE searches SET campaign_id = NULL WHERE campaign_id = ?').bind(id),
+    env.DB.prepare('DELETE FROM campaigns WHERE id = ?').bind(id),
+  ]);
+  return json({ ok: true, freed: free.length });
+}
+
 /* ------------------------------------------------------------------ items (campaign results, manual queue, messages) */
 export async function listItems(env, url) {
   const q = url.searchParams, where = [], vals = [];
@@ -226,6 +251,17 @@ export async function itemAction(env, oid, b) {
   return json({ ok: true });
 }
 
+/** A lead marked contacted (some other way) or do-not-contact by hand: don't send it anything still waiting. */
+export async function skipUnsent(env, leadIds, status) {
+  if (![2, 3].includes(status) || !leadIds.length) return;
+  const reason = status === 3 ? 'do not contact' : 'already contacted';
+  for (const part of chunk(leadIds, 90)) await env.DB.prepare(`UPDATE outreach SET status = 'skipped', reason = ?, updated_at = ? WHERE lead_id IN (${inList(part.length)}) AND status IN ('queued','manual','failed')`).bind(reason, now(), ...part).run();
+}
+export async function leadOutreach(env, id) {
+  const r = await env.DB.prepare('SELECT o.id, o.campaign_id, c.name AS campaign, o.status, o.reason, o.evidence, o.form_url, o.sent_at, o.updated_at, o.test_status FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE o.lead_id = ? ORDER BY o.id DESC').bind(id).all();
+  return json({ items: r.results });
+}
+
 /* ------------------------------------------------------------------ runs */
 async function activeJob(env, cid) {
   return env.DB.prepare("SELECT id, status FROM searches WHERE kind = 'outreach' AND campaign_id = ? AND status IN ('queued','running') ORDER BY id DESC LIMIT 1").bind(cid).first();
@@ -243,6 +279,7 @@ async function startJob(env, c, mode, count) {
   if (mode === 'test') {
     n = (await env.DB.prepare("UPDATE outreach SET test_job = ?, test_status = NULL, test_reason = NULL WHERE id IN (SELECT id FROM outreach WHERE campaign_id = ? AND status = 'queued' ORDER BY test_at IS NOT NULL, id LIMIT ?)").bind(job.id, c.id, count).run()).meta.changes;
   } else {
+    await env.DB.prepare("UPDATE outreach SET status = 'skipped', reason = 'do not contact', updated_at = ? WHERE campaign_id = ? AND status = 'queued' AND lead_id IN (SELECT id FROM leads WHERE status = 3)").bind(t, c.id).run();
     n = (await env.DB.prepare("UPDATE outreach SET status = 'sending', job_id = ?, attempt_at = NULL, attempts = attempts + 1, updated_at = ? WHERE id IN (SELECT id FROM outreach WHERE campaign_id = ? AND status = 'queued' ORDER BY id LIMIT ?)").bind(job.id, t, c.id, count).run()).meta.changes;
   }
   if (!n) { await env.DB.prepare('DELETE FROM searches WHERE id = ?').bind(job.id).run(); return { error: null, empty: true }; }

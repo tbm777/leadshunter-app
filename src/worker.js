@@ -65,7 +65,7 @@ async function route(req, env, url, ctx) {
   if (p === '/api/senders' && m === 'POST') return O.saveSender(env, await body(req));
   if ((mm = p.match(/^\/api\/senders\/(\d+)$/))) { if (m === 'PUT') return O.saveSender(env, await body(req), +mm[1]); if (m === 'DELETE') return O.archiveSender(env, +mm[1]); }
   if (p === '/api/campaigns' && m === 'POST') return O.saveCampaign(env, await body(req));
-  if ((mm = p.match(/^\/api\/campaigns\/(\d+)$/))) { if (m === 'GET') return O.getCampaign(env, +mm[1]); if (m === 'PUT') return O.saveCampaign(env, await body(req), +mm[1]); }
+  if ((mm = p.match(/^\/api\/campaigns\/(\d+)$/))) { if (m === 'GET') return O.getCampaign(env, +mm[1]); if (m === 'PUT') return O.saveCampaign(env, await body(req), +mm[1]); if (m === 'DELETE') return O.deleteCampaign(env, +mm[1], await body(req)); }
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/status$/)) && m === 'POST') return O.setCampaignStatus(env, +mm[1], await body(req));
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/leads$/)) && m === 'POST') return O.addLeads(env, +mm[1], await body(req));
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/remove$/)) && m === 'POST') return O.removeItems(env, +mm[1], await body(req));
@@ -92,6 +92,7 @@ async function route(req, env, url, ctx) {
   if (p === '/api/changes' && m === 'GET') return getChanges(env, url);
   if ((mm = p.match(/^\/api\/leads\/(\d+)$/)) && m === 'PATCH') return patchLead(env, +mm[1], await body(req));
   if (p === '/api/leads/bulk' && m === 'POST') return bulkLeads(env, await body(req));
+  if ((mm = p.match(/^\/api\/leads\/(\d+)\/outreach$/)) && m === 'GET') return O.leadOutreach(env, +mm[1]);
 
   if (p === '/api/views' && m === 'GET') return json({ views: (await env.DB.prepare('SELECT id, name, filters FROM views ORDER BY id').all()).results });
   if (p === '/api/views' && m === 'POST') return saveView(env, await body(req));
@@ -357,15 +358,18 @@ async function getChanges(env, url) {
   const last = r.length ? r[r.length - 1][1] : since;
   return json({ cols: LEAD_COLS, rows: r, seq: last, more: r.length === limit });
 }
-const LEAD_STATUS = [0, 1, 2, 3];
+// 1 (in campaign) is set by campaigns only, never by hand.
+const LEAD_STATUS = [0, 2, 3];
 async function patchLead(env, id, b) {
   const sets = [], vals = [];
-  if (b.status !== undefined) { if (!LEAD_STATUS.includes(+b.status)) throw new HttpError(400, 'Unknown status.'); sets.push('status = ?'); vals.push(+b.status); }
+  if (b.status !== undefined) { if (+b.status === 1) throw new HttpError(400, '“In campaign” is set automatically when you add a lead to a campaign.');
+    if (+b.status === 0 && (await env.DB.prepare('SELECT status FROM leads WHERE id = ?').bind(id).first())?.status === 1) throw new HttpError(409, 'This lead is in a campaign. Remove it from the campaign to set it back to New.'); if (!LEAD_STATUS.includes(+b.status)) throw new HttpError(400, 'Unknown status.'); sets.push('status = ?'); vals.push(+b.status); }
   if (b.notes !== undefined) { sets.push('notes = ?'); vals.push(String(b.notes).slice(0, 5000)); }
   if (!sets.length) throw new HttpError(400, 'Nothing to change.');
   const seq = await reserveSeq(env, 1);
   const r = await env.DB.prepare(`UPDATE leads SET ${sets.join(', ')}, seq = ?, updated_at = ? WHERE id = ? RETURNING ${COLS_SQL}`).bind(...vals, seq, now(), id).raw();
   if (!r.length) throw new HttpError(404, 'Lead not found.');
+  if (b.status !== undefined) await O.skipUnsent(env, [id], +b.status);
   return json({ cols: LEAD_COLS, row: r[0] });
 }
 async function bulkLeads(env, b) {
@@ -375,6 +379,7 @@ async function bulkLeads(env, b) {
   const t = now();
   const stmts = ids.map(id => env.DB.prepare('UPDATE leads SET status = ?, seq = ?, updated_at = ? WHERE id = ?').bind(+b.status, seq++, t, id));
   for (const part of chunk(stmts, 400)) await env.DB.batch(part);
+  await O.skipUnsent(env, ids, +b.status);
   return json({ ok: true, updated: ids.length });
 }
 

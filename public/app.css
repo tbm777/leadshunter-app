@@ -1055,3 +1055,14 @@ select.fx-mini{min-width:120px;cursor:pointer}
 .fblist div:last-child{border-bottom:0}
 .fblist dt{color:var(--muted)}.fblist dd{margin:0}
 @media (max-width:560px){.fblist div{grid-template-columns:1fr;gap:2px}}
+.ldout{display:flex;flex-direction:column;gap:6px;margin-top:2px}
+.ldo{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:9px 11px;border:1px solid var(--line);border-radius:10px;text-decoration:none;color:inherit;background:var(--surface)}
+.ldo:hover{border-color:var(--faint)}
+.ldo>div:first-child{min-width:0;display:flex;flex-direction:column;gap:1px}
+.ldo b{font-size:13px;font-weight:600}.ldo small{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ldo-r{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex:none}
+.ld-status{grid-template-columns:repeat(3,1fr)!important}
+.delsum{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
+.delsum b{color:var(--ink)}
+.btn.primary.danger-btn{background:var(--bad);border-color:var(--bad);color:#fff}
+.btn.primary.danger-btn:disabled{opacity:.45;cursor:not-allowed;filter:none}

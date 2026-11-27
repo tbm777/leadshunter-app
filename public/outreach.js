@@ -20,7 +20,7 @@ const REASON = {
   'page-error': 'The page broke while filling the form', 'no-submit-button': 'The form has no send button', 'fields-still-invalid': 'The form kept rejecting a field',
   'gave-up-after-retries': 'The site kept rejecting the form', 'sent-no-confirmation': 'Sent, but the site showed no confirmation', 'no-response': 'The site did not respond to the send',
   'no-confirmation': 'The site showed no confirmation', 'validation-error': 'The form kept rejecting a field', 'file-type': 'The form only accepts Word files',
-  'skipped by you': 'Skipped by you', 'do not contact': 'Marked do not contact', 'no-contact-form': 'No contact form found',
+  'skipped by you': 'Skipped by you', 'do not contact': 'Marked do not contact', 'already contacted': 'You marked this lead as contacted', 'no-contact-form': 'No contact form found',
 };
 const reasonText = r => REASON[r] || (r ? String(r).replace(/-/g, ' ') : '');
 const pill = (st) => `<span class="pill" style="--c:${ST_COLOR[st] || 'var(--idle)'}">${ST_LABEL[st] || st}</span>`;
@@ -289,7 +289,7 @@ function settingsTab(c) {
     <div class="field"><label>Sending hours (PT)</label><div class="row" style="flex-wrap:nowrap"><select class="input" data-ssave="window_start">${hours(c.window_start, 0, 23)}</select><span class="help">to</span><select class="input" data-ssave="window_end">${hours(c.window_end, 1, 24)}</select></div><span class="help">Business hours look the most natural.</span></div>
     <div class="field" style="grid-column:1/-1"><label>Sending days</label><div class="days" role="group">${[1, 2, 3, 4, 5, 6, 0].map(d => `<button class="${c.weekdays.includes(String(d)) ? 'on' : ''}" data-day="${d}" aria-pressed="${c.weekdays.includes(String(d))}">${DAYS[d]}</button>`).join('')}</div></div>
     <div class="field" style="grid-column:1/-1"><label>File for forms that require an upload</label><label class="opt on" style="cursor:default"><input type="radio" checked disabled><div><b>The Bat Marketing</b><span>Two pages: your subject and message, then your offer. Attached only when a form requires a file.</span></div></label></div>
-    <div style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line);padding-top:14px"><span class="help" id="s-save"></span><button class="btn ghost sm" data-o="archive" style="color:var(--bad)">${A.ic('trash', 13)}Archive campaign</button></div>
+    <div style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line);padding-top:14px"><span class="help" id="s-save"></span><button class="btn ghost sm" data-o="delcamp" style="color:var(--bad)">${A.ic('trash', 13)}Delete campaign</button></div>
   </div></div>`;
 }
 async function saveSetting(c, patch) {
@@ -552,11 +552,29 @@ async function onClick(e) {
       catch (err) { A.$('#sn-err').textContent = err.message; b.disabled = false; }
       break;
     }
-    case 'archive':
-      A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Archive campaign"><div class="card-h"><div><h2>Archive “${A.esc(c.name)}”?</h2></div></div><div class="card-b"><p style="margin:0">It stops sending and disappears from Campaigns. Leads keep their Contacted status, so they won't be messaged twice.</p></div>
-        <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-o="archiveok" style="background:var(--bad);border-color:var(--bad);color:#fff">Archive</button></div></div></div>`;
+    case 'delcamp': {
+      const n = c.counts, sent = contacted(c), waiting = n.queued + n.sending + n.manual + n.failed;  // skipped leads already have their own status
+      A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Delete campaign">
+        <div class="card-h"><div><h2>Delete “${A.esc(c.name)}”?</h2><p>This can't be undone.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
+        <div class="card-b" style="display:flex;flex-direction:column;gap:12px">
+          <ul class="delsum">
+            <li>The campaign, its message and its results are removed${jobActive(c.job) ? ', and the queued batch is cancelled' : ''}.</li>
+            ${sent ? `<li><b>${A.fmt(sent)}</b> lead${sent === 1 ? '' : 's'} already contacted stay marked <b>Contacted</b>, so they won't be messaged twice.</li>` : ''}
+            ${waiting ? `<li><b>${A.fmt(waiting)}</b> lead${waiting === 1 ? '' : 's'} not contacted go back to <b>New</b> (unless another campaign has them).</li>` : ''}
+            <li>Your leads themselves are not deleted.</li></ul>
+          <div class="field"><label for="del-in">Type <b>DELETE</b> to confirm</label><input class="input big" id="del-in" autocomplete="off" spellcheck="false" placeholder="DELETE"></div>
+          <div class="help" id="del-err" style="color:var(--bad)"></div></div>
+        <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary danger-btn" data-o="delcampok" disabled>${A.ic('trash', 14)}Delete campaign</button></div></div></div>`;
+      setTimeout(() => A.$('#del-in')?.focus(), 0);
       break;
-    case 'archiveok': try { await A.api('POST', `/api/campaigns/${c.id}/status`, { status: 'archived' }); OS.campaigns = OS.campaigns.filter(x => x.id !== c.id); A.closeOverlay(); location.hash = '#campaigns'; A.toast('Campaign archived'); } catch (err) { A.toast(err.message, 'alert'); } break;
+    }
+    case 'delcampok': {
+      if (A.$('#del-in').value.trim() !== 'DELETE') return;
+      b.disabled = true;
+      try { await A.api('DELETE', `/api/campaigns/${c.id}`, { confirm: 'DELETE' }); OS.campaigns = OS.campaigns.filter(x => x.id !== c.id); delete CP[c.id]; A.closeOverlay(); location.hash = '#campaigns'; A.toast('Campaign deleted'); A.sync(); loadOutreach(); }
+      catch (err) { A.$('#del-err').textContent = err.message; b.disabled = false; }
+      break;
+    }
     case 'dismissbanner': A.$('#c-banner').innerHTML = ''; break;
     case 'moreitems': loadItems(c.id, true); break;
     case 'moremsgs': loadMessages(true); break;
@@ -610,6 +628,7 @@ function insertTag(tag) {
 }
 function onInput(e) {
   const t = e.target, c = curCampaign();
+  if (t.id === 'del-in') { const ok = t.value.trim() === 'DELETE'; const bt = document.querySelector('[data-o="delcampok"]'); if (bt) bt.disabled = !ok; return; }
   if (t.dataset && t.dataset.spf) { updateFallbackHints(); return; }
   if (t.dataset.msave !== undefined && c) {
     lastField = t.id;
@@ -638,10 +657,25 @@ function onChange(e) {
   if (t.id === 'ms-camp') { MS.campaign = +t.value; MS.loaded = false; loadMessages(); return; }
 }
 function onKey(e) {
+  if (e.target.id === 'del-in' && e.key === 'Enter') { e.preventDefault(); document.querySelector('[data-o="delcampok"]:not([disabled])')?.click(); return; }
   if (A.currentView() !== 'manual' || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || document.querySelector('.scrim') || e.metaKey || e.ctrlKey) return;
   if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); MQ.sel = Math.min(MQ.items.length - 1, MQ.sel + 1); A.$('#mq-list').innerHTML = mqList(); A.$('#mq-detail').innerHTML = mqDetail(); document.querySelector('#mq-list .on')?.scrollIntoView({ block: 'nearest' }); }
   if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); MQ.sel = Math.max(0, MQ.sel - 1); A.$('#mq-list').innerHTML = mqList(); A.$('#mq-detail').innerHTML = mqDetail(); document.querySelector('#mq-list .on')?.scrollIntoView({ block: 'nearest' }); }
   if (e.key === 's') { e.preventDefault(); mqAction('sent'); }
+}
+
+/* ------------------------------------------------------------------ lead panel: campaign history */
+export async function leadOutreachInto(el, L) {
+  if (!el) return;
+  try {
+    const r = await A.api('GET', `/api/leads/${L.id}/outreach`);
+    if (!document.body.contains(el)) return;
+    if (!r.items.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `<div class="ldout">${L.status === 1 ? `<span class="help">In a campaign. This is set automatically and clears when the campaign is done with this lead.</span>` : ''}${r.items.map(it => {
+      const why = it.status === 'sent' ? it.evidence : it.status === 'submitted' ? reasonText(it.reason || 'sent-no-confirmation') : reasonText(it.reason);
+      return `<a class="ldo" href="#campaign/${it.campaign_id}"><div><b>${A.esc(it.campaign)}</b>${why ? `<small>${A.esc(why)}</small>` : ''}</div><div class="ldo-r">${pill(it.status)}<small class="num">${A.esc(A.whenPT(it.sent_at || it.updated_at).replace(' PT', ''))}</small></div></a>`;
+    }).join('')}</div>`;
+  } catch { el.innerHTML = ''; }
 }
 
 /* ------------------------------------------------------------------ install */

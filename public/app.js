@@ -1,7 +1,7 @@
 // LeadsHunter web app (phase 1: leads). Plain ES modules, no build step.
 import { buildCells, cityRadiusKm } from './shared/grid.js';
 import { parseAddress, prettyPhone } from './shared/normalize.js';
-import { install as installOutreach, loadOutreach, addToCampaign, outreachNav } from './outreach.js';
+import { install as installOutreach, loadOutreach, addToCampaign, outreachNav, leadOutreachInto } from './outreach.js';
 
 /* ================================================================ basics */
 const $ = s => document.querySelector(s);
@@ -545,9 +545,12 @@ function leadDrawer(id) {
       ${row('Address', L.address ? `${esc(L.address)} ${copyBtn(L.address, '')}` : '—')}
       ${row('Category', esc(L.category || '—'))}
       ${row('Found by', `${esc(searchName(L.search_id))} · ${dayPT(L.created_at)}`)}</dl></section>
-    <section class="ld-sec"><h5>Status</h5><div class="seg-c ld-status" role="radiogroup" aria-label="Lead status">${LS.map((s, i) => `<button type="button" role="radio" aria-checked="${L.status === i}" class="${L.status === i ? 'on' : ''}" data-lstat="${L.id}:${i}">${s}</button>`).join('')}</div></section>
+    <section class="ld-sec"><h5>Status</h5>
+      <div class="seg-c ld-status" role="radiogroup" aria-label="Lead status">${[0, 2, 3].map(i => `<button type="button" role="radio" aria-checked="${L.status === i}" class="${L.status === i ? 'on' : ''}" data-lstat="${L.id}:${i}">${LS[i]}</button>`).join('')}</div>
+      <div id="ld-out" data-lid="${L.id}">${L.status === 1 ? '<span class="help">In a campaign…</span>' : ''}</div></section>
     <section class="ld-sec" style="border-bottom:0"><h5>Notes</h5><textarea class="input" id="dnote" data-lnote="${L.id}" style="min-height:84px" placeholder="Add a note about this business">${esc(L.notes || '')}</textarea><span class="help" id="dnote-h">Saved automatically.</span></section>
   </div></div>`;
+  leadOutreachInto($('#ld-out'), L);
 }
 function navDrawer(step) {
   const idx = L$.res.findIndex(x => x.id === DRAWER_ID); const next = L$.res[idx + step];
@@ -1198,7 +1201,13 @@ document.addEventListener('click', async (e) => {
   if ((v = ds('lsel')) !== undefined) { e.stopPropagation(); const id = +v; L$.sel.has(id) ? L$.sel.delete(id) : L$.sel.add(id); renderSel(); renderRows(); return; }
   if ((v = ds('lead')) !== undefined) { leadDrawer(+v); return; }
   if ((v = ds('lnav')) !== undefined) { navDrawer(+v); return; }
-  if ((v = ds('lstat')) !== undefined) { const [lid, st] = v.split(':').map(Number); saveLead(lid, { status: st }, () => { toast('Status saved'); if (DRAWER_ID === lid) { document.querySelectorAll('[data-lstat]').forEach(b => { const on = +b.dataset.lstat.split(':')[1] === st; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); }); } }); return; }
+  if ((v = ds('lstat')) !== undefined) {
+    const [lid, st] = v.split(':').map(Number), cur = ST.byId.get(lid);
+    if (cur && cur.status === st) return;
+    if (cur && cur.status === 1 && st === 0) { toast('This lead is in a campaign. Open the campaign and remove it there to set it back to New.', 'alert'); return; }
+    saveLead(lid, { status: st }, () => { toast(st === 3 ? 'Marked do not contact. Unsent campaign messages are skipped.' : st === 2 && cur?.status === 1 ? 'Marked contacted. Unsent campaign messages are skipped.' : 'Status saved'); if (DRAWER_ID === lid) leadDrawer(lid); });
+    return;
+  }
   if ((v = ds('xpreset')) !== undefined) { XP.preset = v; XP.custom = false; XP.cols = new Set(XPRESETS[v]); exportModal(); return; }
   if ((v = ds('xscopebtn')) !== undefined) { XP.scope = v; XP.file = ''; exportModal(); return; }
   if ((v = ds('xstep')) !== undefined) { const f = $('#x-file'); if (f) XP.file = f.value; XP.step = +v; exportModal(); return; }
@@ -1283,7 +1292,13 @@ document.addEventListener('click', async (e) => {
   }
   const a = ds('act'); if (!a) return;
   switch (a) {
-    case 'logout': await api('POST', '/api/logout').catch(() => {}); showLogin(); break;
+    case 'logout':
+      $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Sign out" style="width:min(400px,100%)">
+        <div class="card-h"><div><h2>Sign out?</h2><p>You'll need the app password to sign back in. Campaigns keep sending on schedule while you're signed out.</p></div></div>
+        <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close" autofocus>Stay signed in</button><button class="btn primary" data-act="logoutok">${ic('logout', 14)}Sign out</button></div></div></div>`;
+      setTimeout(() => document.querySelector('[data-act="logoutok"]')?.focus(), 0);
+      break;
+    case 'logoutok': closeOverlay(); await api('POST', '/api/logout').catch(() => {}); showLogin(); break;
     case 'theme': { const n = effectiveTheme() === 'dark' ? 'light' : 'dark'; try { localStorage.setItem('lh-theme', n); } catch { /* ignore */ } applyTheme(n); break; }
     case 'sync': sync({ quiet: false }); break;
     case 'reset': L$.F = defaultF(); L$.view = null; if ($('#lq')) $('#lq').value = ''; leadsUpdate(); break;
