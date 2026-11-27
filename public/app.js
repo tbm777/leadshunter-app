@@ -594,7 +594,7 @@ const XCOLS = [
   ['name', 'Name', 'Business', L => L.name], ['phone', 'Phone', 'Business', L => phoneOut(L)], ['website', 'Website', 'Business', L => L.website || ''],
   ['industry', 'Industry', 'Business', L => industryName(L.industry_id)], ['category', 'Google category', 'Business', L => L.category || ''], ['address', 'Address', 'Business', L => L.address || ''],
   ['city', 'City', 'Business', L => L.city || ''], ['region', 'State / province', 'Business', L => L.region || ''], ['postal', 'Postal code', 'Business', L => L.postal || ''], ['country', 'Country', 'Business', L => L.country || ''],
-  ['rating', 'Rating', 'Business', L => L.rating ?? ''], ['reviews', 'Reviews', 'Business', L => L.reviews], ['maps', 'Google Maps link', 'Business', L => L.maps_url || ''],
+  ['rating', 'Rating', 'Business', L => L.rating ?? ''], ['reviews', 'Reviews', 'Business', L => L.reviews], ['maps', 'Maps link', 'Business', L => L.maps_url || ''],
   ['site', 'Site status', 'Website check', L => L.website ? SS[L.site_status] : 'No website'], ['platform', 'Platform', 'Website check', L => L.platform || ''],
   ['form', 'Contact form', 'Contact', L => FM[L.form_status]], ['formurl', 'Form page', 'Contact', L => L.form_url || ''], ['captcha', 'CAPTCHA type', 'Contact', L => L.form_status === 1 ? (L.captcha || '') : ''], ['email', 'Email', 'Contact', L => L.email || ''],
   ['status', 'Lead status', 'Pipeline', L => LS[L.status]], ['search', 'Found by search', 'Pipeline', L => searchName(L.search_id)], ['added', 'Date added', 'Pipeline', L => dayKey.format(new Date(L.created_at))], ['notes', 'Notes', 'Pipeline', L => L.notes || ''],
