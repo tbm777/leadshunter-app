@@ -98,13 +98,24 @@ export function tradePattern(terms) {
   if (words.length === 1 && stem(words[0]).length < 4) return null;
   return new RegExp('\\b' + words.map(stem).join('\\w*\\s+'));
 }
+// Names that clearly say the trade, per industry (from the real Google Maps test). Other industries fall back to the first term.
+const TRADE_NAMES = {
+  'roofers': /\broof/, 'plumbers': /\bplumb|\brooter|\bdrain/, 'hvac contractors': /\bhvac|\bheating|\bcooling|air condition|\bmechanical|\bcomfort/,
+  'electricians': /\belectric/, 'landscapers': /\blandscap|\blawn|\byard|\bturf/, 'remodeling': /\bremodel|\brenovat/,
+  'house cleaners': /\bclean|\bmaid/, 'pest control companies': /\bpest|\bextermin|\btermite|\bmosquito/, 'painters': /\bpaint/,
+  'movers': /\bmoving\b|\bmovers?\b|\brelocat/, 'tree service': /\btree|\barbor|\bstump/, 'garage door companies': /garage\s+doors?|overhead\s+doors?/,
+  'windows & doors': /\bwindows?\b|\bdoors?\b/, 'pool construction': /\bpools?\b/, 'pressure washing': /pressure\s+wash|power\s+wash|soft\s+wash|\bwashing\b/,
+  'floor & carpet cleaning': /\bcarpet|\bsteam|\bgrout|\bupholster/, 'paving': /\bpav|\basphalt|\bsealcoat/, 'fence installers': /\bfenc/,
+  'dog groomers': /\bgroom|\bpaws?\b|\bpups?\b|\bcanine|\bdoggie|\bdog\b/,
+};
+export function tradeNamePattern(industryName, terms) { return TRADE_NAMES[String(industryName || '').trim().toLowerCase()] || tradePattern(terms); }
 /** Keep a business whose name clearly says the trade ("ABC Roofing" filed under "Contractor"). */
-export function categoryAccepted(accepted, category, categories, name = '', terms = []) {
+export function categoryAccepted(accepted, category, categories, name = '', terms = [], industryName = '') {
   if (!accepted || !accepted.length) return true;
   const want = new Set(accepted.map(c => c.trim().toLowerCase()));
   const have = [category, ...(Array.isArray(categories) ? categories : [])].filter(Boolean).map(c => String(c).trim().toLowerCase());
   if (have.some(c => want.has(c))) return true;
-  const re = tradePattern(terms), n = String(name || '').toLowerCase();
+  const re = tradeNamePattern(industryName, terms), n = String(name || '').toLowerCase();
   return !!(re && n && re.test(n));
 }
 
