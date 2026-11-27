@@ -2,7 +2,7 @@
 // Never logs lead data: the repository and its logs are public.
 import { getBrowser, closeBrowser } from './browser.mjs';
 import { submitForm } from './forms/filler.mjs';
-import { engineProfile } from '../public/shared/fallbacks.js';
+import { engineProfile, localizeProfile } from '../public/shared/fallbacks.js';
 import { isSocialHost } from '../public/shared/normalize.js';
 
 const CONCURRENCY = +process.env.OUTREACH_CONCURRENCY || 3;
@@ -94,7 +94,9 @@ export async function runOutreach({ api, JOB, log, isCancelled }) {
       let r;
       // Each lead gets the text for the step it's on (follow-ups have their own message).
       const stepText = (data.campaign.steps || {})[item.step];
-      const prof = stepText && item.step > 1 ? { ...profile, subject: stepText.subject || profile.subject, message: stepText.message || profile.message } : profile;
+      // No address in the profile: use this business's own city, state and ZIP.
+      const local = localizeProfile(profile, data.sender, item.lead);
+      const prof = stepText && item.step > 1 ? { ...local, subject: stepText.subject || local.subject, message: stepText.message || local.message } : local;
       try { r = await withTimeout(attempt(ctx, item, prof, dryRun), ITEM_TIMEOUT); }
       catch { r = { status: 'failed', reason: 'site-too-slow' }; }
       await ctx.close().catch(() => {});

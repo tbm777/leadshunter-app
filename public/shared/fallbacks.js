@@ -11,11 +11,25 @@ export const SENDER_FALLBACKS = {
   company: { value: s => `${s.first_name || ''} ${s.last_name || ''}`.trim(), hint: s => `${`${s.first_name || ''} ${s.last_name || ''}`.trim() || 'your full name'} (your full name)` },
   website: { value: s => emailDomain(s.email) || 'N/A', hint: s => emailDomain(s.email) ? `${emailDomain(s.email)} (from your email)` : 'N/A, or your email domain if it isn’t Gmail/Outlook' },
   address: { value: () => DEFAULT_ADDRESS.address, hint: () => DEFAULT_ADDRESS.address },
-  city: { value: () => DEFAULT_ADDRESS.city, hint: () => DEFAULT_ADDRESS.city },
-  state: { value: () => DEFAULT_ADDRESS.state, hint: () => DEFAULT_ADDRESS.state },
-  zip: { value: () => DEFAULT_ADDRESS.zip, hint: () => DEFAULT_ADDRESS.zip },
+  city: { value: () => DEFAULT_ADDRESS.city, hint: () => `the business’s own city (${DEFAULT_ADDRESS.city} if unknown)` },
+  state: { value: () => DEFAULT_ADDRESS.state, hint: () => `the business’s state (${DEFAULT_ADDRESS.state} if unknown)` },
+  zip: { value: () => DEFAULT_ADDRESS.zip, hint: () => `the business’s ZIP (${DEFAULT_ADDRESS.zip} if unknown)` },
   country: { value: () => DEFAULT_ADDRESS.country, hint: () => DEFAULT_ADDRESS.country },
 };
+
+const US_STATES = { AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California', CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', DC: 'District of Columbia', FL: 'Florida', GA: 'Georgia', HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa', KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland', MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri', MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey', NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio', OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont', VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming' };
+
+/**
+ * With no address in the sender profile, use the city, state and ZIP of the business being contacted,
+ * so the sender looks local and service-area checks pass. Only for US businesses with a complete,
+ * matching set; otherwise the coherent placeholder address stays. The street stays the placeholder.
+ */
+export function localizeProfile(profile, sender, lead) {
+  if (!lead || ['address', 'city', 'state', 'zip'].some(k => String(sender[k] || '').trim())) return profile;
+  const st = String(lead.state || '').trim().toUpperCase(), city = String(lead.city || '').trim(), zip = String(lead.zip || '').trim();
+  if ((lead.country && lead.country !== 'US') || !US_STATES[st] || !city || !/^\d{5}(-\d{4})?$/.test(zip)) return profile;
+  return { ...profile, city, state: st, stateName: US_STATES[st], zip, country: DEFAULT_ADDRESS.country };
+}
 
 /** Sender profile (database shape) → the profile the form engine uses, with every empty field filled. */
 export function engineProfile(s) {

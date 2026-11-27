@@ -1,7 +1,7 @@
 // LeadsHunter outreach pages: campaigns, manual queue, messages, sender profiles. Plugs into app.js through install().
 import { personalize, cleanCompanyName, MERGE_TAGS, unknownTags } from './shared/personalize.js';
 import { render as renderFile, ASSETS } from './shared/templates/bat-marketing.js';
-import { SENDER_FALLBACKS, OTHER_FIELDS, engineProfile, DEFAULT_ADDRESS } from './shared/fallbacks.js';
+import { SENDER_FALLBACKS, OTHER_FIELDS, engineProfile, localizeProfile } from './shared/fallbacks.js';
 
 let A;                       // helpers from app.js
 const OS = { loaded: false, senders: [], campaigns: [], manual: 0 };
@@ -473,7 +473,7 @@ function showOpenLink(id) {
 const hasExt = () => !!document.documentElement.dataset.lhExt;
 function b64url(str) { return btoa(unescape(encodeURIComponent(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 function fillUrl(it, c, snd, url, subject, message) {
-  const payload = { v: 1, api: location.origin, oid: it.id, token: it.fill_token, ...(snd ? engineProfile(snd) : {}), subject, message, leadCompany: cleanCompanyName(it.name) };
+  const payload = { v: 1, api: location.origin, oid: it.id, token: it.fill_token, ...(snd ? localizeProfile(engineProfile(snd), snd, { city: it.city, state: it.region, zip: it.postal, country: it.country }) : {}), subject, message, leadCompany: cleanCompanyName(it.name) };
   return url.replace(/#.*$/, '') + '#lh-fill=' + b64url(JSON.stringify(payload));
 }
 function extGuide() {
@@ -743,7 +743,7 @@ function sendersView() {
   const card = s => {
     const cs = camps(s.id), name = [s.first_name, s.last_name].filter(Boolean).join(' ');
     const hasAddr = [s.address, s.city, s.state, s.zip].some(Boolean);
-    const addr = hasAddr ? [s.address, s.city, [s.state, s.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ') : `${DEFAULT_ADDRESS.address}, ${DEFAULT_ADDRESS.city} ${DEFAULT_ADDRESS.state} ${DEFAULT_ADDRESS.zip}`;
+    const addr = hasAddr ? [s.address, s.city, [s.state, s.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ') : 'Matches each business’s city';
     const opt = [s.company, s.website, hasAddr].filter(Boolean).length, done = 3 + opt;
     const sub = [name, s.company && s.company !== s.label ? s.company : ''].filter(Boolean).join(' · ');
     return `<article class="card spc">
@@ -756,7 +756,7 @@ function sendersView() {
         ${row('mail', s.email, false, 'Email')}${row('phone', s.phone, false, 'Phone')}
         ${row('building', s.company || fbHint('company', s).replace(/ \(.*\)$/, ''), !s.company, 'Company')}
         ${row('globe', s.website || fbHint('website', s).replace(/ \(.*\)$/, ''), !s.website, 'Website')}
-        ${row('pin', addr.replace(/^Placeholder: /, ''), !hasAddr, 'Address')}
+        ${row('pin', addr, !hasAddr, 'Address')}
       </div>
       <div class="spc-foot">
         <div class="spc-meter" title="Name, email and phone are required. Empty optional fields use safe defaults."><div><i style="width:${Math.round(done / 6 * 100)}%"></i></div><span>${done === 6 ? 'Complete' : `${done} of 6 filled`}</span></div>
@@ -785,7 +785,7 @@ function senderDrawer(s = {}, onSaved) {
     <div class="drawer-h"><div class="spc-dh"><div class="spc-av sm">${s.first_name ? A.esc(initials(s)) : A.ic('senders', 18)}</div><div><div class="eyebrow" style="margin:0 0 4px">${s.id ? 'Edit sender profile' : 'New sender profile'}</div><h2>${A.esc(s.label || 'Sender profile')}</h2></div></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
     <section><h5>Always used</h5><div class="fsrow2">${f('first_name', 'First name', 'Dustin')}${f('last_name', 'Last name', 'Morgan')}</div>${f('email', 'Email', 'you@company.com', 'email', 'Replies from businesses arrive here.')}${f('phone', 'Phone', '(512) 555-0142', 'tel', 'Typed in the format each form expects.')}</section>
     <section><h5>Your business</h5>${f('company', 'Company')}${f('website', 'Website')}</section>
-    <section><h5>Address</h5><span class="help" style="margin-top:-4px">Only typed in when a form insists on an address. With no address at all, the whole placeholder address is used so city, state and ZIP match.</span>${f('address', 'Street')}<div class="fsrow2">${f('city', 'City')}${f('state', 'State')}</div>${f('zip', 'ZIP code')}</section>
+    <section><h5>Address</h5><span class="help" style="margin-top:-4px">Only typed in when a form asks for an address. Leave it empty and each form gets the city, state and ZIP of the business you're contacting, so you look local. The street is a placeholder.</span>${f('address', 'Street')}<div class="fsrow2">${f('city', 'City')}${f('state', 'State')}</div>${f('zip', 'ZIP code')}</section>
     <section><h5>Questions the form asks that aren't in your profile</h5><span class="help" style="margin-top:-4px">The robot answers these so a form never fails for a missing value. Your subject and message come from the campaign.</span>
       <dl class="fblist">${OTHER_FIELDS.map(([k, v]) => `<div><dt>${A.esc(k)}</dt><dd>${A.esc(v)}</dd></div>`).join('')}</dl></section>
     <section><h5>Profile name</h5>${f('label', 'Shown in the app', s.company || 'e.g. The Bat Marketing')}</section>

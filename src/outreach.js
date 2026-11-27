@@ -320,7 +320,7 @@ export async function listItems(env, url) {
   const order = q.get('order') === 'sent' ? 'o.sent_at DESC, o.id DESC' : q.get('order') === 'recent' ? 'o.updated_at DESC, o.id DESC' : 'o.id';
   const limit = Math.min(500, +q.get('limit') || 200), offset = Math.max(0, +q.get('offset') || 0);
   const sql = `SELECT o.id, o.campaign_id, o.lead_id, o.status, o.reason, o.evidence, o.form_url, o.test_status, o.test_reason, o.test_at, o.sent_at, o.updated_at, o.step, o.next_at, l.status AS lead_status,
-      l.name, l.website, l.city, l.region, l.phone, l.category, l.industry_id, c.name AS campaign
+      l.name, l.website, l.city, l.region, l.postal, l.country, l.phone, l.category, l.industry_id, c.name AS campaign
     FROM outreach o JOIN leads l ON l.id = o.lead_id JOIN campaigns c ON c.id = o.campaign_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${order} LIMIT ? OFFSET ?`;
   const r = await env.DB.prepare(sql).bind(...vals, limit + 1, offset).all();
@@ -547,12 +547,12 @@ export async function runnerItems(env, s, params) {
   const sender = c && c.sender_id ? await env.DB.prepare('SELECT * FROM senders WHERE id = ?').bind(c.sender_id).first() : null;
   if (!c || !sender) throw new HttpError(409, 'The campaign or its sender profile is missing.');
   const where = params.mode === 'test' ? 'o.test_job = ?' : "o.job_id = ? AND o.status = 'sending'";
-  const r = await env.DB.prepare(`SELECT o.id AS oid, o.step, l.name, l.city, l.region, l.website, COALESCE(o.form_url, l.form_url) AS form_url, l.category, i.name AS industry
+  const r = await env.DB.prepare(`SELECT o.id AS oid, o.step, l.name, l.city, l.region, l.postal, l.country, l.website, COALESCE(o.form_url, l.form_url) AS form_url, l.category, i.name AS industry
     FROM outreach o JOIN leads l ON l.id = o.lead_id LEFT JOIN industries i ON i.id = l.industry_id WHERE ${where} ORDER BY o.id`).bind(s.id).all();
   return json({
     mode: params.mode, campaign: { id: c.id, subject: c.subject, message: c.message, file_template: c.file_template,
       steps: Object.fromEntries((await stepsOf(env, c.id)).map(x => [x.step, { subject: x.subject || c.subject, message: x.message }])) },
-    sender: senderOut(sender), items: r.results.map(x => ({ oid: x.oid, step: params.mode === 'test' ? 1 : x.step || 1, lead: { name: x.name, city: x.city, state: x.region, website: x.website, form_url: x.form_url, category: x.category, industry: x.industry } })),
+    sender: senderOut(sender), items: r.results.map(x => ({ oid: x.oid, step: params.mode === 'test' ? 1 : x.step || 1, lead: { name: x.name, city: x.city, state: x.region, zip: x.postal, country: x.country, website: x.website, form_url: x.form_url, category: x.category, industry: x.industry } })),
   });
 }
 const RESULT = { confirmed: 'sent', submitted: 'submitted', manual: 'manual', failed: 'failed', ready: 'ready' };
