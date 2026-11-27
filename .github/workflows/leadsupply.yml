@@ -1,0 +1,59 @@
+name: Lead supply test
+
+# Real Google Maps searches and website checks at volume, to measure how many usable leads a day the tool can find.
+# Totals only in the logs, never lead data. Nothing is saved to the app.
+on:
+  workflow_dispatch:
+    inputs:
+      terms:
+        description: Trades to search, comma separated
+        required: false
+        default: 'plumber,roofing contractor,hvac contractor,electrician,landscaper'
+      cities:
+        description: Number of US cities (max 10)
+        required: false
+        default: '6'
+      checks:
+        description: Websites to check for a contact form (max 600)
+        required: false
+        default: '300'
+
+permissions:
+  contents: read
+
+jobs:
+  supply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Restore gosom
+        id: gosom
+        uses: actions/cache@v4
+        with:
+          path: gmaps
+          key: gosom-1.9.2
+      - name: Download gosom 1.9.2
+        if: steps.gosom.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL --retry 4 -o gmaps https://github.com/gosom/google-maps-scraper/releases/download/v1.9.2/google_maps_scraper-1.9.2-linux-amd64
+          chmod +x gmaps
+      - name: Restore browser
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.cache/ms-playwright
+          key: playwright-1.48.2-v1
+      - name: Run the test
+        env:
+          GMAPS_BIN: ./gmaps
+          TERMS: ${{ inputs.terms }}
+          CITIES: ${{ inputs.cities }}
+          CHECKS: ${{ inputs.checks }}
+        run: |
+          chmod +x gmaps
+          node scripts/leadsupply.mjs
