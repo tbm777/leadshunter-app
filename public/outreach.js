@@ -77,8 +77,12 @@ document.addEventListener('click', (e) => {
 });
 function limitsBar() {
   const L = OS.limits; if (!L) return '';
-  const warming = L.senders.filter(x => x.cap).map(x => { const sd = OS.senders.find(y => y.id === x.id); return sd ? `${A.esc(sd.label)}: day ${x.warmup_day}, ${A.fmt(x.cap)} today` : ''; }).filter(Boolean);
-  return `<div class="limbar">${A.ic('shield', 15)}<span>Up to <b class="num">${A.fmt(L.tool.cap)}</b> forms a day across all campaigns, spread evenly through each campaign's sending hours.${L.tool.ramp ? ` New sender profiles warm up over 4 weeks${warming.length ? ` (${warming.join(' · ')})` : ''}.` : ' Warm-up is off.'}</span><button class="linkbtn" data-o="limitsedit">Change</button></div>`;
+  const pct = Math.min(100, Math.round(L.tool.today / Math.max(1, L.tool.cap) * 100));
+  const warming = L.senders.filter(x => x.cap).map(x => { const sd = OS.senders.find(y => y.id === x.id); return sd ? `<span class="lim-chip" title="New sender profiles start at 100 a day and reach the full limit after 4 weeks"><b>${A.esc(sd.label)}</b><span>Warm-up day ${x.warmup_day} · ${A.fmt(x.today)}/${A.fmt(x.cap)} today</span></span>` : ''; }).filter(Boolean);
+  return `<div class="limbar">
+    <div class="lim-main"><span class="lim-ic">${A.ic('shield', 15)}</span><div><b>Daily sending limit</b><span><span class="num">${A.fmt(L.tool.today)}</span> of <span class="num">${A.fmt(L.tool.cap)}</span> forms today, all campaigns</span></div><div class="lim-meter"><i style="width:${pct}%"></i></div></div>
+    <div class="lim-side">${L.tool.ramp ? (warming.length ? warming.join('') : '<span class="lim-note">Warm-up on for new sender profiles</span>') : '<span class="lim-note">Warm-up off</span>'}<button class="btn sm ghost" data-o="limitsedit">Change</button></div>
+  </div>`;
 }
 function limitsModal() {
   const L = OS.limits;
