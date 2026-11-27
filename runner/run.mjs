@@ -143,11 +143,23 @@ async function flushChecksNow(force = false) {
     if (r.stop) { stopChecks = true; stopMaps = true; }
   }
 }
+// Real-browser checks are slower, so only a few run at once.
+let browserSlots = +process.env.BROWSER_CHECKS || 4;
+const browserWaiters = [];
+async function withBrowserSlot(fn) {
+  while (browserSlots <= 0) await new Promise(r => browserWaiters.push(r));
+  browserSlots--;
+  try { return await fn(); } finally { browserSlots++; const w = browserWaiters.shift(); if (w) w(); }
+}
 async function checkOne([id, website]) {
   try {
     const r = await checkSite(website, checkOpts);
-    if (checkOpts.form && r.form === FORM.NEEDS_BROWSER) {
-      try { Object.assign(r, await browserFormCheck(r.form_url || website)); } catch (e) { log('browser check failed', e.message); }
+    // Forms built by JavaScript need a browser. Forms that look open get a second look too: many sites load their CAPTCHA with JavaScript.
+    if (checkOpts.form && (r.form === FORM.NEEDS_BROWSER || r.form === FORM.OPEN)) {
+      try {
+        const b = await withBrowserSlot(() => browserFormCheck(r.form_url || website));
+        if (r.form === FORM.NEEDS_BROWSER || b.form === FORM.CAPTCHA) Object.assign(r, b.form === FORM.NEEDS_BROWSER && r.form === FORM.OPEN ? {} : b);
+      } catch (e) { log('browser check failed', e.message); }
     }
     checkResults.push({ id, ...r });
   } catch (e) {

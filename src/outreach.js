@@ -39,7 +39,7 @@ function campaignOut(c, counts = {}, today = 0, job = null) {
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   return {
     id: c.id, name: c.name, sender_id: c.sender_id, subject: c.subject, message: c.message, file_template: c.file_template,
-    daily_limit: c.daily_limit, window_start: c.window_start, window_end: c.window_end, weekdays: c.weekdays, status: c.status,
+    daily_limit: c.daily_limit, window_start: c.window_start, window_end: c.window_end, weekdays: c.weekdays, status: c.status, start_at: c.start_at || null, msg_version: c.msg_version || 1,
     created_at: c.created_at, updated_at: c.updated_at, today, job,
     counts: { total, queued: n('queued'), sending: n('sending'), sent: n('sent'), submitted: n('submitted'), sent_manual: n('sent_manual'), manual: n('manual'), failed: n('failed'), skipped: n('skipped') },
   };
@@ -99,6 +99,7 @@ export async function saveCampaign(env, b, id) {
   if (!v.weekdays) throw new HttpError(400, 'Pick at least one sending day.');
   if (v.sender_id && !(await env.DB.prepare('SELECT id FROM senders WHERE id = ? AND archived = 0').bind(v.sender_id).first())) throw new HttpError(400, 'That sender profile no longer exists.');
   if (cur?.status === 'active') checkReady(v);
+  if (cur && (v.subject !== cur.subject || v.message !== cur.message)) v.msg_version = (cur.msg_version || 1) + 1;
   const cols = Object.keys(v);
   if (id) await env.DB.prepare(`UPDATE campaigns SET ${cols.map(c => c + ' = ?').join(', ')}, updated_at = ? WHERE id = ?`).bind(...Object.values(v), now(), id).run();
   else id = (await env.DB.prepare(`INSERT INTO campaigns (${cols.join(', ')}, created_at, updated_at) VALUES (${inList(cols.length)}, ?, ?) RETURNING id`).bind(...Object.values(v), now(), now()).first()).id;
@@ -115,7 +116,10 @@ export async function setCampaignStatus(env, id, b) {
   const status = ['active', 'paused', 'archived'].includes(b.status) ? b.status : null;
   if (!status) throw new HttpError(400, 'Unknown status.');
   if (status === 'active') checkReady(c);
-  await env.DB.prepare('UPDATE campaigns SET status = ?, updated_at = ? WHERE id = ?').bind(status, now(), id).run();
+  let startAt = null;
+  if (status === 'active' && b.start_at) { startAt = Math.floor(+b.start_at); if (!(startAt > now() - 60e3) || startAt > now() + 366 * 864e5) throw new HttpError(400, 'Pick a start time in the future.'); }
+  await env.DB.prepare('UPDATE campaigns SET status = ?, start_at = ?, updated_at = ? WHERE id = ?').bind(status, status === 'active' ? startAt : c.start_at, now(), id).run();
+  c.start_at = startAt;
   if (status !== 'active') await env.DB.prepare("UPDATE searches SET status = 'cancelled', finished_at = ? WHERE kind = 'outreach' AND campaign_id = ? AND status IN ('queued','running')").bind(now(), id).run();
   if (status === 'active') { const e = await tickCampaign(env, { ...c, status }, { ignoreWindow: false }); if (e) throw new HttpError(502, e); }
   return getCampaign(env, id);
@@ -138,7 +142,7 @@ export async function addLeads(env, id, b) {
   const ids = [...new Set((Array.isArray(b.ids) ? b.ids : []).map(Number).filter(Number.isInteger))].slice(0, 20000);
   if (!ids.length) throw new HttpError(400, 'Select at least one lead.');
   const leads = [];
-  for (const part of chunk(ids, 90)) leads.push(...(await env.DB.prepare(`SELECT id, status, website, form_status, form_url, deleted FROM leads WHERE id IN (${inList(part.length)})`).bind(...part).all()).results);
+  for (const part of chunk(ids, 90)) leads.push(...(await env.DB.prepare(`SELECT id, status, website, site_status, form_status, form_url, deleted FROM leads WHERE id IN (${inList(part.length)})`).bind(...part).all()).results);
   const inThis = new Set(), contacted = new Set();
   for (const part of chunk(ids, 90)) {
     for (const r of (await env.DB.prepare(`SELECT lead_id, campaign_id, status FROM outreach WHERE lead_id IN (${inList(part.length)})`).bind(...part).all()).results) {
@@ -146,13 +150,14 @@ export async function addLeads(env, id, b) {
       if (SENT.includes(r.status)) contacted.add(r.lead_id);
     }
   }
-  const out = { add: [], manual: [], skipped: { already: 0, dnc: 0, contacted: 0, noWebsite: 0, noForm: 0 } };
+  const out = { add: [], manual: [], skipped: { already: 0, dnc: 0, contacted: 0, noWebsite: 0, profile: 0, noForm: 0 } };
   for (const l of leads) {
     if (l.deleted) continue;
     if (inThis.has(l.id)) out.skipped.already++;
     else if (l.status === 3) out.skipped.dnc++;
     else if (!b.includeContacted && (l.status === 2 || contacted.has(l.id))) out.skipped.contacted++;
     else if (!l.website) out.skipped.noWebsite++;
+    else if (l.site_status === 7) out.skipped.profile++;
     else if (l.form_status === 2) out.skipped.noForm++;
     else if (l.form_status === 1) out.manual.push(l);   // CAPTCHA known from the website check: straight to the manual queue
     else out.add.push(l);
@@ -207,6 +212,29 @@ export async function deleteCampaign(env, id, b) {
   return json({ ok: true, freed: free.length });
 }
 
+/* ------------------------------------------------------------------ browser extension: signed, single-item codes */
+const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+async function extKey(env) {
+  const raw = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('lh-ext:' + (env.RUNNER_SECRET || '')));
+  return crypto.subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+}
+async function extToken(key, oid, exp) { return `${exp}.${b64u(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${oid}.${exp}`)))}`; }
+/** Called by the extension when a site confirms a manual send. Needs a valid code for that one item, no login. */
+export async function extSent(env, b) {
+  const oid = Math.floor(+b.oid), [exp] = String(b.token || '').split('.');
+  if (!oid || !(+exp > now())) throw new HttpError(401, 'This link has expired. Open the form again from the Manual queue.');
+  const want = await extToken(await extKey(env), oid, +exp);
+  if (want.length !== String(b.token).length || want !== String(b.token)) throw new HttpError(401, 'Not authorised.');
+  const o = await env.DB.prepare('SELECT * FROM outreach WHERE id = ?').bind(oid).first();
+  if (!o) throw new HttpError(404, 'This item is no longer in LeadsHunter.');
+  if (!SENT.includes(o.status)) {
+    const t = now();
+    await env.DB.prepare("UPDATE outreach SET status = 'sent_manual', reason = NULL, evidence = ?, sent_at = ?, updated_at = ? WHERE id = ?").bind(str(b.evidence, 300) || 'Sent with the extension', t, t, oid).run();
+    await setLeadStatus(env, [o.lead_id], 2);
+  }
+  return json({ ok: true });
+}
+
 /* ------------------------------------------------------------------ items (campaign results, manual queue, messages) */
 export async function listItems(env, url) {
   const q = url.searchParams, where = [], vals = [];
@@ -224,7 +252,9 @@ export async function listItems(env, url) {
     FROM outreach o JOIN leads l ON l.id = o.lead_id JOIN campaigns c ON c.id = o.campaign_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${order} LIMIT ? OFFSET ?`;
   const r = await env.DB.prepare(sql).bind(...vals, limit + 1, offset).all();
-  return json({ items: r.results.slice(0, limit), more: r.results.length > limit });
+  const items = r.results.slice(0, limit);
+  if (q.get('tokens')) { const key = await extKey(env), exp = now() + 14 * 864e5; for (const it of items) if (it.status === 'manual') it.fill_token = await extToken(key, it.id, exp); }
+  return json({ items, more: r.results.length > limit });
 }
 export async function itemAction(env, oid, b) {
   const o = await env.DB.prepare('SELECT * FROM outreach WHERE id = ?').bind(oid).first();
@@ -258,7 +288,10 @@ export async function skipUnsent(env, leadIds, status) {
   for (const part of chunk(leadIds, 90)) await env.DB.prepare(`UPDATE outreach SET status = 'skipped', reason = ?, updated_at = ? WHERE lead_id IN (${inList(part.length)}) AND status IN ('queued','manual','failed')`).bind(reason, now(), ...part).run();
 }
 export async function leadOutreach(env, id) {
-  const r = await env.DB.prepare('SELECT o.id, o.campaign_id, c.name AS campaign, o.status, o.reason, o.evidence, o.form_url, o.sent_at, o.updated_at, o.test_status FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE o.lead_id = ? ORDER BY o.id DESC').bind(id).all();
+  const r = await env.DB.prepare(`SELECT o.id, o.campaign_id, c.name AS campaign, o.status, o.reason, o.evidence, o.form_url, o.sent_at, o.updated_at, o.created_at, o.test_status, o.test_reason, o.test_at, o.answers,
+      COALESCE(m.subject, c.subject) AS subject, COALESCE(m.message, c.message) AS message, o.msg_version, c.sender_id
+    FROM outreach o JOIN campaigns c ON c.id = o.campaign_id LEFT JOIN campaign_messages m ON m.campaign_id = o.campaign_id AND m.version = o.msg_version
+    WHERE o.lead_id = ? ORDER BY o.id DESC`).bind(id).all();
   return json({ items: r.results });
 }
 
@@ -279,8 +312,12 @@ async function startJob(env, c, mode, count) {
   if (mode === 'test') {
     n = (await env.DB.prepare("UPDATE outreach SET test_job = ?, test_status = NULL, test_reason = NULL WHERE id IN (SELECT id FROM outreach WHERE campaign_id = ? AND status = 'queued' ORDER BY test_at IS NOT NULL, id LIMIT ?)").bind(job.id, c.id, count).run()).meta.changes;
   } else {
-    await env.DB.prepare("UPDATE outreach SET status = 'skipped', reason = 'do not contact', updated_at = ? WHERE campaign_id = ? AND status = 'queued' AND lead_id IN (SELECT id FROM leads WHERE status = 3)").bind(t, c.id).run();
-    n = (await env.DB.prepare("UPDATE outreach SET status = 'sending', job_id = ?, attempt_at = NULL, attempts = attempts + 1, updated_at = ? WHERE id IN (SELECT id FROM outreach WHERE campaign_id = ? AND status = 'queued' ORDER BY id LIMIT ?)").bind(job.id, t, c.id, count).run()).meta.changes;
+    await env.DB.batch([
+      env.DB.prepare("UPDATE outreach SET status = 'skipped', reason = 'do not contact', updated_at = ? WHERE campaign_id = ? AND status = 'queued' AND lead_id IN (SELECT id FROM leads WHERE status = 3)").bind(t, c.id),
+      env.DB.prepare("UPDATE outreach SET status = 'skipped', reason = 'directory-page', updated_at = ? WHERE campaign_id = ? AND status = 'queued' AND lead_id IN (SELECT id FROM leads WHERE site_status = 7)").bind(t, c.id),
+      env.DB.prepare('INSERT OR IGNORE INTO campaign_messages (campaign_id, version, subject, message, created_at) VALUES (?, ?, ?, ?, ?)').bind(c.id, c.msg_version || 1, c.subject, c.message, t),
+    ]);
+    n = (await env.DB.prepare("UPDATE outreach SET status = 'sending', job_id = ?, msg_version = ?, attempt_at = NULL, attempts = attempts + 1, updated_at = ? WHERE id IN (SELECT id FROM outreach WHERE campaign_id = ? AND status = 'queued' ORDER BY id LIMIT ?)").bind(job.id, c.msg_version || 1, t, c.id, count).run()).meta.changes;
   }
   if (!n) { await env.DB.prepare('DELETE FROM searches WHERE id = ?').bind(job.id).run(); return { error: null, empty: true }; }
   await env.DB.prepare('UPDATE searches SET to_check = ? WHERE id = ?').bind(n, job.id).run();
@@ -319,7 +356,7 @@ function ptNow() {
 }
 export function inWindow(c) { const { hour, day } = ptNow(); return c.weekdays.includes(String(day)) && hour >= c.window_start && hour < c.window_end; }
 async function tickCampaign(env, c) {
-  if (c.status !== 'active' || !inWindow(c)) return null;
+  if (c.status !== 'active' || !inWindow(c) || (c.start_at && c.start_at > now())) return null;
   const left = c.daily_limit - await sentToday(env, c.id);
   if (left <= 0) return null;
   const r = await startJob(env, c, 'send', Math.min(BATCH, left));
@@ -357,10 +394,22 @@ export async function runnerResult(env, s, params, b) {
   const st = RESULT[b.status] || 'failed';
   const reason = b.reason ? str(b.reason, 120) : null, evidence = b.evidence ? str(b.evidence, 300) : null;
   const formUrl = b.form_url && /^https?:\/\//.test(b.form_url) ? str(b.form_url, 500) : null;
+  const answers = b.answers ? str(b.answers, 600) : null;
+  // The robot saw the form in a real browser: its finding replaces the quicker website check's label.
+  const fixLabel = async () => {
+    const o = await env.DB.prepare('SELECT lead_id FROM outreach WHERE id = ?').bind(oid).first(); if (!o) return;
+    const L = await env.DB.prepare('SELECT form_status, captcha FROM leads WHERE id = ?').bind(o.lead_id).first(); if (!L) return;
+    let form = null, cap = L.captcha;
+    if (st === 'manual' && b.reason === 'captcha') { form = 1; cap = str(b.captcha, 40) || 'reCAPTCHA'; }
+    else if (['sent', 'submitted', 'ready'].includes(st)) { form = 0; cap = null; }
+    if (form === null || (form === L.form_status && cap === L.captcha)) return;
+    const seq = await reserveSeq(env, 1);
+    await env.DB.prepare('UPDATE leads SET form_status = ?, captcha = ?, form_url = COALESCE(?, form_url), seq = ?, updated_at = ? WHERE id = ?').bind(form, cap, formUrl, seq, t, o.lead_id).run();
+  };
   if (params.mode === 'test') {
     const testSt = st === 'ready' ? 'ready' : st === 'manual' ? 'manual' : 'failed';
     await env.DB.batch([
-      env.DB.prepare('UPDATE outreach SET test_status = ?, test_reason = ?, test_at = ?, form_url = COALESCE(?, form_url), evidence = CASE WHEN status = \'queued\' THEN ? ELSE evidence END WHERE id = ? AND test_job = ?').bind(testSt, testSt === 'ready' ? null : reason, t, formUrl, evidence, oid, s.id),
+      env.DB.prepare('UPDATE outreach SET test_status = ?, test_reason = ?, test_at = ?, form_url = COALESCE(?, form_url), evidence = CASE WHEN status = \'queued\' THEN ? ELSE evidence END, answers = CASE WHEN status = \'queued\' THEN ? ELSE answers END WHERE id = ? AND test_job = ?').bind(testSt, testSt === 'ready' ? null : reason, t, formUrl, evidence, answers, oid, s.id),
       env.DB.prepare('UPDATE searches SET checked = checked + 1, heartbeat_at = ? WHERE id = ?').bind(t, s.id),
     ]);
   } else {
@@ -368,14 +417,15 @@ export async function runnerResult(env, s, params, b) {
     if (o) {
       const final = st === 'ready' ? 'failed' : st;
       await env.DB.batch([
-        env.DB.prepare('UPDATE outreach SET status = ?, reason = ?, evidence = ?, form_url = COALESCE(?, form_url), sent_at = ?, updated_at = ? WHERE id = ?')
-          .bind(final, final === 'sent' ? null : reason, evidence, formUrl, SENT.includes(final) ? t : null, t, oid),
+        env.DB.prepare('UPDATE outreach SET status = ?, reason = ?, evidence = ?, answers = ?, form_url = COALESCE(?, form_url), sent_at = ?, updated_at = ? WHERE id = ?')
+          .bind(final, final === 'sent' ? null : reason, evidence, answers, formUrl, SENT.includes(final) ? t : null, t, oid),
         env.DB.prepare('UPDATE searches SET checked = checked + 1, heartbeat_at = ? WHERE id = ?').bind(t, s.id),
       ]);
       if (SENT.includes(final)) await setLeadStatus(env, [o.lead_id], 2);
       else if (final === 'failed') await setLeadStatus(env, [o.lead_id], 0, [1]);
     }
   }
+  await fixLabel().catch(e => console.error('label fix', e));
   const cur = await env.DB.prepare('SELECT status FROM searches WHERE id = ?').bind(s.id).first();
   return json({ ok: true, stop: cur.status === 'cancelled' });
 }

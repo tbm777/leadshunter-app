@@ -64,6 +64,12 @@ function scanInPage(prevMax) {
     if (f.length <= 2 && !f.some(e => e.tagName === 'TEXTAREA') && f.some(e => e.type === 'email') && !f.some(e => /name/i.test(e.name + labelOf(e)))) s -= 8; // newsletter
     if (/newsletter|subscribe|login|sign.?in|password/i.test((root.className || '') + ' ' + (root.id || '') + ' ' + (root.action || ''))) s -= 10;
     if (f.some(e => e.type === 'password')) s -= 30;
+    // A contact form always has somewhere to write a message (possibly on a later step). Without one it's a signup, login or newsletter form.
+    const all = fieldsIn(root);
+    if (!all.some(e => e.tagName === 'TEXTAREA' || e.isContentEditable || /message|comment|question|details|inquiry|enquiry|describe|project|how can we help|tell us/i.test(`${e.name} ${labelOf(e)} ${e.getAttribute('placeholder') || ''}`))) return -50;
+    const btns = [...root.querySelectorAll('button,input[type="submit"],[role="button"]')].map(b => txt(b) || b.value || '').join(' | ');
+    if (/sign ?up|create (an |your )?account|\bregister\b|join (now|free|us|today)|log ?in|sign ?in|subscribe|get the app|download the app/i.test(btns)) s -= 25;
+    if (all.some(e => /user.?name|confirm.?password|create.?password|new.?password/i.test(`${e.name} ${labelOf(e)}`))) s -= 25;
     return s;
   };
   let roots = [...document.querySelectorAll('form')];
@@ -80,8 +86,12 @@ function scanInPage(prevMax) {
   else for (const r of roots) { const sc = scoreRoot(r); if (sc > bestScore) { bestScore = sc; best = r; } }
   if (!best || bestScore < 3) return { found: false, login: !!document.querySelector('input[type="password"]') };
   best.setAttribute('data-lh-root', '1');
+  window.__lhDoc = window.__lhDoc || Math.random(); // marks this document, so a reloaded page is never mistaken for a closed form
   const page = document.body.innerText || '';
-  const captcha = !!(best.querySelector(window.__LH_CAPTCHA) || document.querySelector(window.__LH_CAPTCHA)) || /grecaptcha|hcaptcha|turnstile/.test([...document.scripts].map(s => s.src).join(' '));
+  const capEl = best.querySelector(window.__LH_CAPTCHA) || document.querySelector(window.__LH_CAPTCHA);
+  const srcs = [...document.scripts].map(s => s.src).join(' ') + ' ' + (capEl ? capEl.outerHTML.slice(0, 400) : '');
+  const captchaType = /hcaptcha/i.test(srcs) ? 'hCaptcha' : /turnstile|challenges\.cloudflare/i.test(srcs) ? 'Turnstile' : /recaptcha|grecaptcha/i.test(srcs) || capEl ? 'reCAPTCHA' : /friendlycaptcha|frc-captcha/i.test(srcs) ? 'Friendly Captcha' : null;
+  const captcha = !!(capEl || captchaType);
   let n = prevMax;
   const fields = [];
   for (const el of fieldsIn(best)) {
@@ -115,7 +125,7 @@ function scanInPage(prevMax) {
     if (!b.hasAttribute('data-lh-btn')) b.setAttribute('data-lh-btn', String(++n));
     return { id: b.getAttribute('data-lh-btn'), text: (txt(b) || b.value || b.getAttribute('aria-label') || '').slice(0, 60), type: (b.getAttribute('type') || (b.tagName === 'BUTTON' ? 'submit' : '')).toLowerCase(), tag: b.tagName.toLowerCase() };
   });
-  return { found: true, score: bestScore, captcha, fields, buttons, maxId: n, isForm: best.tagName === 'FORM', textLen: page.length };
+  return { found: true, score: bestScore, captcha, captchaType, fields, buttons, maxId: n, isForm: best.tagName === 'FORM', textLen: page.length };
 }
 
 /* ------------------------------------------------------------------ classification and values */
@@ -259,10 +269,13 @@ export async function submitForm(page, url, profile, opts = {}) {
   };
   await rescan();
   if (!scan) return login ? { status: 'manual', reason: 'login-required', log } : { status: 'failed', reason: 'no-form', log };
-  if (scan.captcha) return { status: 'manual', reason: 'captcha', log };
+  if (scan.captcha) return { status: 'manual', reason: 'captcha', captcha: scan.captchaType || 'reCAPTCHA', log };
   maxId = scan.maxId;
 
   const filled = new Map();      // field id -> value we set
+  const answers = new Map();     // what the robot answered beyond the profile and message, shown in the app
+  const PROFILE_CLS = new Set(['first', 'last', 'name', 'email', 'confirm_email', 'phone', 'subject', 'message']);
+  const answersText = () => [...answers].map(([k, v]) => `${k}: ${v}`).join(' · ').slice(0, 600);
   const before = await page.evaluate(() => document.body.innerText).catch(() => '');
   const startUrl = page.url();
 
@@ -276,12 +289,12 @@ export async function submitForm(page, url, profile, opts = {}) {
         if (!f.required && !opts.alwaysUpload) return;
         const file = await brandedFile(page.context(), f.accept, profile);
         if (!file) throw new Error('unsupported-file-type');
-        await el.setInputFiles(file); filled.set(f.id, file.name); note(`file → ${file.name}`); return;
+        await el.setInputFiles(file); filled.set(f.id, file.name); answers.set('File attached', file.name); note(`file → ${file.name}`); return;
       }
       if (f.tag === 'select') {
         const o = override ? f.options.find(x => x.value === override || x.text === override) : chooseOption(f, cls, f.options, profile);
         if (!o) return;
-        await el.selectOption(o.value); filled.set(f.id, o.text); note(`${f.label || f.name} → ${o.text}`); return;
+        await el.selectOption(o.value); filled.set(f.id, o.text); answers.set(String(f.label || f.placeholder || f.name || cls).replace(/\s*\*\s*/g, ' ').trim().slice(0, 60), o.text); note(`${f.label || f.name} → ${o.text}`); return;
       }
       if (f.role === 'combobox' || f.role === 'button' || f.tag === 'div' || f.tag === 'span' || f.tag === 'button') {
         if (f.contentEditable) { await el.click(); await el.fill(override ?? valueFor(f, cls, profile)); filled.set(f.id, 'text'); return; }
@@ -291,10 +304,10 @@ export async function submitForm(page, url, profile, opts = {}) {
         const texts = await optLoc.allInnerTexts();
         const cands = texts.map((t, i) => ({ value: String(i), text: t.trim(), disabled: false }));
         const o = chooseOption(f, cls, cands, profile);
-        await optLoc.nth(+o.value).click(); filled.set(f.id, o.text); note(`${f.label || f.name} → ${o.text} (custom dropdown)`); return;
+        await optLoc.nth(+o.value).click(); filled.set(f.id, o.text); answers.set(String(f.label || f.placeholder || f.name || cls).replace(/\s*\*\s*/g, ' ').trim().slice(0, 60), o.text); note(`${f.label || f.name} → ${o.text} (custom dropdown)`); return;
       }
       if (f.type === 'checkbox') {
-        if (cls === 'consent' || f.required || override === 'check') { if (!(await el.isChecked())) await el.check({ force: true }); filled.set(f.id, 'checked'); note(`☑ ${f.ownText || f.label}`); }
+        if (cls === 'consent' || f.required || override === 'check') { if (!(await el.isChecked())) await el.check({ force: true }); filled.set(f.id, 'checked'); answers.set(String(f.ownText || f.label || 'Checkbox').replace(/\s*\*\s*/g, ' ').trim().slice(0, 60), 'Ticked'); note(`☑ ${f.ownText || f.label}`); }
         return;
       }
       if (f.type === 'radio') return; // handled per group
@@ -307,7 +320,7 @@ export async function submitForm(page, url, profile, opts = {}) {
       const v = override ?? valueFor(f, cls, profile);
       await el.fill(String(v));
       await el.dispatchEvent('blur').catch(() => {});
-      filled.set(f.id, v); note(`${(f.label || f.name || cls).slice(0, 40)} [${cls}] → ${String(v).slice(0, 40)}`);
+      filled.set(f.id, v); if (!PROFILE_CLS.has(cls)) answers.set(String(f.label || f.placeholder || f.name || cls).replace(/\s*\*\s*/g, ' ').trim().slice(0, 60), String(v).slice(0, 80)); note(`${(f.label || f.name || cls).slice(0, 40)} [${cls}] → ${String(v).slice(0, 40)}`);
     } catch (e) { note(`could not fill ${f.label || f.name}: ${e.message.split('\n')[0]}`); if (e.message === 'unsupported-file-type') throw e; }
   };
   const fillRadios = async (fields) => {
@@ -319,7 +332,7 @@ export async function submitForm(page, url, profile, opts = {}) {
       const cands = items.map((i, k) => ({ value: String(k), text: i.ownText || i.value, disabled: false }));
       const pref = cands.find(c => PREFER.radio.test(c.text)) || pick(cands);
       await loc(items[+pref.value].id).check({ force: true }).catch(async () => { await loc(items[+pref.value].id).click({ force: true }); });
-      filled.set('g:' + g, pref.text); note(`◉ ${items[0].groupLabel || g} → ${pref.text}`);
+      filled.set('g:' + g, pref.text); answers.set(String(items[0].groupLabel || g).replace(/\s*\*\s*/g, ' ').trim().slice(0, 60), pref.text); note(`◉ ${items[0].groupLabel || g} → ${pref.text}`);
     }
   };
   const fillAll = async () => {
@@ -333,7 +346,7 @@ export async function submitForm(page, url, profile, opts = {}) {
       const groupRequired = items.some(i => i.required) || /\*|required|at least|select (one|all)/i.test(items[0].groupLabel);
       if (!groupRequired) continue;
       const it = items.find(i => !/none|n\/a/i.test(i.ownText)) || items[0];
-      await loc(it.id).check({ force: true }).catch(() => {}); filled.set(it.id, 'checked'); note(`☑ ${items[0].groupLabel || g} → ${it.ownText}`);
+      await loc(it.id).check({ force: true }).catch(() => {}); filled.set(it.id, 'checked'); answers.set(String(items[0].groupLabel || g).replace(/\s*\*\s*/g, ' ').trim().slice(0, 60), it.ownText); note(`☑ ${items[0].groupLabel || g} → ${it.ownText}`);
     }
   };
 
@@ -420,13 +433,35 @@ export async function submitForm(page, url, profile, opts = {}) {
     break;
   }
 
+  // Some sites only load their CAPTCHA once you start typing: look again before pressing send.
+  const captchaNow = async () => {
+    for (const fr of [frame, page.mainFrame()]) {
+      const t = await fr.evaluate((sel) => { const el = document.querySelector(sel); const src = [...document.scripts].map(x => x.src).join(' ') + (el ? el.outerHTML.slice(0, 300) : '');
+        return el || /recaptcha|hcaptcha|turnstile/i.test(src) ? (/hcaptcha/i.test(src) ? 'hCaptcha' : /turnstile|challenges\.cloudflare/i.test(src) ? 'Turnstile' : 'reCAPTCHA') : null; }, CAPTCHA_SEL).catch(() => null);
+      if (t) { captchaNow.type = t; return true; }
+    }
+    return false;
+  };
+  // After a successful send many forms simply empty themselves or disappear.
+  const formCleared = async () => frame.evaluate((ids) => {
+    if (!window.__lhDoc) return null;   // a new page loaded: only a thank-you text or URL counts there
+    const errSel = '[role="alert"],.error,.errors,.field-error,.invalid-feedback,.wpcf7-not-valid-tip,.gfield_validation_message,.wpforms-error,.form-error,.error-message';
+    if ([...document.querySelectorAll(errSel)].some(e => e.getBoundingClientRect().height > 1 && (e.innerText || '').trim())) return null;
+    const root = document.querySelector('[data-lh-root]');
+    if (!root || !root.isConnected) return 'gone';
+    const r = root.getBoundingClientRect(); if (r.height < 2 || getComputedStyle(root).display === 'none') return 'hidden';
+    const els = ids.map(id => document.querySelector(`[data-lh="${id}"]`)).filter(e => e && (e.tagName === 'TEXTAREA' || /^(text|email|tel|url|)$/.test(e.type || '')));
+    if (els.length >= 2 && els.filter(e => !e.value).length / els.length >= 0.8) return 'cleared';
+    return null;
+  }, [...filled.keys()].filter(k => !String(k).includes(':'))).catch(() => null);
   // Test run: everything is filled and valid, but nothing is sent.
   if (opts.dryRun) {
     const btn = pickSubmit(scan.buttons), bad = await invalidFields().catch(() => []);
     const count = [...filled.keys()].filter(k => !String(k).startsWith('tried:')).length;
     if (!btn) return { status: 'failed', reason: 'no-submit-button', log };
     if (bad.length) return { status: 'failed', reason: 'fields-still-invalid', log };
-    return { status: 'ready', evidence: `Filled ${count} field${count === 1 ? '' : 's'}, ready to send with “${btn.text || 'Submit'}”`, log };
+    if (await captchaNow()) return { status: 'manual', reason: 'captcha', captcha: captchaNow.type, answers: answersText(), log };
+    return { status: 'ready', evidence: `Filled ${count} field${count === 1 ? '' : 's'}, ready to send with “${btn.text || 'Submit'}”`, answers: answersText(), log };
   }
   // Submit, then read the outcome. Fix and resubmit when the site shows errors.
   let responses = [];
@@ -434,18 +469,21 @@ export async function submitForm(page, url, profile, opts = {}) {
   for (let attempt = 0; attempt < 4; attempt++) {
     const btn = pickSubmit(scan.buttons);
     if (!btn) return { status: 'failed', reason: 'no-submit-button', log };
+    if (attempt === 0 && await captchaNow()) return { status: 'manual', reason: 'captcha', captcha: captchaNow.type, answers: answersText(), log };
     responses = [];
     note(`submit (${btn.text || btn.type})${attempt ? ` attempt ${attempt + 1}` : ''}`);
     const nav = page.waitForNavigation({ timeout: 8000 }).catch(() => null);
     const errCount = async () => { try { return (await visibleErrors()).length + (await invalidFields()).length; } catch (e) { return 0; } };
     const errBefore = await errCount();
     await frame.locator(`[data-lh-btn="${btn.id}"]`).click({ timeout: 5000 }).catch(async () => { await frame.locator(`[data-lh-btn="${btn.id}"]`).click({ force: true }); });
-    const outcome = await waitOutcome(page, frame, before, startUrl, () => responses, nav, async () => (await errCount()) > errBefore);
-    if (outcome.success) return { status: 'confirmed', evidence: outcome.evidence, filled: [...filled.entries()].filter(([k]) => !String(k).includes(':')).length, log };
+    const outcome = await waitOutcome(page, frame, before, startUrl, () => responses, nav, async () => (await errCount()) > errBefore, formCleared);
+    if (outcome.success) return { status: 'confirmed', evidence: outcome.evidence, answers: answersText(), filled: [...filled.entries()].filter(([k]) => !String(k).includes(':')).length, log };
     // Errors? Re-sync with the page (it may have been re-rendered by the server), fix, retry.
     // We only resubmit when the site shows an error, so a working form is never sent twice.
     let errorsSeen = 0;
     try {
+      // The site already accepted a send: only a visible error message justifies sending again (empty fields after a reset do not).
+      if (outcome.submittedOk && !(await visibleErrors()).length) return { status: 'submitted', reason: 'sent-no-confirmation', evidence: outcome.evidence, answers: answersText(), log };
       const s2 = await frame.evaluate(scanInPage, maxId);
       if (s2.found) {
         const rerendered = !s2.fields.some(x => scan.fields.some(y => y.id === x.id));
@@ -453,9 +491,9 @@ export async function submitForm(page, url, profile, opts = {}) {
         if (rerendered) { for (const k of [...filled.keys()]) if (!String(k).startsWith('tried:')) filled.delete(k); note('page re-rendered, refilling'); }
         await fillAll();
       }
-      const inv = await invalidFields();
-      for (const b of inv) { errorsSeen++; await fixField(b.id, b.msg + ' ' + b.flags.join(' ')); }
       const errs = await visibleErrors();
+      const inv = await invalidFields();
+      for (const b of inv) { if (outcome.submittedOk && b.flags.length === 1 && b.flags[0] === 'valueMissing') continue; errorsSeen++; await fixField(b.id, b.msg + ' ' + b.flags.join(' ')); }
       for (const e of errs) {
         errorsSeen++;
         if (e.fieldId && scan.fields.some(f => f.id === e.fieldId)) { await fixField(e.fieldId, e.text); continue; }
@@ -466,7 +504,7 @@ export async function submitForm(page, url, profile, opts = {}) {
         if (m) await fixField(m.id, e.text);
       }
     } catch (err) { note('re-sync failed: ' + err.message.split('\n')[0]); }
-    if (!errorsSeen) return { status: outcome.submittedOk ? 'submitted' : 'failed', reason: outcome.reason || 'no-confirmation', evidence: outcome.evidence, log };
+    if (!errorsSeen) return { status: outcome.submittedOk ? 'submitted' : 'failed', reason: outcome.reason || 'no-confirmation', evidence: outcome.evidence, answers: answersText(), log };
   }
   return { status: 'failed', reason: 'gave-up-after-retries', log };
 }
@@ -476,7 +514,7 @@ function pickSubmit(buttons) {
   return cands.find(b => b.type === 'submit' && SUBMIT_TEXT.test(b.text)) || cands.find(b => SUBMIT_TEXT.test(b.text)) || cands.find(b => b.type === 'submit') || cands[cands.length - 1] || null;
 }
 
-async function waitOutcome(page, frame, before, startUrl, getResponses, nav, newErrors) {
+async function waitOutcome(page, frame, before, startUrl, getResponses, nav, newErrors, formCleared) {
   const started = Date.now();
   await Promise.race([nav, page.waitForTimeout(700)]);
   while (Date.now() - started < 9000) {
@@ -497,6 +535,10 @@ async function waitOutcome(page, frame, before, startUrl, getResponses, nav, new
           const ct = r.headers()['content-type'] || '';
           if (ct.includes('json')) { const j = await r.json().catch(() => null); if (j && (j.status === 'mail_sent' || j.success === true || j.ok === true || j.result === 'success')) return { success: true, evidence: `Server replied ${j.status || 'success'}` }; }
         }
+      }
+      // The site accepted the send (2xx) and the form emptied itself or went away: that's how many forms confirm.
+      if (formCleared && Date.now() - started > 1200 && getResponses().some(r => r.status() >= 200 && r.status() < 300)) {
+        const how = await formCleared(); if (how) return { success: true, evidence: how === 'cleared' ? 'The site accepted the message and cleared the form' : 'The site accepted the message and closed the form' };
       }
       // The page now shows a new validation or server error: stop waiting and go fix it.
       if (Date.now() - started > 1200 && newErrors && await newErrors()) return { success: false, submittedOk: false, reason: 'validation-error' };

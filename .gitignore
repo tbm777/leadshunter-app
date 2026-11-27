@@ -7,3 +7,4 @@ runner/node_modules/
 gmaps
 *.log
 .geo-tmp/
+public/leadshunter-extension.zip

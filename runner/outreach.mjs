@@ -3,6 +3,7 @@
 import { getBrowser, closeBrowser } from './browser.mjs';
 import { submitForm } from './forms/filler.mjs';
 import { engineProfile } from '../public/shared/fallbacks.js';
+import { isSocialHost } from '../public/shared/normalize.js';
 
 const CONCURRENCY = +process.env.OUTREACH_CONCURRENCY || 3;
 const ITEM_TIMEOUT = 150000;
@@ -34,7 +35,9 @@ async function contactPages(page, base) {
 async function attempt(ctx, item, profile, dryRun) {
   const lead = item.lead;
   const tried = new Set();
-  const candidates = [lead.form_url, lead.website].map(norm).filter(Boolean);
+  // Directory and social profile pages (Houzz, Yelp…) only have the platform's own forms, like signups: never fill those.
+  const candidates = [lead.form_url, lead.website].map(norm).filter(u => u && !isSocialHost(new URL(u).hostname));
+  if (!candidates.length) return { status: 'failed', reason: 'directory-page' };
   let last = { status: 'failed', reason: 'no-form' };
   const tryUrl = async (url) => {
     if (tried.has(url)) return null;
@@ -73,7 +76,7 @@ export async function runOutreach({ api, JOB, log, isCancelled }) {
   let stop = false, chain = Promise.resolve();
   const report = (oid, r) => {
     chain = chain.then(async () => {
-      const res = await api('POST', `/api/runner/jobs/${JOB}/outreach-result`, { oid, status: r.status, reason: r.reason || null, evidence: r.evidence || null, form_url: r.form_url || null });
+      const res = await api('POST', `/api/runner/jobs/${JOB}/outreach-result`, { oid, status: r.status, reason: r.reason || null, evidence: r.evidence || null, form_url: r.form_url || null, answers: r.answers || null, captcha: r.captcha || null });
       if (res.stop) stop = true;
     }).catch(e => log('Could not save a result:', e.message));
     return chain;

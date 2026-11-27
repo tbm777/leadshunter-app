@@ -430,6 +430,28 @@ export const FIXTURES = [
       <div class="gfield"><div class="lbl">Describe the job <span class="gfield_required">*</span></div><div class="ginput"><textarea name="input_6"></textarea></div></div>
       <input type="submit" value="Submit" class="gform_button"></form>`),
   },
+  {
+    id: 'directory-signup', industry: 'Directory page', note: 'Houzz-style profile: only a signup form, no contact form. Must not be filled.', mode: 'html', expect: 'noform',
+    req: ['email'],
+    html: () => layout('Pro profile on a directory', `<p>Great decks, 5 stars. Join to message this pro.</p><form method="post" action="/submit/directory-signup"><!--ERR-->
+      <label for="a">First name</label><input id="a" name="first_name"><label for="b">Email</label><input id="b" type="email" name="email" required>
+      <label for="z">ZIP code</label><input id="z" name="zip"><button type="submit">Sign Up</button></form>`),
+  },
+  {
+    id: 'late-captcha', industry: 'Painter', note: 'reCAPTCHA appears only after you start typing. Must go to the manual queue.', mode: 'html', expect: 'manual',
+    req: ['name', 'email', 'message'],
+    html: () => layout('Brush & Roll Painting', `<form method="post" action="/submit/late-captcha"><!--ERR-->
+      <label for="a">Name *</label><input id="a" name="name" required><label for="b">Email *</label><input id="b" type="email" name="email" required>
+      <label for="m">Message *</label><textarea id="m" name="message" required></textarea><div id="cap"></div><button type="submit">Send</button></form>
+      <script>document.addEventListener('focusin',function f(){document.removeEventListener('focusin',f);var d=document.createElement('div');d.className='g-recaptcha';d.setAttribute('data-sitekey','x');d.style.cssText='width:304px;height:78px;border:1px solid #ccc';document.getElementById('cap').appendChild(d);});</script>`),
+  },
+  {
+    id: 'silent-reset', industry: 'Locksmith', note: 'AJAX form that just clears itself after a successful send, no message.', mode: 'html',
+    req: ['name', 'email', 'phone', 'message'],
+    html: () => layout('KeyFast Locksmith', `<form id="f"><label for="a">Name</label><input id="a" name="name" required><label for="b">Email</label><input id="b" type="email" name="email" required>
+      <label for="c">Phone</label><input id="c" type="tel" name="phone" required><label for="m">Message</label><textarea id="m" name="message" required></textarea><button>Send</button></form>
+      <script>var f=document.getElementById('f');f.addEventListener('submit',function(e){e.preventDefault();fetch('/submit/silent-reset',{method:'POST',body:new FormData(f)}).then(function(r){if(r.ok)f.reset();});});</script>`),
+  },
 ];
 
 export const byId = Object.fromEntries(FIXTURES.map(f => [f.id, f]));

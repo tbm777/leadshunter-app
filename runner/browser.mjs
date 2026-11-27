@@ -28,7 +28,8 @@ export async function getBrowser() {
   return browserPromise;
 }
 
-const CAPTCHA_SEL = 'iframe[src*="recaptcha"], .g-recaptcha, iframe[src*="hcaptcha"], .h-captcha, iframe[src*="challenges.cloudflare.com"], .cf-turnstile';
+// Same rules as the form robot, so the label in Leads matches what happens when sending.
+const CAPTCHA_SEL = 'iframe[src*="recaptcha"],.g-recaptcha,iframe[src*="hcaptcha"],.h-captcha,iframe[src*="challenges.cloudflare.com"],.cf-turnstile,[data-sitekey],iframe[src*="friendlycaptcha"],.frc-captcha';
 
 /** Returns { form, captcha, form_url } using a real browser. */
 export async function browserFormCheck(url) {
@@ -52,13 +53,18 @@ export async function browserFormCheck(url) {
         return !!(document.querySelector('textarea') && document.querySelector('input[type=email], input[name*=mail i]'));
       }).catch(() => false);
       if (found) {
-        const cap = await page.$(CAPTCHA_SEL);
+        // Some sites only load their CAPTCHA once you start typing.
+        await frame.evaluate(() => { const el = document.querySelector('form textarea, textarea, form input[type=email]'); if (el) { el.focus(); el.dispatchEvent(new Event('focusin', { bubbles: true })); el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'a' })); } }).catch(() => {});
+        await page.waitForTimeout(1500);
+        let cap = null;
+        for (const fr of page.frames()) { cap = await fr.$(CAPTCHA_SEL).catch(() => null); if (cap) break; }
         let captcha = null;
         if (cap) {
           const html = await cap.evaluate(el => el.outerHTML);
           captcha = /hcaptcha/i.test(html) ? 'hCaptcha' : /cloudflare|turnstile/i.test(html) ? 'Turnstile' : 'reCAPTCHA';
         } else {
-          const scripts = await page.$$eval('script[src]', s => s.map(x => x.src).join(' '));
+          let scripts = '';
+          for (const fr of page.frames()) scripts += ' ' + await fr.$$eval('script[src]', s => s.map(x => x.src).join(' ')).catch(() => '');
           if (/recaptcha/i.test(scripts)) captcha = 'reCAPTCHA';
           else if (/hcaptcha/i.test(scripts)) captcha = 'hCaptcha';
           else if (/turnstile/i.test(scripts)) captcha = 'Turnstile';

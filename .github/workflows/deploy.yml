@@ -55,6 +55,10 @@ jobs:
         run: node scripts/provision.mjs
       - name: Apply database migrations
         run: npx wrangler d1 migrations apply leadshunter --remote
+      - name: Package the browser extension
+        run: |
+          mkdir -p /tmp/ext && cp -r extension /tmp/ext/leadshunter-extension
+          (cd /tmp/ext && zip -qr "$GITHUB_WORKSPACE/public/leadshunter-extension.zip" leadshunter-extension)
       - name: Deploy Worker
         run: npx wrangler deploy
       - name: Set Worker secrets

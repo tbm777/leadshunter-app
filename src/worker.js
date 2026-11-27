@@ -49,6 +49,7 @@ async function route(req, env, url, ctx) {
     return runnerRoute(req, env, url);
   }
   if (p === '/api/login' && m === 'POST') return login(req, env);
+  if (p === '/api/ext/sent' && m === 'POST') return O.extSent(env, await body(req));
   if (p === '/api/logout' && m === 'POST') return json({ ok: true }, 200, { 'set-cookie': cookie('', 0) });
   const session = await readSession(req, env);
   if (!session) return fail(401, 'Please sign in.');

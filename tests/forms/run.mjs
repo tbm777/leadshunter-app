@@ -41,7 +41,7 @@ await Promise.all(Array.from({ length: 4 }, async () => {
     const filesOk = !(fx.files || []).length || (r.files || []).some(f => /^the-bat-marketing-for-[a-z0-9-]+\.(pdf|png|jpg)/.test(f));
     if (tagsLeft) out.reason = 'merge tag left unfilled';
     if (!filesOk) out.reason = 'upload missing or not branded';
-    const pass = expect === 'manual' ? out.status === 'manual' && r.posts === 0 : out.status === 'confirmed' && r.valid === 1 && !r.trap && !r.wrongForm && !tagsLeft && filesOk;
+    const pass = expect === 'noform' ? out.status === 'failed' && out.reason === 'no-form' && r.posts === 0 : expect === 'manual' ? out.status === 'manual' && r.posts === 0 : out.status === 'confirmed' && r.valid === 1 && !r.trap && !r.wrongForm && !tagsLeft && filesOk;
     rows.push({ fx, out, r, pass, ms: Date.now() - s });
   }
 }));

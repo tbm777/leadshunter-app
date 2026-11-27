@@ -5,7 +5,12 @@ const SHARED = ['facebook.com', 'fb.com', 'instagram.com', 'linktr.ee', 'yelp.co
   'g.page', 'goo.gl', 'nextdoor.com', 'angi.com', 'angieslist.com', 'homeadvisor.com', 'thumbtack.com', 'houzz.com', 'bbb.org',
   'yellowpages.com', 'wixsite.com', 'squarespace.com', 'godaddysites.com', 'weebly.com', 'wordpress.com', 'square.site', 'mapquest.com',
   'linkedin.com', 'twitter.com', 'x.com', 'tiktok.com', 'youtube.com', 'porch.com', 'booksy.com', 'vagaro.com', 'setmore.com'];
-const SOCIAL = ['facebook.com', 'fb.com', 'instagram.com', 'linktr.ee', 'yelp.com', 'nextdoor.com', 'linkedin.com', 'twitter.com', 'x.com', 'tiktok.com', 'youtube.com'];
+// Social networks and directories: a profile page on these is not the business's own website (and its forms are the platform's, like signups).
+const SOCIAL = ['facebook.com', 'fb.com', 'instagram.com', 'linktr.ee', 'yelp.com', 'nextdoor.com', 'linkedin.com', 'twitter.com', 'x.com', 'tiktok.com', 'youtube.com', 'pinterest.com',
+  'houzz.com', 'houzz.co.uk', 'houzz.com.au', 'angi.com', 'angieslist.com', 'homeadvisor.com', 'thumbtack.com', 'bbb.org', 'porch.com', 'buildzoom.com', 'yellowpages.com', 'yellowpages.ca',
+  'yellowpages.com.au', 'superpages.com', 'manta.com', 'mapquest.com', 'alignable.com', 'expertise.com', 'networx.com', 'bark.com', 'homeguide.com', 'fixr.com', 'birdeye.com',
+  'chamberofcommerce.com', 'local.com', 'groupon.com', 'hipages.com.au', 'oneflare.com.au', 'truelocal.com.au', 'yelp.ca', 'yelp.com.au', 'trustpilot.com', 'zillow.com', 'realtor.com',
+  'dubizzle.com', 'yello.ae', 'google.com', 'goo.gl', 'g.page', 'maps.app.goo.gl', 'linkedin.cn', 'threads.net', 'tripadvisor.com', 'opentable.com', 'doordash.com', 'ubereats.com', 'grubhub.com'];
 
 const endsWith = (host, list) => list.some(d => host === d || host.endsWith('.' + d));
 

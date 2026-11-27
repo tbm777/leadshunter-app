@@ -1,7 +1,7 @@
 // LeadsHunter outreach pages: campaigns, manual queue, messages, sender profiles. Plugs into app.js through install().
 import { personalize, cleanCompanyName, MERGE_TAGS, unknownTags } from './shared/personalize.js';
 import { render as renderFile, ASSETS } from './shared/templates/bat-marketing.js';
-import { SENDER_FALLBACKS, OTHER_FIELDS } from './shared/fallbacks.js';
+import { SENDER_FALLBACKS, OTHER_FIELDS, engineProfile } from './shared/fallbacks.js';
 
 let A;                       // helpers from app.js
 const OS = { loaded: false, senders: [], campaigns: [], manual: 0 };
@@ -20,12 +20,15 @@ const REASON = {
   'page-error': 'The page broke while filling the form', 'no-submit-button': 'The form has no send button', 'fields-still-invalid': 'The form kept rejecting a field',
   'gave-up-after-retries': 'The site kept rejecting the form', 'sent-no-confirmation': 'Sent, but the site showed no confirmation', 'no-response': 'The site did not respond to the send',
   'no-confirmation': 'The site showed no confirmation', 'validation-error': 'The form kept rejecting a field', 'file-type': 'The form only accepts Word files',
-  'skipped by you': 'Skipped by you', 'do not contact': 'Marked do not contact', 'already contacted': 'You marked this lead as contacted', 'no-contact-form': 'No contact form found',
+  'skipped by you': 'Skipped by you', 'do not contact': 'Marked do not contact', 'already contacted': 'You marked this lead as contacted', 'directory-page': 'The website is a directory or social profile, not their own site', 'no-contact-form': 'No contact form found',
 };
+const SENT = ['sent', 'submitted', 'sent_manual'];
 const reasonText = r => REASON[r] || (r ? String(r).replace(/-/g, ' ') : '');
 const pill = (st) => `<span class="pill" style="--c:${ST_COLOR[st] || 'var(--idle)'}">${ST_LABEL[st] || st}</span>`;
 const CSTATUS = { draft: ['Draft', 'var(--idle)'], active: ['Active', 'var(--ok)'], paused: ['Paused', 'var(--warn)'], archived: ['Archived', 'var(--idle)'] };
-const cpill = c => `<span class="pill" style="--c:${CSTATUS[c.status][1]}">${CSTATUS[c.status][0]}</span>`;
+const scheduled = c => c.status === 'active' && c.start_at && c.start_at > Date.now();
+const cpill = c => scheduled(c) ? '<span class="pill" style="--c:var(--info)">Scheduled</span>' : `<span class="pill" style="--c:${CSTATUS[c.status][1]}">${CSTATUS[c.status][0]}</span>`;
+const startLbl = c => scheduled(c) ? `Starts ${new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(c.start_at))} PT` : '';
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const hourLbl = h => h === 0 || h === 24 ? '12am' : h === 12 ? '12pm' : h < 12 ? `${h}am` : `${h - 12}pm`;
 function daysLbl(w) {
@@ -74,7 +77,7 @@ function campRow(c) {
   const seg = (v, col) => v ? `<i style="width:${(v / Math.max(1, tot) * 100).toFixed(2)}%;background:${col}"></i>` : '';
   const live = jobActive(c.job);
   return `<a class="camp" href="#campaign/${c.id}">
-    <div><h4>${A.esc(c.name)}</h4><div class="meta">${cpill(c)}<span>${s ? A.esc(s.label) : '<span style="color:var(--warn)">No sender</span>'}</span><span>${c.daily_limit}/day</span><span>${schedLbl(c)}</span></div></div>
+    <div><h4>${A.esc(c.name)}</h4><div class="meta">${cpill(c)}${scheduled(c) ? `<span style="color:var(--info)">${startLbl(c)}</span>` : ''}<span>${s ? A.esc(s.label) : '<span style="color:var(--warn)">No sender</span>'}</span><span>${c.daily_limit}/day</span><span>${schedLbl(c)}</span></div></div>
     <div class="prog"><div class="t"><span><b class="num" style="color:var(--ink)">${A.fmt(done)}</b> of ${A.fmt(tot)} contacted</span>${n.manual ? `<span style="color:var(--manual)">${A.fmt(n.manual)} need you</span>` : ''}</div>
       <div class="seg">${seg(done, 'var(--ok)')}${seg(n.manual, 'var(--manual)')}${seg(n.failed + n.skipped, 'var(--bad)')}${seg(n.sending, 'var(--warn)')}</div></div>
     <div class="ctoday">${live ? `<span class="okline" style="color:var(--warn)"><span class="spin"></span>${c.job.mode === 'test' ? 'Testing' : 'Sending'} ${c.job.done}/${c.job.total}</span>` : `<b class="num">${A.fmt(c.today)}</b><span> / ${c.daily_limit} today</span>`}</div></a>`;
@@ -116,7 +119,7 @@ function campaignView(arg) {
   if (!c) { A.api('GET', `/api/campaigns/${id}`).then(r => { upsertCampaign(r.campaign); A.render(); }).catch(() => { location.hash = '#campaigns'; }); return loading(); }
   const P = cp(id);
   return `<div class="chead">
-      <div><a class="back" href="#campaigns">${A.ic('back', 14)}Campaigns</a><h1>${A.esc(c.name)}</h1><div class="meta">${cpill(c)}<span>${senderOf(c) ? 'Sends as ' + A.esc(senderOf(c).label) : 'No sender yet'}</span><span>${c.daily_limit} a day</span><span>${schedLbl(c)}</span></div></div>
+      <div><a class="back" href="#campaigns">${A.ic('back', 14)}Campaigns</a><h1>${A.esc(c.name)}</h1><div class="meta">${cpill(c)}${scheduled(c) ? `<span style="color:var(--info);font-weight:550">${startLbl(c)}</span>` : ''}<span>${senderOf(c) ? 'Sends as ' + A.esc(senderOf(c).label) : 'No sender yet'}</span><span>${c.daily_limit} a day</span><span>${schedLbl(c)}</span></div></div>
       <div class="row" id="c-actions">${actionsHTML(c)}</div></div>
     <div id="c-banner">${bannerHTML(c)}</div>
     ${c.status === 'draft' ? `<div id="c-ready">${readyHTML(c)}</div>` : ''}
@@ -129,7 +132,7 @@ function actionsHTML(c) {
   const left = Math.max(0, c.daily_limit - c.today);
   return `<button class="btn" data-o="test" ${live || !c.counts.queued ? 'disabled' : ''} title="Fills up to 10 forms and stops before pressing send">${A.ic('check', 14)}Test run</button>
     <button class="btn" data-o="sendnow" ${live || !c.counts.queued || !left || c.status === 'draft' ? 'disabled' : ''} title="${c.status === 'draft' ? 'Start the campaign first' : !left ? "Today's limit is reached" : 'Send the next batch now, outside the schedule'}">${A.ic('campaigns', 14)}Send now</button>
-    ${c.status === 'active' ? `<button class="btn" data-o="pause">Pause</button>` : `<button class="btn primary" data-o="start">${A.ic('play', 13)}${c.status === 'paused' ? 'Resume' : 'Start campaign'}</button>`}`;
+    ${c.status === 'active' ? `<button class="btn" data-o="pause">${scheduled(c) ? 'Cancel schedule' : 'Pause'}</button>` : `<button class="btn primary" data-o="start">${A.ic('play', 13)}${c.status === 'paused' ? 'Resume' : 'Start campaign'}</button>`}`;
 }
 function statsHTML(c) {
   const n = c.counts;
@@ -189,7 +192,7 @@ function itemRow(it, withCampaign = false) {
   const test = it.test_status ? `<span class="dtag ${it.test_status === 'ready' ? 'okt' : it.test_status === 'manual' ? 'mant' : 'badt'}" title="${A.esc(reasonText(it.test_reason) || it.evidence || '')}">${it.test_status === 'ready' ? 'Ready' : it.test_status === 'manual' ? 'Needs you' : 'Failed'}</span>${it.test_reason ? `<small>${A.esc(reasonText(it.test_reason))}</small>` : ''}` : '<span class="faint">—</span>';
   const when = it.sent_at || it.updated_at;
   const form = it.form_url || it.website;
-  return `<div class="oi" data-oid="${it.id}">
+  return `<div class="oi oi-click" data-oid="${it.id}" data-lead="${it.lead_id}" data-camp="${it.campaign_id}" title="Show lead details and what was sent">
     <div class="oi-b"><b>${A.esc(it.name)}</b><span>${A.esc(domain(it.website))}${withCampaign ? ` · ${A.esc(it.campaign)}` : ''}</span></div>
     <div class="oi-r">${pill(it.status)}${reason ? `<small title="${A.esc(reason)}">${A.esc(reason)}</small>` : ''}</div>
     <div class="oi-t">${test}</div>
@@ -305,7 +308,7 @@ async function saveSetting(c, patch) {
 function refreshCampaignChrome(c) {
   const set = (sel, html) => { const el = A.$(sel); if (el) el.innerHTML = html; };
   set('#c-actions', actionsHTML(c)); set('#c-banner', bannerHTML(c)); set('#c-stats', statsHTML(c)); set('#c-ready', readyHTML(c));
-  const meta = document.querySelector('.chead .meta'); if (meta) meta.innerHTML = `${cpill(c)}<span>${senderOf(c) ? 'Sends as ' + A.esc(senderOf(c).label) : 'No sender yet'}</span><span>${c.daily_limit} a day</span><span>${schedLbl(c)}</span>`;
+  const meta = document.querySelector('.chead .meta'); if (meta) meta.innerHTML = `${cpill(c)}${scheduled(c) ? `<span style="color:var(--info);font-weight:550">${startLbl(c)}</span>` : ''}<span>${senderOf(c) ? 'Sends as ' + A.esc(senderOf(c).label) : 'No sender yet'}</span><span>${c.daily_limit} a day</span><span>${schedLbl(c)}</span>`;
   const h = document.querySelector('.chead h1'); if (h) h.textContent = c.name;
   document.querySelectorAll('.ctabs [data-ctab="leads"] .n').forEach(n => { n.textContent = A.fmt(c.counts.total); });
   const fl = document.querySelector('.ofilters .tabs');
@@ -348,7 +351,7 @@ export function addToCampaign(ids) {
 }
 function acModal() {
   const live = OS.campaigns.filter(c => c.status !== 'archived'), s = AC.summary;
-  const sk = s ? Object.entries({ already: 'already in this campaign', contacted: 'already contacted', dnc: 'do not contact', noWebsite: 'no website', noForm: 'no contact form' }).filter(([k]) => s.skipped[k]).map(([k, l]) => `${A.fmt(s.skipped[k])} ${l}`) : [];
+  const sk = s ? Object.entries({ already: 'already in this campaign', contacted: 'already contacted', dnc: 'do not contact', noWebsite: 'no website', profile: 'directory or social page instead of a website', noForm: 'no contact form' }).filter(([k]) => s.skipped[k]).map(([k, l]) => `${A.fmt(s.skipped[k])} ${l}`) : [];
   const total = s ? s.add + s.manual : 0;
   A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Add to campaign">
     <div class="card-h"><div><h2>Add ${A.fmt(AC.ids.length)} lead${AC.ids.length === 1 ? '' : 's'} to a campaign</h2><p>Nothing is sent until the campaign is started.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
@@ -393,6 +396,24 @@ function manualView() {
   ${its.length ? `<div class="split mq"><div class="card list" id="mq-list">${mqList()}</div><div class="card" id="mq-detail">${mqDetail()}</div></div>`
     : `<div class="card"><div class="empty"><b>All clear</b>Nothing needs you right now. CAPTCHA forms and anything the robot couldn't finish land here.</div></div>`}`;
 }
+const hasExt = () => !!document.documentElement.dataset.lhExt;
+function b64url(str) { return btoa(unescape(encodeURIComponent(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+function fillUrl(it, c, snd, url, subject, message) {
+  const payload = { v: 1, api: location.origin, oid: it.id, token: it.fill_token, ...(snd ? engineProfile(snd) : {}), subject, message, leadCompany: cleanCompanyName(it.name) };
+  return url.replace(/#.*$/, '') + '#lh-fill=' + b64url(JSON.stringify(payload));
+}
+function extGuide() {
+  A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Install the extension">
+    <div class="card-h"><div><h2>Install the form filler</h2><p>Works in Opera, Chrome and Edge. Takes about two minutes, once.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
+    <div class="card-b"><ol class="extsteps">
+      <li><a class="btn sm primary" href="/leadshunter-extension.zip" download>${A.ic('download', 13)}Download the extension</a> and unzip it (double-click the file).</li>
+      <li>Open <code>opera://extensions</code> in a new tab (in Chrome: <code>chrome://extensions</code>).</li>
+      <li>Turn on <b>Developer mode</b> (top right).</li>
+      <li>Click <b>Load unpacked</b> and choose the unzipped <b>leadshunter-extension</b> folder.</li>
+      <li>Come back here and reload the page. The button changes to <b>Fill form</b>.</li></ol>
+      <p class="help" style="margin:12px 0 0">The extension only acts on pages you open with Fill form. It never solves CAPTCHAs; you do that and press send yourself.</p></div>
+    <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Done</button></div></div></div>`;
+}
 function mqList() {
   return MQ.items.map((it, i) => `<button class="${i === MQ.sel ? 'on' : ''}" data-mq="${i}"><b>${A.esc(cleanCompanyName(it.name))}</b><span>${A.esc(reasonText(it.reason))} · ${A.esc(it.campaign)}</span></button>`).join('');
 }
@@ -404,7 +425,10 @@ function mqDetail() {
   const f = (k, v) => v ? `<div class="mfield"><span class="k">${k}</span><span class="val">${A.esc(v)}</span><button class="dcopy" data-copy="${A.esc(v)}">${A.ic('copy', 12)}<span>Copy</span></button></div>` : '';
   return `<div class="card-h"><div><h3>${A.esc(cleanCompanyName(it.name))}</h3><p>${A.esc(reasonText(it.reason))}</p></div><span class="help num">${MQ.sel + 1} of ${MQ.items.length}</span></div>
     <div class="card-b" style="display:flex;flex-direction:column;gap:14px">
-      ${url ? `<a class="btn primary mqopen" href="${A.esc(url)}" target="_blank" rel="noopener">${A.ic('ext', 15)}Open the form<span class="mqurl">${A.esc(domain(url))}</span></a>` : ''}
+      ${url ? (hasExt() && it.fill_token && snd && subj && msg
+        ? `<a class="btn primary mqopen" href="${A.esc(fillUrl(it, c, snd, url, subj, msg))}" target="_blank" rel="noopener">${A.ic('edit', 15)}Fill form<span class="mqurl">${A.esc(domain(url))}</span></a><div class="row" style="justify-content:space-between"><span class="help">Opens the form already filled in. Solve the CAPTCHA and press send: it's marked sent here automatically.</span><a class="linkbtn muted" href="${A.esc(url)}" target="_blank" rel="noopener">Open without filling</a></div>`
+        : `<a class="btn primary mqopen" href="${A.esc(url)}" target="_blank" rel="noopener">${A.ic('ext', 15)}Open the form<span class="mqurl">${A.esc(domain(url))}</span></a>
+           <div class="extcta">${A.ic('edit', 16)}<div><b>Fill these forms in one click</b><span>Install the LeadsHunter extension for Opera, Chrome or Edge. Forms open already filled in.</span></div><button class="btn sm" data-o="extguide">Get the extension</button></div>`) : ''}
       <div>${f('Subject', subj)}${f('Message', msg)}${snd ? f('First name', snd.first_name) + f('Last name', snd.last_name) + f('Email', snd.email) + f('Phone', snd.phone) + f('Company', snd.company) + f('Website', snd.website) : ''}</div>
       <div class="row mqacts"><button class="btn primary" data-mqact="sent">${A.ic('check', 14)}Mark as sent</button><button class="btn" data-mqact="retry" title="Send it back to the robot">${A.ic('retry', 14)}Try robot again</button><button class="btn" data-mqact="skip">Skip</button><button class="btn ghost" data-mqact="dnc" style="color:var(--bad)">${A.ic('shield', 14)}Do not contact</button></div>
     </div>`;
@@ -412,8 +436,8 @@ function mqDetail() {
 async function loadManual() {
   if (MQ.loading) return; MQ.loading = true;
   try {
-    if (!OS.loaded) await loadOutreach();
-    const r = await A.api('GET', '/api/outreach/items?status=manual&order=recent&limit=500');
+    await loadOutreach();   // fresh campaigns and senders: the Fill form link carries them
+    const r = await A.api('GET', '/api/outreach/items?status=manual&order=recent&limit=500&tokens=1');
     MQ.items = r.items; MQ.sel = Math.min(MQ.sel, Math.max(0, MQ.items.length - 1)); MQ.loaded = true;
     if (A.currentView() === 'manual') A.render();
   } catch (e) { A.toast(e.message, 'alert'); } finally { MQ.loading = false; }
@@ -526,6 +550,8 @@ async function onClick(e) {
   if (mqa) { mqAction(mqa.dataset.mqact); return; }
   const msr = t.closest('[data-msres]');
   if (msr) { MS.result = msr.dataset.msres; MS.loaded = false; loadMessages(); return; }
+  const row = t.closest('.oi-click');
+  if (row && !t.closest('a,button,.menu')) { openFor = +row.dataset.camp; A.openLead(+row.dataset.lead); return; }
   const oact = t.closest('[data-oact]');
   if (oact) { itemAct(+t.closest('[data-oid]').dataset.oid, oact.dataset.oact); return; }
   const b = t.closest('[data-o]'); if (!b) return;
@@ -538,9 +564,19 @@ async function onClick(e) {
     case 'savesender': saveSender(+b.dataset.sid || 0); break;
     case 'delsender': try { await A.api('DELETE', `/api/senders/${+b.dataset.sid}`); OS.senders = OS.senders.filter(s => s.id !== +b.dataset.sid); A.closeOverlay(); A.render(); A.toast('Profile deleted'); } catch (err) { A.$('#sp-err').textContent = err.message; } break;
     case 'addleads': location.hash = '#leads'; A.toast('Select leads, then choose “Add to campaign”'); break;
-    case 'start': case 'pause': {
+    case 'start': startModal(c); break;
+    case 'startok': {
+      const later = A.$('#st-later')?.checked; let start_at = null;
+      if (later) { start_at = ptToMs(A.$('#st-date').value, A.$('#st-time').value); if (!start_at || start_at < Date.now()) { A.$('#st-err').textContent = 'Pick a date and time in the future.'; return; } }
       b.disabled = true;
-      try { const r = await A.api('POST', `/api/campaigns/${c.id}/status`, { status: b.dataset.o === 'start' ? 'active' : 'paused' }); upsertCampaign(r.campaign); A.render(); A.toast(b.dataset.o === 'start' ? (inWindowNow(r.campaign) ? 'Campaign started. The first batch is on its way.' : `Campaign started. Sending begins ${nextWindowLbl(r.campaign)}.`) : 'Paused. Nothing more will be sent.'); refreshCampaign(c.id).catch(() => {}); }
+      try { const r = await A.api('POST', `/api/campaigns/${c.id}/status`, { status: 'active', start_at }); upsertCampaign(r.campaign); A.closeOverlay(); A.render();
+        A.toast(scheduled(r.campaign) ? `Scheduled. ${startLbl(r.campaign)}.` : inWindowNow(r.campaign) ? 'Campaign started. The first batch is on its way.' : `Campaign started. Sending begins ${nextWindowLbl(r.campaign)}.`); refreshCampaign(c.id).catch(() => {}); }
+      catch (err) { A.$('#st-err').textContent = err.message; b.disabled = false; }
+      break;
+    }
+    case 'pause': {
+      b.disabled = true;
+      try { const r = await A.api('POST', `/api/campaigns/${c.id}/status`, { status: 'paused' }); upsertCampaign(r.campaign); A.render(); A.toast('Paused. Nothing more will be sent.'); }
       catch (err) { A.toast(err.message, 'alert'); b.disabled = false; }
       break;
     }
@@ -582,6 +618,7 @@ async function onClick(e) {
     }
     case 'dismissbanner': A.$('#c-banner').innerHTML = ''; break;
     case 'moreitems': loadItems(c.id, true); break;
+    case 'extguide': extGuide(); break;
     case 'moremsgs': loadMessages(true); break;
     case 'kebab': {
       const k = b.closest('.kebab'), open = k.querySelector('.menu');
@@ -604,6 +641,31 @@ function nextWindowLbl(c) {
   if (c.weekdays.includes(String(d)) && +p.hour < c.window_start) return `today at ${hourLbl(c.window_start)} PT`;
   for (let i = 1; i <= 7; i++) { const dd = (d + i) % 7; if (c.weekdays.includes(String(dd))) return `${i === 1 ? 'tomorrow' : DAYS[dd]} at ${hourLbl(c.window_start)} PT`; }
   return 'at the next sending window';
+}
+/** Date + time typed in Los Angeles time → timestamp. */
+function ptToMs(date, time) {
+  if (!date || !time) return null;
+  const [y, mo, d] = date.split('-').map(Number), [h, mi] = time.split(':').map(Number);
+  let t = Date.UTC(y, mo - 1, d, h, mi);
+  for (let i = 0; i < 2; i++) {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).formatToParts(new Date(t)).map(x => [x.type, x.value]));
+    t += Date.UTC(y, mo - 1, d, h, mi) - Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute);
+  }
+  return t;
+}
+function startModal(c) {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date());
+  const tomorrow = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date(Date.now() + 864e5));
+  const times = []; for (let h = 0; h < 24; h++) for (const m of [0, 30]) times.push(`${String(h).padStart(2, '0')}:${m ? '30' : '00'}`);
+  const tl = t => { const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
+  A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Start campaign">
+    <div class="card-h"><div><h2>Start “${A.esc(c.name)}”</h2><p>Sends up to ${c.daily_limit} a day, ${schedLbl(c)}. All times are Los Angeles time.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
+    <div class="card-b" style="display:flex;flex-direction:column;gap:10px">
+      <label class="opt on" id="st-o1"><input type="radio" name="stwhen" id="st-now" checked><div><b>Start now</b><span>${inWindowNow(c) ? 'The first batch goes out within a few minutes.' : `It's outside your sending hours, so sending begins ${nextWindowLbl(c)}.`}</span></div></label>
+      <label class="opt" id="st-o2"><input type="radio" name="stwhen" id="st-later"><div style="flex:1"><b>Schedule a start</b><span>Nothing is sent before this time.</span>
+        <div class="row st-pick" style="margin-top:8px;flex-wrap:nowrap"><input class="input" type="date" id="st-date" min="${today}" value="${tomorrow}"><select class="input" id="st-time">${times.map(t => `<option value="${t}" ${t === `${String(c.window_start).padStart(2, '0')}:00` ? 'selected' : ''}>${tl(t)}</option>`).join('')}</select><span class="help" style="white-space:nowrap">PT</span></div></div></label>
+      <div class="help" id="st-err" style="color:var(--bad)"></div></div>
+    <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-o="startok">${A.ic('play', 13)}<span id="st-go">Start campaign</span></button></div></div></div>`;
 }
 function sendNowModal(c) {
   const left = Math.max(0, c.daily_limit - c.today), n = Math.min(40, left, c.counts.queued);
@@ -658,6 +720,7 @@ function onChange(e) {
   const t = e.target, c = curCampaign();
   if (t.dataset.ssave && c) { const k = t.dataset.ssave; const v = ['daily_limit', 'window_start', 'window_end'].includes(k) ? +t.value : k === 'sender_id' ? (+t.value || null) : t.value; saveSetting(c, { [k]: v }); return; }
   if (t.name === 'accamp') { AC.cid = +t.value; acSummary(); return; }
+  if (t.name === 'stwhen' || t.id === 'st-date' || t.id === 'st-time') { if (t.id === 'st-date' || t.id === 'st-time') A.$('#st-later').checked = true; const later = A.$('#st-later').checked; A.$('#st-o1').classList.toggle('on', !later); A.$('#st-o2').classList.toggle('on', later); A.$('#st-go').textContent = later ? 'Schedule campaign' : 'Start campaign'; return; }
   if (t.id === 'ac-inc') { AC.includeContacted = t.checked; acSummary(); return; }
   if (t.id === 'ms-camp') { MS.campaign = +t.value; MS.loaded = false; loadMessages(); return; }
 }
@@ -670,15 +733,30 @@ function onKey(e) {
 }
 
 /* ------------------------------------------------------------------ lead panel: campaign history */
+let openFor = null;   // campaign to expand when the lead panel opens from a campaign
 export async function leadOutreachInto(el, L) {
   if (!el) return;
+  const expand = openFor; openFor = null;
   try {
     const r = await A.api('GET', `/api/leads/${L.id}/outreach`);
     if (!document.body.contains(el)) return;
     if (!r.items.length) { el.innerHTML = ''; return; }
-    el.innerHTML = `<div class="ldout">${L.status === 1 ? `<span class="help">In a campaign. This is set automatically and clears when the campaign is done with this lead.</span>` : ''}${r.items.map(it => {
+    const ind = A.ST.industries.find(d => d.id === L.industry_id);
+    const lead = { name: L.name, city: L.city, state: L.region, industry: ind ? ind.name : '' };
+    el.innerHTML = `<div class="ldout">${L.status === 1 ? `<span class="help">In a campaign. This is set automatically.</span>` : ''}${r.items.map(it => {
       const why = it.status === 'sent' ? it.evidence : it.status === 'submitted' ? reasonText(it.reason || 'sent-no-confirmation') : reasonText(it.reason);
-      return `<a class="ldo" href="#campaign/${it.campaign_id}"><div><b>${A.esc(it.campaign)}</b>${why ? `<small>${A.esc(why)}</small>` : ''}</div><div class="ldo-r">${pill(it.status)}<small class="num">${A.esc(A.whenPT(it.sent_at || it.updated_at).replace(' PT', ''))}</small></div></a>`;
+      const sentOrWill = SENT.includes(it.status) ? 'Message sent' : it.status === 'queued' || it.status === 'sending' ? 'Message that will be sent' : 'Message';
+      const answers = (it.answers || '').split(' · ').filter(Boolean);
+      const when = (lbl, t) => t ? `<div class="dk"><dt>${lbl}</dt><dd>${A.esc(A.whenPT(t))}</dd></div>` : '';
+      return `<details class="ldo" ${expand === it.campaign_id || r.items.length === 1 ? 'open' : ''}><summary><div><b>${A.esc(it.campaign)}</b>${why ? `<small>${A.esc(why)}</small>` : ''}</div><div class="ldo-r">${pill(it.status)}<small class="num">${A.esc(A.whenPT(it.sent_at || it.updated_at).replace(' PT', ''))}</small></div></summary>
+        <div class="ldo-b">
+          <dl class="ld-dl">${when('Added', it.created_at)}${it.test_status ? `<div class="dk"><dt>Test run</dt><dd>${it.test_status === 'ready' ? 'Ready to send' : A.esc(reasonText(it.test_reason) || it.test_status)}</dd></div>` : ''}${when(it.status === 'sent_manual' ? 'Sent by you' : 'Sent', it.sent_at)}
+            ${it.evidence && it.status !== 'queued' ? `<div class="dk"><dt>Site replied</dt><dd>“${A.esc(it.evidence)}”</dd></div>` : ''}
+            ${it.form_url ? `<div class="dk"><dt>Form</dt><dd><a href="${A.esc(it.form_url)}" target="_blank" rel="noopener">${A.esc(domain(it.form_url))}${A.esc((() => { try { return new URL(it.form_url).pathname.replace(/\/$/, ''); } catch { return ''; } })())}</a></dd></div>` : ''}</dl>
+          <div class="ldo-msg"><h6>${sentOrWill}</h6><b>${A.esc(personalize(it.subject, lead))}</b><p>${A.esc(personalize(it.message, lead))}</p></div>
+          ${answers.length ? `<div class="ldo-ans"><h6>Other answers the robot gave</h6><ul>${answers.map(a => { const i = a.indexOf(': '); return `<li><span>${A.esc(i > 0 ? a.slice(0, i) : 'Field')}</span><b>${A.esc(i > 0 ? a.slice(i + 2) : a)}</b></li>`; }).join('')}</ul></div>` : ''}
+          <a class="linkbtn muted" href="#campaign/${it.campaign_id}">Open campaign</a>
+        </div></details>`;
     }).join('')}</div>`;
   } catch { el.innerHTML = ''; }
 }
@@ -702,6 +780,8 @@ export function install(ctx) {
   document.addEventListener('change', onChange);
   document.addEventListener('keydown', onKey);
   window.addEventListener('hashchange', () => { stopPoll(); flushSave(); });
+  document.addEventListener('lh-ext-ready', () => { if (A.currentView() === 'manual' && MQ.loaded) A.render(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && A.currentView() === 'manual' && MQ.loaded && !MQ.fresh) { MQ.fresh = true; loadManual().then(() => { MQ.fresh = false; }); loadOutreach(); } });
   window.addEventListener('beforeunload', () => { if (pendingSave) navigator.sendBeacon && flushSave(); });
 }
 export const outreachNav = () => [['campaigns', 'Campaigns', 'campaigns'], ['manual', 'Manual queue', 'manual', OS.manual], ['messages', 'Messages', 'messages'], ['senders', 'Sender profiles', 'senders']];

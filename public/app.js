@@ -71,8 +71,8 @@ async function api(method, path, body) {
 
 /* ================================================================ state */
 const ST = { industries: [], searches: [], config: {}, cols: [], leads: [], byId: new Map(), seq: 0, views: [], places: null, postal: {}, syncing: false, lastSync: 0 };
-const SS = ['Loads', 'Slow (over 5 s)', 'Down', 'Not checked yet', 'No website', 'Blocked us', 'Parked or for sale', 'Social media page'];
-const SS_SHORT = ['Loads', 'Slow', 'Down', 'Not checked', '', 'Blocked us', 'Parked', 'Social page'];
+const SS = ['Loads', 'Slow (over 5 s)', 'Down', 'Not checked yet', 'No website', 'Blocked us', 'Parked or for sale', 'Social or directory page'];
+const SS_SHORT = ['Loads', 'Slow', 'Down', 'Not checked', '', 'Blocked us', 'Parked', 'Profile page'];
 const SS_C = ['ok', 'warn', 'bad', 'faint', 'faint', 'warn', 'faint', 'faint'];
 const FM = ['Open form', 'CAPTCHA', 'No form found', 'Not checked yet', 'Needs browser check'];
 const PF = ['WordPress', 'Wix', 'Squarespace', 'Webflow', 'GoDaddy', 'Shopify', 'Duda', 'Weebly', 'HubSpot', 'Custom', 'Not checked'];
@@ -1443,6 +1443,7 @@ async function boot() {
 }
 installOutreach({
   $, esc, fmt, ic, api, toast, closeOverlay, whenPT, ST, V, MOUNT, TITLES, CRUMBS, NAV_ACTIVE, render, renderNav, sync: () => sync(),
+  openLead: (id) => { if (ST.byId.has(id)) leadDrawer(id); else toast('This lead is no longer in your list.', 'alert'); },
   currentView: () => CURRENT_VIEW, currentArg: () => CURRENT_ARG, clearSelection: () => { L$.sel.clear(); if ($('#vt')) { renderSel(); renderRows(); } },
 });
 boot();

@@ -210,7 +210,9 @@
         if (cls === 'checkbox' || cls === 'consent') { if (cls === 'consent' || req) { check(el); mark(el); count++; } else if (el.name) (groups['cb:' + el.name] ||= []).push(el); continue; }
         if (el.tagName === 'SELECT') { if (el.value && !PLACEHOLDER.test(el.options[el.selectedIndex]?.text || '')) continue; const o = pickOption(el, cls, P); if (o) { setValue(el, o.value); mark(el); count++; } continue; }
         if (el.value && el.value.trim()) continue; // leave anything already typed
-        setValue(el, valueFor(el, cls, P)); mark(el); count++;
+        const v = valueFor(el, cls, P);
+        if (!v || /undefined/.test(v)) { skipped.push(f.label || f.name); continue; }
+        setValue(el, v); mark(el); count++;
       } catch { skipped.push(f.label || f.name); }
     }
     for (const name of radios) {
