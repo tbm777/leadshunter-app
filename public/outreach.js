@@ -344,7 +344,8 @@ async function refreshCampaign(id, { items = true } = {}) {
 }
 function mountCampaign(arg) {
   const id = +arg, c = OS.campaigns.find(x => x.id === id); if (!c) return;
-  const P = cp(id); P.items = null; P.prevJob = c.job ? { id: c.job.id, status: c.job.status, done: c.job.done } : null;
+  // Show what's already loaded straight away and refresh quietly: coming back to a campaign shouldn't flash or reset.
+  const P = cp(id); P.prevJob = c.job ? { id: c.job.id, status: c.job.status, done: c.job.done } : null;
   loadItems(id);
   if (P.tab === 'message') renderPreview(c);
   refreshCampaign(id, { items: false }).catch(() => {});

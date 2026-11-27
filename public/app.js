@@ -1,6 +1,7 @@
 // LeadsHunter web app (phase 1: leads). Plain ES modules, no build step.
 import { buildCells, cityRadiusKm } from './shared/grid.js';
 import { parseAddress, prettyPhone } from './shared/normalize.js';
+import { installSelects } from './nselect.js';
 import { install as installOutreach, loadOutreach, addToCampaign, outreachNav, leadOutreachInto } from './outreach.js';
 
 /* ================================================================ basics */
@@ -212,7 +213,7 @@ function shell() {
 }
 function renderNav(active) {
   $('#nav').innerHTML = `<div class="nav-label">Leads</div>` + NAV.map(([id, label, icon]) => `<a href="#${id}" class="${active === id ? 'on' : ''}">${ic(icon)}${label}${id === 'leads' ? `<span class="count">${ST.leads.length >= 1000 ? (ST.leads.length / 1000).toFixed(ST.leads.length >= 10000 ? 0 : 1) + 'k' : ST.leads.length}</span>` : ''}</a>`).join('')
-    + `<div class="nav-label">Outreach</div>` + outreachNav().map(([id, label, icon, n]) => `<a href="#${id}" class="${active === id ? 'on' : ''}">${ic(icon)}${label}${n ? `<span class="count hot">${n > 999 ? '999+' : n}</span>` : ''}</a>`).join('')
+    + `<div class="nav-label">Outreach</div>` + outreachNav().map(([id, label, icon, n]) => `<a href="${active !== id && NAV_LAST[id] ? NAV_LAST[id] : '#' + id}" class="${active === id ? 'on' : ''}">${ic(icon)}${label}${n ? `<span class="count hot">${n > 999 ? '999+' : n}</span>` : ''}</a>`).join('')
     + `<div class="nav-label">Workspace</div><a href="#usage" class="${active === 'usage' ? 'on' : ''}">${ic('chart')}Usage</a>`;
   const rc = $('#railcount'); if (rc) rc.textContent = `${fmt(ST.leads.length)} leads stored here, so filtering is instant and free.`;
 }
@@ -255,22 +256,27 @@ document.addEventListener('submit', async (e) => {
 
 /* ================================================================ router */
 const TITLES = { leads: 'Leads', find: 'Find leads', industries: 'Industries', usage: 'Usage' };
-const V = {}, MOUNT = {}, CRUMBS = {}, NAV_ACTIVE = {};
+const V = {}, MOUNT = {}, CRUMBS = {}, NAV_ACTIVE = {}, NAV_LAST = {};
+const SCROLL = new Map();   // scroll position per page, restored when you come back
 function render() {
   const [view, arg] = (location.hash || '#leads').slice(1).split('/');
   const v = V[view] ? view : 'leads';
   CURRENT_VIEW = v; CURRENT_ARG = arg;
+  NAV_LAST[NAV_ACTIVE[v] || v] = location.hash || '#' + v;
   renderNav(NAV_ACTIVE[v] || v);
   $('#crumbs').innerHTML = `<span>Workspace</span><span>›</span>` + (CRUMBS[v] ? CRUMBS[v](arg) : `<b>${TITLES[v]}</b>`);
   $('#page').innerHTML = V[v](arg);
   MOUNT[v] && MOUNT[v](arg);
 }
 let CURRENT_VIEW = null, CURRENT_ARG = null;
+let LAST_HASH = location.hash;
 window.addEventListener('hashchange', () => {
-  // Remember where the leads list was, so coming back lands in the same place.
+  // Remember where each page was scrolled, so coming back lands in the same place.
   if (CURRENT_VIEW === 'leads') { const vt = $('#vt'); if (vt) L$.vtScroll = vt.scrollTop; L$.winScroll = window.scrollY; }
+  else SCROLL.set(LAST_HASH, window.scrollY);
+  LAST_HASH = location.hash;
   closeOverlay(); render();
-  if (CURRENT_VIEW !== 'leads') window.scrollTo(0, 0);
+  if (CURRENT_VIEW !== 'leads') { const y = SCROLL.get(location.hash) || 0; window.scrollTo(0, y); requestAnimationFrame(() => window.scrollTo(0, y)); setTimeout(() => window.scrollTo(0, y), 250); }
 });
 function onLeadsChanged() {
   if (CURRENT_VIEW) renderNav(NAV_ACTIVE[CURRENT_VIEW] || CURRENT_VIEW);
@@ -1496,6 +1502,7 @@ async function boot() {
   if (ST.searches.some(ACTIVE)) startPolling();
   setInterval(() => { if (!document.hidden && !pollTimer) sync(); }, 60000);
 }
+installSelects();
 installOutreach({
   $, esc, fmt, ic, api, toast, closeOverlay, whenPT, ST, V, MOUNT, TITLES, CRUMBS, NAV_ACTIVE, render, renderNav, sync: () => sync(),
   openLead: (id) => { if (ST.byId.has(id)) leadDrawer(id); else toast('This lead is no longer in your list.', 'alert'); },
