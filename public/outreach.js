@@ -138,9 +138,14 @@ function statsHTML(c) {
     <div><span>Today</span><b class="num">${A.fmt(c.today)} <small>/ ${c.daily_limit}</small></b></div>`;
 }
 function readyHTML(c) {
-  const s = !!senderOf(c), sub = !!c.subject.trim(), msg = c.message.trim().length >= 20, leads = c.counts.total > 0;
-  const item = (ok, t, act, lbl) => `<div class="rdy ${ok ? 'ok' : ''}"><i>${ok ? A.ic('check', 12) : ''}</i><span>${t}</span>${!ok ? `<button class="linkbtn" ${act}>${lbl}</button>` : ''}</div>`;
-  return `<div class="card rdycard"><b>Before you start</b>${item(s, 'Sender profile', 'data-ctab="settings"', 'Choose')}${item(sub && msg, 'Subject and message', 'data-ctab="message"', 'Write')}${item(leads, 'Leads added', 'data-o="addleads"', 'Add leads')}<span class="help">Tip: a test run fills real forms without sending, so you can see what will happen.</span></div>`;
+  const steps = [
+    [!!senderOf(c), 'Sender profile', senderOf(c) ? `Sends as ${senderOf(c).label}` : 'Who the message is from', 'data-ctab="settings"', 'Choose'],
+    [!!c.subject.trim() && c.message.trim().length >= 20, 'Subject and message', c.message.trim().length >= 20 ? 'Written' : 'What businesses will read', 'data-ctab="message"', 'Write'],
+    [c.counts.total > 0, 'Leads', c.counts.total ? `${A.fmt(c.counts.total)} added` : 'Who to contact', 'data-o="addleads"', 'Add leads'],
+  ];
+  const done = steps.filter(x => x[0]).length, next = steps.findIndex(x => !x[0]);
+  return `<div class="card rdy2"><div class="rdy2-h"><div><b>${done === 3 ? 'Ready to go' : 'Set up your campaign'}</b><span>${done === 3 ? 'Try a test run first: it fills real forms without sending.' : `${done} of 3 done`}</span></div><div class="rdy2-bar"><i style="width:${done / 3 * 100}%"></i></div></div>
+    <div class="rdy2-steps">${steps.map(([ok, t, sub, act, lbl], i) => `<button class="rdy2-s ${ok ? 'ok' : ''} ${i === next ? 'next' : ''}" ${act}><i>${ok ? A.ic('check', 13) : i + 1}</i><span><b>${t}</b><small>${A.esc(sub)}</small></span>${ok ? '' : `<em>${lbl} ${A.ic('arrow', 12)}</em>`}</button>`).join('')}</div></div>`;
 }
 function bannerHTML(c) {
   const j = c.job; if (!j) return '';
