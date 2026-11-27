@@ -192,7 +192,7 @@ function itemRow(it, withCampaign = false) {
   const test = it.test_status ? `<span class="dtag ${it.test_status === 'ready' ? 'okt' : it.test_status === 'manual' ? 'mant' : 'badt'}" title="${A.esc(reasonText(it.test_reason) || it.evidence || '')}">${it.test_status === 'ready' ? 'Ready' : it.test_status === 'manual' ? 'Needs you' : 'Failed'}</span>${it.test_reason ? `<small>${A.esc(reasonText(it.test_reason))}</small>` : ''}` : '<span class="faint">—</span>';
   const when = it.sent_at || it.updated_at;
   const form = it.form_url || it.website;
-  return `<div class="oi oi-click" data-oid="${it.id}" data-lead="${it.lead_id}" data-camp="${it.campaign_id}" title="Show lead details and what was sent">
+  return `<div class="oi oi-click" data-oid="${it.id}" data-olead="${it.lead_id}" data-camp="${it.campaign_id}" title="Show lead details and what was sent">
     <div class="oi-b"><b>${A.esc(it.name)}</b><span>${A.esc(domain(it.website))}${withCampaign ? ` · ${A.esc(it.campaign)}` : ''}</span></div>
     <div class="oi-r">${pill(it.status)}${reason ? `<small title="${A.esc(reason)}">${A.esc(reason)}</small>` : ''}</div>
     <div class="oi-t">${test}</div>
@@ -621,7 +621,7 @@ async function onClick(e) {
   const msr = t.closest('[data-msres]');
   if (msr) { MS.result = msr.dataset.msres; MS.loaded = false; loadMessages(); return; }
   const row = t.closest('.oi-click');
-  if (row && !t.closest('a,button,.menu')) { openFor = +row.dataset.camp; A.openLead(+row.dataset.lead); return; }
+  if (row && !t.closest('a,button,.menu')) { openFor = +row.dataset.camp; A.openLead(+row.dataset.olead); return; }
   const oact = t.closest('[data-oact]');
   if (oact) { itemAct(+t.closest('[data-oid]').dataset.oid, oact.dataset.oact); return; }
   const b = t.closest('[data-o]'); if (!b) return;
