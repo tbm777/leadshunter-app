@@ -539,7 +539,8 @@ function ptNow() {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: 'numeric', hourCycle: 'h23', weekday: 'short' }).formatToParts(new Date()).map(x => [x.type, x.value]));
   return { hour: +p.hour, minute: +p.minute, day: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday) };
 }
-const SENT_SQL = "((o.sent_at >= ? AND o.status IN ('sent','submitted','sent_manual')) OR o.status = 'sending')";
+// Forms sent today plus forms in flight, as two index-friendly counts (an OR here would read the whole table on every tick).
+const sentSince = (filter = '') => `((SELECT COUNT(*) FROM outreach o WHERE o.sent_at >= ? AND o.status IN ('sent','submitted','sent_manual')${filter}) + (SELECT COUNT(*) FROM outreach o WHERE o.status = 'sending'${filter}))`;
 /** Tool-wide sending settings: the daily cap across all campaigns and the warm-up for new sender profiles. */
 export async function outreachSettings(env) {
   let v = {}; try { v = JSON.parse((await env.DB.prepare("SELECT v FROM meta WHERE k = 'outreach_settings'").first())?.v || '{}'); } catch { /* defaults */ }
@@ -554,10 +555,11 @@ export async function saveOutreachSettings(env, b) {
 /** Every limit that applies to a campaign right now: its own, its sender profile's warm-up, and the tool-wide cap. */
 async function limitsFor(env, c) {
   const day = ptMidnight(), set = await outreachSettings(env);
+  const inSender = ' AND o.campaign_id IN (SELECT id FROM campaigns WHERE sender_id = ?)';
   const [camp, snd, tool] = await env.DB.batch([
-    env.DB.prepare(`SELECT COUNT(*) AS n FROM outreach o WHERE o.campaign_id = ? AND ${SENT_SQL}`).bind(c.id, day),
-    env.DB.prepare(`SELECT COUNT(*) AS n, (SELECT MIN(o2.sent_at) FROM outreach o2 JOIN campaigns c2 ON c2.id = o2.campaign_id WHERE c2.sender_id = ? AND o2.status IN ('sent','submitted','sent_manual')) AS first FROM outreach o JOIN campaigns cc ON cc.id = o.campaign_id WHERE cc.sender_id = ? AND ${SENT_SQL}`).bind(c.sender_id, c.sender_id, day),
-    env.DB.prepare(`SELECT COUNT(*) AS n FROM outreach o WHERE ${SENT_SQL}`).bind(day),
+    env.DB.prepare(`SELECT ${sentSince(' AND o.campaign_id = ?')} AS n`).bind(day, c.id, c.id),
+    env.DB.prepare(`SELECT ${sentSince(inSender)} AS n, (SELECT MIN(o2.sent_at) FROM outreach o2 WHERE o2.sent_at IS NOT NULL AND o2.campaign_id IN (SELECT id FROM campaigns WHERE sender_id = ?)) AS first`).bind(day, c.sender_id, c.sender_id, c.sender_id),
+    env.DB.prepare(`SELECT ${sentSince()} AS n`).bind(day),
   ]);
   const campSent = camp.results[0].n, sndSent = snd.results[0].n, first = snd.results[0].first, toolSent = tool.results[0].n;
   const days = first ? Math.floor((day - ptMidnight(new Date(first))) / 864e5) : null;
@@ -566,9 +568,13 @@ async function limitsFor(env, c) {
 }
 export async function limitsSummary(env) {
   const day = ptMidnight(), set = await outreachSettings(env);
-  const tool = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM outreach o WHERE ${SENT_SQL}`).bind(day).first()).n;
-  const senders = (await env.DB.prepare(`SELECT s.id, (SELECT MIN(o.sent_at) FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE c.sender_id = s.id AND o.status IN ('sent','submitted','sent_manual')) AS first,
-    (SELECT COUNT(*) FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE c.sender_id = s.id AND ${SENT_SQL}) AS today FROM senders s`).bind(day).all()).results;
+  const tool = (await env.DB.prepare(`SELECT ${sentSince()} AS n`).bind(day).first()).n;
+  const senders = [];
+  for (const sd of (await env.DB.prepare('SELECT id FROM senders WHERE archived = 0').all()).results) {
+    const inS = ' AND o.campaign_id IN (SELECT id FROM campaigns WHERE sender_id = ?)';
+    const r = await env.DB.prepare(`SELECT ${sentSince(inS)} AS today, (SELECT MIN(o2.sent_at) FROM outreach o2 WHERE o2.sent_at IS NOT NULL AND o2.campaign_id IN (SELECT id FROM campaigns WHERE sender_id = ?)) AS first`).bind(day, sd.id, sd.id, sd.id).first();
+    senders.push({ id: sd.id, today: r.today, first: r.first });
+  }
   return { tool: { cap: set.daily_cap, today: tool, ramp: set.ramp }, senders: senders.map(x => { const days = x.first ? Math.floor((day - ptMidnight(new Date(x.first))) / 864e5) : null, cap = set.ramp ? rampCap(days) : null; return { id: x.id, today: x.today, cap: cap === Infinity ? null : cap, warmup_day: cap && cap !== Infinity ? (days == null ? 1 : days + 1) : null }; }) };
 }
 export function inWindow(c) { const { hour, day } = ptNow(); return c.weekdays.includes(String(day)) && hour >= c.window_start && hour < c.window_end; }
