@@ -68,16 +68,9 @@ export async function outreachOverview(env) {
   for (const r of stats.results) (by[r.campaign_id] ||= {})[r.status] = r.n;
   const td = Object.fromEntries(todayQ.results.map(r => [r.campaign_id, r.n]));
   const jb = Object.fromEntries(jobs.results.map(j => [j.campaign_id, jobOut(j)]));
-  const [vrs, vst] = await env.DB.batch([
-    env.DB.prepare('SELECT campaign_id, variant, subject, message FROM campaign_variants ORDER BY campaign_id, variant'),
-    env.DB.prepare(`SELECT o.campaign_id, COALESCE(o.variant, 'A') AS v, COUNT(*) AS sent, SUM(l.status = 4) AS replied FROM outreach o JOIN leads l ON l.id = o.lead_id WHERE o.status IN ('sent','submitted','sent_manual') AND o.campaign_id IN (SELECT DISTINCT campaign_id FROM campaign_variants UNION SELECT DISTINCT campaign_id FROM outreach WHERE variant IS NOT NULL) GROUP BY 1, 2`),
-  ]);
-  const vBy = {}, vsBy = {};
-  for (const r of vrs.results) (vBy[r.campaign_id] ||= []).push({ variant: r.variant, subject: r.subject, message: r.message });
-  for (const r of vst.results) (vsBy[r.campaign_id] ||= {})[r.v] = { sent: r.sent, replied: r.replied || 0 };
   return json({
     senders: snd.results.map(senderOut),
-    campaigns: cmp.results.map(c => ({ ...campaignOut(c, by[c.id] || {}, td[c.id] || 0, jb[c.id] || null, stepsBy[c.id] || [], seqBy[c.id] || {}), variants: vBy[c.id] || [], variant_stats: vsBy[c.id] || {} })),
+    campaigns: cmp.results.map(c => campaignOut(c, by[c.id] || {}, td[c.id] || 0, jb[c.id] || null, stepsBy[c.id] || [], seqBy[c.id] || {})),
     manual: manual.results[0].n,
     limits: await limitsSummary(env),
     alerts: await healthAlerts(env),
@@ -113,8 +106,6 @@ async function campaignById(env, id) {
   const row = c.results[0];
   if (!row) throw new HttpError(404, 'Campaign not found.');
   const out = campaignOut(row, Object.fromEntries(st.results.map(r => [r.status, r.n])), td.results[0].n, jb.results[0] ? jobOut(jb.results[0]) : null, stp.results, sq.results[0] || {});
-  out.variants = (await env.DB.prepare('SELECT variant, subject, message FROM campaign_variants WHERE campaign_id = ? ORDER BY variant').bind(id).all()).results;
-  out.variant_stats = await variantStats(env, id);
   return out;
 }
 export async function getCampaign(env, id) { return json({ campaign: await campaignById(env, id) }); }
@@ -501,7 +492,6 @@ async function startJob(env, c, mode, count) {
     n = fu + (count - fu > 0 ? (await env.DB.prepare("UPDATE outreach SET status = 'sending', job_id = ?, msg_version = ?, attempt_at = NULL, attempts = attempts + 1, updated_at = ? WHERE id IN (SELECT id FROM outreach WHERE campaign_id = ? AND status = 'queued' ORDER BY id LIMIT ?)").bind(job.id, c.msg_version || 1, t, c.id, count - fu).run()).meta.changes : 0);
   }
   if (!n) { await env.DB.prepare('DELETE FROM searches WHERE id = ?').bind(job.id).run(); return { error: null, empty: true }; }
-  if (mode === 'send') await assignVariants(env, c.id, job.id);
   await env.DB.prepare('UPDATE searches SET to_check = ? WHERE id = ?').bind(n, job.id).run();
   const err = await dispatch(env, job.id);
   if (err) {
@@ -617,12 +607,12 @@ export async function runnerItems(env, s, params) {
   const sender = c && c.sender_id ? await env.DB.prepare('SELECT * FROM senders WHERE id = ?').bind(c.sender_id).first() : null;
   if (!c || !sender) throw new HttpError(409, 'The campaign or its sender profile is missing.');
   const where = params.mode === 'test' ? 'o.test_job = ?' : "o.job_id = ? AND o.status = 'sending'";
-  const r = await env.DB.prepare(`SELECT o.id AS oid, o.step, o.variant, v.subject AS v_subject, v.message AS v_message, l.name, l.city, l.region, l.postal, l.country, l.website, COALESCE(o.form_url, l.form_url) AS form_url, l.category, i.name AS industry
-    FROM outreach o JOIN leads l ON l.id = o.lead_id LEFT JOIN industries i ON i.id = l.industry_id LEFT JOIN campaign_variants v ON v.campaign_id = o.campaign_id AND v.variant = o.variant WHERE ${where} ORDER BY o.id`).bind(s.id).all();
+  const r = await env.DB.prepare(`SELECT o.id AS oid, o.step, l.name, l.city, l.region, l.postal, l.country, l.website, COALESCE(o.form_url, l.form_url) AS form_url, l.category, i.name AS industry
+    FROM outreach o JOIN leads l ON l.id = o.lead_id LEFT JOIN industries i ON i.id = l.industry_id WHERE ${where} ORDER BY o.id`).bind(s.id).all();
   return json({
     mode: params.mode, campaign: { id: c.id, subject: c.subject, message: c.message, file_template: c.file_template,
       steps: Object.fromEntries((await stepsOf(env, c.id)).map(x => [x.step, { subject: x.subject || c.subject, message: x.message }])) },
-    sender: senderOut(sender), items: r.results.map(x => ({ oid: x.oid, step: params.mode === 'test' ? 1 : x.step || 1, text: x.variant && (params.mode === 'test' || (x.step || 1) === 1) && x.v_message ? { subject: x.v_subject || c.subject, message: x.v_message } : null, lead: { name: x.name, city: x.city, state: x.region, zip: x.postal, country: x.country, website: x.website, form_url: x.form_url, category: x.category, industry: x.industry } })),
+    sender: senderOut(sender), items: r.results.map(x => ({ oid: x.oid, step: params.mode === 'test' ? 1 : x.step || 1, lead: { name: x.name, city: x.city, state: x.region, zip: x.postal, country: x.country, website: x.website, form_url: x.form_url, category: x.category, industry: x.industry } })),
   });
 }
 const RESULT = { confirmed: 'sent', submitted: 'submitted', manual: 'manual', failed: 'failed', ready: 'ready', skipped: 'skipped' };
@@ -786,55 +776,3 @@ export async function blacklistResult(env, b) {
 }
 
 
-/* ------------------------------------------------------------------ A/B test of the first message */
-/** Newly claimed first messages rotate across A (the campaign message), B and C. */
-const SNAP = 100000;   // message snapshots of A/B versions are numbered from here, apart from the campaign's own versions
-async function assignVariants(env, cid, jobId) {
-  const c = await env.DB.prepare('SELECT subject FROM campaigns WHERE id = ?').bind(cid).first();
-  const rowsV = (await env.DB.prepare("SELECT variant, subject, message FROM campaign_variants WHERE campaign_id = ? AND message != '' ORDER BY variant").bind(cid).all()).results;
-  if (!rowsV.length) return;
-  // Snapshot each version's exact text, so a lead's history always shows what it received, even after the test ends.
-  const snap = {};
-  for (const v of rowsV) {
-    const subject = v.subject || c.subject;
-    let row = await env.DB.prepare('SELECT version FROM campaign_messages WHERE campaign_id = ? AND version >= ? AND subject = ? AND message = ?').bind(cid, SNAP, subject, v.message).first();
-    if (!row) row = await env.DB.prepare('INSERT INTO campaign_messages (campaign_id, version, subject, message, created_at) VALUES (?, (SELECT MAX(?, COALESCE(MAX(version), 0) + 1) FROM campaign_messages WHERE campaign_id = ? AND version >= ?), ?, ?, ?) RETURNING version').bind(cid, SNAP, cid, SNAP, subject, v.message, now()).first();
-    snap[v.variant] = row.version;
-  }
-  const vs = rowsV.map(r => r.variant);
-  const all = [null, ...vs];
-  const rows = (await env.DB.prepare("SELECT id FROM outreach WHERE job_id = ? AND status = 'sending' AND step = 1 ORDER BY id").bind(jobId).all()).results;
-  // Continue the rotation from where the last batch stopped, so every version gets an equal share over time.
-  const done = (await env.DB.prepare('SELECT COUNT(*) AS n FROM outreach WHERE campaign_id = ? AND step >= 1 AND sent_at IS NOT NULL').bind(cid).first()).n;
-  const ops = rows.map((r, i) => { const v = all[(done + i) % all.length]; return v ? env.DB.prepare('UPDATE outreach SET variant = ?, msg_version = ? WHERE id = ?').bind(v, snap[v], r.id) : env.DB.prepare('UPDATE outreach SET variant = NULL WHERE id = ?').bind(r.id); });
-  for (const part of chunk(ops, 100)) await env.DB.batch(part);
-}
-export async function variantStats(env, cid) {
-  const rows = (await env.DB.prepare(`SELECT COALESCE(o.variant, 'A') AS v, COUNT(*) AS sent, SUM(l.status = 4) AS replied FROM outreach o JOIN leads l ON l.id = o.lead_id
-    WHERE o.campaign_id = ? AND o.status IN ('sent','submitted','sent_manual') GROUP BY 1`).bind(cid).all()).results;
-  return Object.fromEntries(rows.map(r => [r.v, { sent: r.sent, replied: r.replied || 0 }]));
-}
-/** Replace a campaign's B and C versions; "keep" promotes one version to be the campaign message and ends the test. */
-export async function saveVariants(env, id, b) {
-  const c = await env.DB.prepare('SELECT * FROM campaigns WHERE id = ?').bind(id).first();
-  if (!c) throw new HttpError(404, 'Campaign not found.');
-  if (b.keep) {
-    const k = String(b.keep);
-    if (k !== 'A') {
-      const v = await env.DB.prepare('SELECT * FROM campaign_variants WHERE campaign_id = ? AND variant = ?').bind(id, k).first();
-      if (!v) throw new HttpError(404, 'That version no longer exists.');
-      await env.DB.prepare('UPDATE campaigns SET subject = ?, message = ?, msg_version = COALESCE(msg_version, 1) + 1, updated_at = ? WHERE id = ?').bind(v.subject || c.subject, v.message, now(), id).run();
-    }
-    // End the test: a new test starts its counts from zero (history keeps the exact text through message snapshots).
-    await env.DB.batch([
-      env.DB.prepare('DELETE FROM campaign_variants WHERE campaign_id = ?').bind(id),
-      env.DB.prepare('UPDATE outreach SET variant = NULL WHERE campaign_id = ? AND variant IS NOT NULL').bind(id),
-    ]);
-    return getCampaign(env, id);
-  }
-  const list = (Array.isArray(b.variants) ? b.variants : []).slice(0, 2);
-  const ops = [env.DB.prepare('DELETE FROM campaign_variants WHERE campaign_id = ?').bind(id)];
-  list.forEach((v, i) => ops.push(env.DB.prepare('INSERT INTO campaign_variants (campaign_id, variant, subject, message) VALUES (?, ?, ?, ?)').bind(id, 'BC'[i], String(v.subject || '').slice(0, 200), String(v.message || '').slice(0, 5000))));
-  await env.DB.batch(ops);
-  return getCampaign(env, id);
-}

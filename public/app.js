@@ -499,7 +499,7 @@ function renderSel() {
   const inMyList = L$.F.src.size === 1 && String([...L$.F.src][0])[0] === 'l';
   $('#lf-selbar').innerHTML = n ? `<div class="selbar"><b class="num">${fmt(n)} selected</b>${!allIn && m > n ? `<button class="linkbtn" data-act="selall">Select all ${fmt(m)}</button>` : ''}<button class="linkbtn muted" data-act="clearsel">Clear</button>
     <div class="selacts"><button class="btn sm" data-act="addcamp">${ic('campaigns', 14)}Add to campaign</button><button class="btn sm" data-act="addlist">${ic('leads', 14)}Add to list</button>${inMyList ? `<button class="btn sm ghost" data-act="rmlist">${ic('x', 14)}Remove from list</button>` : ''}
-      <div class="kebab selmore"><button class="iconbtn sm" data-act="selmore" aria-label="More actions" aria-haspopup="menu" title="More">⋯</button>${L$.selMore ? `<div class="menu" role="menu"><button role="menuitem" data-act="export">${ic('download', 14)}Export</button><button role="menuitem" data-act="checkmodal">${ic('globe', 14)}Check websites</button><button role="menuitem" class="danger" data-act="bdnc">${ic('shield', 14)}Do not contact</button></div>` : ''}</div></div></div>` : '';
+      <div class="kebab selmore"><button class="iconbtn sm" data-act="selmore" aria-label="More actions" aria-haspopup="menu" title="More">⋯</button>${L$.selMore ? `<div class="menu" role="menu"><button role="menuitem" data-act="export">${ic('download', 14)}Export</button><button role="menuitem" data-act="checkmodal">${ic('globe', 14)}Check websites</button><button role="menuitem" class="danger" data-act="bdnc">${ic('shield', 14)}Do not contact</button><button role="menuitem" class="danger" data-act="bdelask">${ic('trash', 14)}Delete leads</button></div>` : ''}</div></div></div>` : '';
 }
 function renderRows() {
   const vt = $('#vt'), body = $('#vt-body'); if (!vt || !body) return;
@@ -1403,6 +1403,18 @@ document.addEventListener('click', async (e) => {
       break;
     }
     case 'checkone': checkModal([+t.closest('[data-id]').dataset.id]); break;
+    case 'bdelask': {
+      const n = L$.sel.size; L$.selMore = false;
+      $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Delete leads">
+        <div class="card-h"><div><h2>Delete ${fmt(n)} lead${n === 1 ? '' : 's'}?</h2><p>They're removed from your leads, lists and any campaign items not yet sent. What was already sent stays in the campaign history. This can't be undone, though a new search that finds the same business adds it back.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
+        <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn danger" data-act="bdel">${ic('trash', 14)}Delete ${fmt(n)} lead${n === 1 ? '' : 's'}</button></div></div></div>`;
+      break;
+    }
+    case 'bdel': {
+      const ids = [...L$.sel];
+      try { await api('POST', '/api/leads/delete', { ids }); closeOverlay(); L$.sel.clear(); await sync(); toast(`${fmt(ids.length)} lead${ids.length === 1 ? '' : 's'} deleted`, 'trash'); } catch (err) { toast(err.message, 'alert'); }
+      break;
+    }
     case 'bdnc': {
       const ids = [...L$.sel];
       try { await api('POST', '/api/leads/bulk', { ids, status: 3 }); toast(`${fmt(ids.length)} leads marked do not contact`, 'shield'); L$.sel.clear(); await sync(); } catch (err) { toast(err.message, 'alert'); }

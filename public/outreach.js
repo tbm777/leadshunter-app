@@ -322,8 +322,8 @@ function renderPreview(c) {
     el.innerHTML = `<div class="pvform"><div class="mock-bar">${A.esc(domain(lead.website) || 'their-website.com')}/contact</div><div class="mock-body">
       <div class="mock-2"><div class="mock-f"><span>First name</span><div class="mock-i">${A.esc(snd?.first_name || '—')}</div></div><div class="mock-f"><span>Last name</span><div class="mock-i">${A.esc(snd?.last_name || '—')}</div></div></div>
       <div class="mock-2"><div class="mock-f"><span>Email</span><div class="mock-i">${A.esc(snd?.email || '—')}</div></div><div class="mock-f"><span>Phone</span><div class="mock-i">${A.esc(snd?.phone || '—')}</div></div></div>
-      <div class="mock-f"><span>Subject</span><div class="mock-i ${s ? '' : 'empty'}">${A.esc(s || 'No subject yet')}</div></div>
-      <div class="mock-f"><span>Message</span><div class="mock-i big pvmsg ${m ? '' : 'empty'}">${A.esc(m || 'No message yet')}</div></div>
+      <div class="mock-f"><span>Subject</span><div class="mock-i ${s ? '' : 'empty'}">${A.esc(s || 'Subject')}</div></div>
+      <div class="mock-f"><span>Message</span><div class="mock-i big pvmsg ${m ? '' : 'empty'}">${A.esc(m || 'Write the message on the left to see it here')}</div></div>
       <div class="mock-f"><span>Anything else the form asks</span><div class="mock-i" style="background:var(--surface-2)">A sensible answer: “General inquiry”, today+2 business days, consent ticked…</div></div>
       <span class="mock-btn">Send</span></div></div>`;
   }
@@ -359,61 +359,19 @@ function seqBar(c) {
     ${steps.length < 2 ? `<button class="seqadd" data-o="addstep">${A.ic('plus', 14)}Add follow-up</button>` : ''}
     <span class="seqnote">${steps.length ? 'Stops for a lead when you mark them Replied or Do not contact.' : 'Add a follow-up or a call. Sequences stop when a lead replies.'}</span></div>`;
 }
-/** A/B test of the first message: up to two extra versions, sends rotate across them, keep the one with more replies. */
-function abHTML(c) {
-  const vs = c.variants || [], st = c.variant_stats || {};
-  if (!vs.length) return `<div class="card abcard abempty"><div><b>A/B test</b><span>Try a second version of this message. New sends alternate between the versions, and you keep the one that gets more replies.</span></div><button class="btn sm" data-o="abadd">${A.ic('plus', 13)}Add version B</button></div>`;
-  const rows = [['A', { subject: c.subject, message: c.message }], ...vs.map(v => [v.variant, v])];
-  const rate = k => { const x = st[k]; return x && x.sent ? x.replied / x.sent : null; };
-  const enough = rows.every(([k]) => (st[k]?.sent || 0) >= 50);
-  const best = enough ? rows.reduce((a, [k]) => (rate(k) ?? -1) > (rate(a) ?? -1) ? k : a, 'A') : null;
-  return `<div class="card abcard"><div class="card-h"><div><h3>A/B test</h3><p>New first messages rotate across ${rows.length} versions. ${enough ? 'Each version has enough sends to compare.' : 'Give each version about 50 sends before picking a winner.'}</p></div>
-      ${vs.length < 2 ? `<button class="btn sm ghost" data-o="abadd">${A.ic('plus', 13)}Add version ${'BC'[vs.length]}</button>` : ''}</div>
-    <div class="card-b"><div class="abstats">${rows.map(([k]) => { const x = st[k] || { sent: 0, replied: 0 }, r = rate(k); return `<div class="${best === k ? 'win' : ''}"><b>Version ${k}${best === k ? ' · best' : ''}</b><span class="num">${A.fmt(x.sent)} sent · ${A.fmt(x.replied)} replied · ${r == null ? '—' : (r * 100).toFixed(1) + '%'}</span><button class="btn sm ${best === k ? 'primary' : 'ghost'}" data-abkeep="${k}">Keep this one</button></div>`; }).join('')}</div>
-    ${vs.map(v => `<div class="abv"><div class="row" style="justify-content:space-between"><b>Version ${v.variant}</b><button class="linkbtn muted" data-abrm="${v.variant}">Remove</button></div>
-      <input class="input" data-abv="${v.variant}" data-abf="subject" value="${A.esc(v.subject)}" maxlength="200" placeholder="Subject (empty = same as version A)">
-      <textarea class="input mbody" data-abv="${v.variant}" data-abf="message" maxlength="5000" placeholder="Hi [Company Name] team,…">${A.esc(v.message)}</textarea>
-      <div id="abw-${v.variant}">${checkHTML(v.subject || c.subject, v.message)}</div></div>`).join('')}
-    <span class="help" id="ab-save"></span></div></div>`;
-}
-let abTimer = null;
-function abCollect() { return ['B', 'C'].map(k => ({ k, s: document.querySelector(`[data-abv="${k}"][data-abf="subject"]`), m: document.querySelector(`[data-abv="${k}"][data-abf="message"]`) })).filter(x => x.m).map(x => ({ subject: x.s.value, message: x.m.value })); }
-async function abSave(c, list) {
-  try { const r = await A.api('PUT', `/api/campaigns/${c.id}/variants`, { variants: list }); upsertCampaign(r.campaign); const sv = A.$('#ab-save'); if (sv) sv.textContent = 'Saved'; return r.campaign; }
-  catch (e) { A.toast(e.message, 'alert'); return null; }
-}
-document.addEventListener('input', (e) => {
-  const t = e.target; if (!t.dataset || !t.dataset.abv) return;
-  const c = curCampaign(); if (!c) return;
-  const w = A.$('#abw-' + t.dataset.abv); if (w) w.innerHTML = checkHTML(document.querySelector(`[data-abv="${t.dataset.abv}"][data-abf="subject"]`).value || c.subject, document.querySelector(`[data-abv="${t.dataset.abv}"][data-abf="message"]`).value);
-  const sv = A.$('#ab-save'); if (sv) sv.textContent = 'Saving…';
-  clearTimeout(abTimer); abTimer = setTimeout(() => abSave(c, abCollect()), 700);
-});
-document.addEventListener('click', async (e) => {
-  const c = curCampaign(); if (!c) return;
-  const add = e.target.closest('[data-o="abadd"]'), rm = e.target.closest('[data-abrm]'), keep = e.target.closest('[data-abkeep]');
-  if (add) { clearTimeout(abTimer); const list = abCollect(); list.push({ subject: '', message: '' }); const nc = await abSave(c, list); if (nc) { A.$('#ab').innerHTML = abHTML(nc); document.querySelector(`[data-abv="${'BC'[list.length - 1]}"][data-abf="message"]`)?.focus(); } }
-  else if (rm) { clearTimeout(abTimer); const k = rm.dataset.abrm; const list = abCollect().filter((_, i) => 'BC'[i] !== k); const nc = await abSave(c, list); if (nc) A.$('#ab').innerHTML = abHTML(nc); }
-  else if (keep) {
-    clearTimeout(abTimer); const k = keep.dataset.abkeep;
-    if (!confirm(k === 'A' ? 'Keep version A and end the test? Versions B and C are removed.' : `Make version ${k} the campaign message and end the test?`)) return;
-    try { const r = await A.api('PUT', `/api/campaigns/${c.id}/variants`, { keep: k }); upsertCampaign(r.campaign); A.$('#c-tab').innerHTML = tabHTML(r.campaign); renderPreview(r.campaign); A.toast(`Version ${k} is now the message`); } catch (err) { A.toast(err.message, 'alert'); }
-  }
-});
 function sequenceTab(c) {
   const P = cp(c.id); P.step ||= 1;
   if (P.step > 1 && !(c.steps || []).some(x => x.step === P.step)) P.step = 1;
-  return `${seqBar(c)}${P.step === 1 ? messageTab(c) + `<div id="ab">${abHTML(c)}</div>` : stepEditor(c, (c.steps || []).find(x => x.step === P.step))}`;
+  return `${seqBar(c)}${P.step === 1 ? messageTab(c) : stepEditor(c, (c.steps || []).find(x => x.step === P.step))}`;
 }
 function stepEditor(c, st) {
   const isCall = st.channel === 'call';
   return `<div class="msgrid">
-    <div class="card"><div class="card-h"><div><h3>Step ${st.step}: ${isCall ? 'Call' : 'Follow-up message'}</h3><p>${isCall ? 'Shows up in your Manual queue with their phone number and this script.' : c.mode === 'manual' ? 'Goes to your Manual queue to send with Fill form.' : 'The robot sends it through the same contact form.'}</p></div><span class="help" id="st-save"></span></div>
+    <div class="card"><div class="card-h"><div><h3>Step ${st.step}: ${isCall ? 'Call' : 'Follow-up message'}</h3><p>${isCall ? 'Shows up in your Manual queue with their phone number and this script.' : c.mode === 'manual' ? 'Goes to your Manual queue to send with Fill form.' : 'The robot sends it through the same contact form.'}</p></div><div class="st-head-r"><span class="help" id="st-save"></span><button class="btn ghost sm" data-o="rmstep" style="color:var(--bad)">${A.ic('trash', 13)}Remove step</button></div></div>
       <div class="card-b" style="display:flex;flex-direction:column;gap:14px">
-        <div class="row" style="gap:14px;align-items:flex-end">
+        <div class="st-row">
           <div class="field"><span class="flabel">Type</span><div class="seg-c"><button class="${!isCall ? 'on' : ''}" data-stch="form">${A.ic('messages', 13)}Contact form</button><button class="${isCall ? 'on' : ''}" data-stch="call">${A.ic('phone', 13)}Call</button></div></div>
-          <div class="field"><label for="st-delay">Send after</label><div class="sset-suffix"><input class="input" id="st-delay" type="number" min="1" max="30" value="${st.delay_days}"><span>business days</span></div></div>
-          <button class="btn ghost sm" data-o="rmstep" style="margin-left:auto;color:var(--bad)">${A.ic('trash', 13)}Remove step</button>
+          <div class="field"><label class="flabel" for="st-delay">Send after</label><div class="sset-suffix"><input class="input" id="st-delay" type="number" min="1" max="30" value="${st.delay_days}"><span>business days</span></div></div>
         </div>
         ${isCall ? '' : `<div class="field"><label for="st-subj">Subject <span class="opt-tag">empty = same as step 1</span></label><input class="input big" id="st-subj" value="${A.esc(st.subject)}" maxlength="200" placeholder="${A.esc(c.subject)}"></div>`}
         <div class="field"><div class="row" style="justify-content:space-between"><label for="st-body">${isCall ? 'Call script' : 'Message'}</label><button class="linkbtn muted" data-o="frombook">${A.ic('playbook', 13)} Use from Playbook</button></div>

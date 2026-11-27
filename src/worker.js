@@ -106,8 +106,8 @@ async function route(req, env, url, ctx) {
   if (p === '/api/changes' && m === 'GET') return getChanges(env, url);
   if ((mm = p.match(/^\/api\/leads\/(\d+)$/)) && m === 'PATCH') return patchLead(env, +mm[1], await body(req));
   if (p === '/api/leads/bulk' && m === 'POST') return bulkLeads(env, await body(req));
+  if (p === '/api/leads/delete' && m === 'POST') return deleteLeads(env, await body(req));
   if ((mm = p.match(/^\/api\/leads\/(\d+)\/outreach$/)) && m === 'GET') return O.leadOutreach(env, +mm[1]);
-  if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/variants$/)) && m === 'PUT') return O.saveVariants(env, +mm[1], await body(req));
   if (p === '/api/outreach/settings' && m === 'PUT') return O.saveOutreachSettings(env, await body(req));
   if ((mm = p.match(/^\/api\/outreach\/(\d+)\/shot$/)) && m === 'GET') return O.getShot(env, +mm[1]);
   if ((mm = p.match(/^\/api\/outreach\/(\d+)\/review$/)) && m === 'POST') return O.reviewItem(env, +mm[1], await body(req));
@@ -404,6 +404,23 @@ async function bulkLeads(env, b) {
   for (const part of chunk(stmts, 400)) await env.DB.batch(part);
   await O.skipUnsent(env, ids, +b.status);
   return json({ ok: true, updated: ids.length });
+}
+
+/** Delete leads: they disappear from every browser on the next sync. Unsent campaign items and scheduled follow-ups go too;
+ *  what was already sent stays in the campaign history. A later search that finds the same business adds it back. */
+async function deleteLeads(env, b) {
+  const ids = [...new Set((b.ids || []).map(Number).filter(Number.isInteger))].slice(0, 20000);
+  if (!ids.length) throw new HttpError(400, 'Select the leads to delete.');
+  let seq = await reserveSeq(env, ids.length);
+  const t = now(), stmts = [];
+  for (const id of ids) stmts.push(env.DB.prepare('UPDATE leads SET deleted = 1, seq = ?, updated_at = ? WHERE id = ?').bind(seq++, t, id));
+  for (const part of chunk(ids, 90)) {
+    stmts.push(env.DB.prepare(`DELETE FROM outreach WHERE lead_id IN (${inList(part.length)}) AND status IN ('queued','manual','failed','skipped')`).bind(...part));
+    stmts.push(env.DB.prepare(`UPDATE outreach SET next_at = NULL WHERE lead_id IN (${inList(part.length)}) AND next_at IS NOT NULL`).bind(...part));
+    stmts.push(env.DB.prepare(`DELETE FROM list_leads WHERE lead_id IN (${inList(part.length)})`).bind(...part));
+  }
+  for (const part of chunk(stmts, 400)) await env.DB.batch(part);
+  return json({ ok: true, deleted: ids.length });
 }
 
 /* ------------------------------------------------------------------ runner API */
