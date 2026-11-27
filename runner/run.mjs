@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { splitCell } from '../public/shared/grid.js';
-import { checkSite, FORM } from './check.mjs';
+import { checkSite, FORM, SITE } from './check.mjs';
 import { browserFormCheck, closeBrowser } from './browser.mjs';
 import { runOutreach } from './outreach.mjs';
 import { Metrics } from './lib/metrics.mjs';
@@ -20,7 +20,7 @@ const GMAPS = process.env.GMAPS_BIN || './gmaps';
 const MAP_CONCURRENCY = +process.env.MAP_CONCURRENCY || 4;
 const CHECK_CONCURRENCY = +process.env.CHECK_CONCURRENCY || 24;
 const DEPTH = 5;              // fast-mode batches of ~20 results per map search
-const SATURATED = 90;         // a cell returning this many results is split into four
+const SATURATED = 18;         // a map search returns at most ~20 businesses: one this full is split into four smaller ones
 const MAX_SPLIT_LEVEL = 2;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -150,7 +150,7 @@ async function flushChecksNow(force = false) {
   }
 }
 // Real-browser checks are slower, so only a few run at once.
-let browserSlots = +process.env.BROWSER_CHECKS || 4;
+let browserSlots = +process.env.BROWSER_CHECKS || 6;
 const browserWaiters = [];
 async function withBrowserSlot(fn) {
   while (browserSlots <= 0) await new Promise(r => browserWaiters.push(r));
@@ -162,14 +162,16 @@ async function checkOne([id, website]) {
   try {
     const r = await checkSite(website, checkOpts);
     SM.time('site_check', Date.now() - t0);
-    // Forms built by JavaScript need a browser. Forms that look open get a second look too: many sites load their CAPTCHA with JavaScript.
-    // The browser sees the page as a person does, so when it finds the form its verdict wins (CAPTCHA or not, in both directions).
-    if (checkOpts.form && [FORM.NEEDS_BROWSER, FORM.OPEN, FORM.CAPTCHA].includes(r.form)) {
+    // The browser applies the robot's own rules (visible, fillable form; pop-up forms; contact pages), so whenever it could load
+    // the site its verdict wins in every direction: "has a form" then means the robot can actually send. Sites the quick
+    // check found no form on get a look too, since many forms are built by JavaScript.
+    const loads = r.site === SITE.LOADS || r.site === SITE.SLOW;
+    if (checkOpts.form && ([FORM.NEEDS_BROWSER, FORM.OPEN, FORM.CAPTCHA].includes(r.form) || (r.form === FORM.NONE && loads))) {
       try {
         const tb = Date.now();
         const b = await withBrowserSlot(() => browserFormCheck(r.form_url || website));
         SM.time('browser_check', Date.now() - tb);
-        if (b.form === FORM.OPEN || b.form === FORM.CAPTCHA || r.form === FORM.NEEDS_BROWSER) Object.assign(r, b);
+        if (b.form !== FORM.NEEDS_BROWSER) Object.assign(r, b);
       } catch (e) { log('browser check failed', e.message); }
     }
     checkResults.push({ id, ...r });

@@ -6,13 +6,17 @@ export function cityRadiusKm(pop) {
   return Math.max(3, Math.min(25, 0.012 * Math.sqrt(pop || 0)));
 }
 
-/** Grid spacing for a circle of radius rKm. Denser for small areas, coarser for big ones. */
+/**
+ * Grid spacing for a circle of radius rKm. A map search returns at most about 20 businesses, so each search covers a
+ * fairly wide area (typically 15-20 results back); the runner splits any search that comes back full into four smaller
+ * ones, so dense downtowns are still covered completely without wasting searches on quiet suburbs.
+ */
 export function spacingKm(rKm) {
-  return Math.max(2.5, Math.min(8, rKm / 5));
+  return Math.max(5, Math.min(14, rKm / 2.5));
 }
 
 export function zoomFor(spacing) {
-  return spacing <= 3 ? 15 : spacing <= 6 ? 14 : 13;
+  return spacing <= 4 ? 14 : spacing <= 10 ? 13 : 12;
 }
 
 /** Points covering a circle on a square lattice. Returns [lat, lon, spacingKm]. */

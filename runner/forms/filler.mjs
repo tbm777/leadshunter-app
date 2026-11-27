@@ -271,6 +271,62 @@ export function noSolicitation() {
   return m ? m[0].slice(0, 80) : null;
 }
 
+/**
+ * Many contractor sites keep their form in a pop-up behind a "Get a free quote" button. Click a button like that (only
+ * ones that stay on this page, never links to other pages) and report whether a visible form appeared.
+ */
+export async function revealForm(page) {
+  const ids = await page.evaluate(() => {
+    const RE = /\b((get|request|free|instant)\b.{0,20}\b(quote|estimate|consultation|inspection)|contact us|message us|send (us )?a message|book (now|online|an? )|schedule (a |an |your )?(free )?(service|estimate|appointment|consultation|inspection))/i;
+    const vis = (el) => { const r = el.getBoundingClientRect(), st = getComputedStyle(el); return r.width > 20 && r.height > 12 && st.visibility !== 'hidden' && st.display !== 'none'; };
+    const out = [];
+    for (const el of document.querySelectorAll('button, a, [role=button], [data-toggle], [data-bs-toggle]')) {
+      const txt = (el.innerText || el.getAttribute('aria-label') || '').trim().slice(0, 80);
+      if (!RE.test(txt) || !vis(el)) continue;
+      const href = el.tagName === 'A' ? (el.getAttribute('href') || '') : '';
+      // Stay on the page: buttons, in-page anchors, script links and pop-up triggers only.
+      const inPage = el.tagName !== 'A' || !href || href.startsWith('#') || /^javascript:/i.test(href) || el.hasAttribute('data-toggle') || el.hasAttribute('data-bs-toggle') || el.getAttribute('aria-haspopup') || /popup|modal|lightbox|elementor-action/i.test(href + ' ' + el.className);
+      if (!inPage) continue;
+      const id = 'lhr' + out.length; el.setAttribute('data-lh-reveal', id); out.push(id);
+      if (out.length >= 3) break;
+    }
+    return out;
+  }).catch(() => []);
+  const visibleForm = () => page.evaluate(() => [...document.querySelectorAll('textarea')].some(t => { const r = t.getBoundingClientRect(), st = getComputedStyle(t); return r.width > 40 && r.height > 20 && st.visibility !== 'hidden' && st.display !== 'none'; })).catch(() => false);
+  if (await visibleForm()) return false;
+  for (const id of ids) {
+    await page.locator(`[data-lh-reveal="${id}"]`).first().click({ timeout: 3000, noWaitAfter: true }).catch(() => {});
+    await page.waitForTimeout(900);
+    if (await visibleForm()) return true;
+    // Embedded builders open in a frame: count a new form frame as revealed too.
+    if (page.frames().length > 1 && await page.evaluate(() => !!document.querySelector('iframe[src*="form" i]:not([data-lh-seen])')).catch(() => false)) return true;
+  }
+  return false;
+}
+
+/**
+ * The robot's own test for a usable form on the current page (visible, fillable, with a message box), opening a pop-up
+ * form if needed. The website check uses it too, so "has a form" means the robot can actually send. Returns { frame, scan }.
+ */
+export async function findFormOnPage(page) {
+  await settle(page);
+  const look = async () => {
+    let best = null, at = null;
+    for (const fr of usableFrames(page)) {
+      try {
+        await evalIn(fr, (sel) => { window.__LH_CAPTCHA = sel; }, CAPTCHA_SEL);
+        await evalIn(fr, `window.__lhProbe = ${captchaInPage.toString()}`);
+        const sc = await evalIn(fr, scanInPage, 0, 6000);
+        if (sc.found && (!best || sc.score > best.score)) { best = sc; at = fr; }
+      } catch { /* cross-origin or detached frame */ }
+    }
+    return { frame: at, scan: best };
+  };
+  let r = await look();
+  if (!r.scan && await revealForm(page)) r = await look();
+  return r;
+}
+
 /** Which form tool the page uses (for accuracy stats by tool). Runs in the page. */
 export function detectFormTool() {
   const h = document.documentElement.innerHTML.slice(0, 400000);
@@ -323,6 +379,8 @@ export async function submitForm(page, url, profile, opts = {}) {
     }
   };
   await rescan();
+  // No form in view: it may sit in a pop-up behind a "Get a quote" button.
+  if (!scan && await revealForm(page)) { note('opened a pop-up form'); await rescan(); }
   mk('scanned');
   if (opts.marks) opts.marks.tool = await page.evaluate(detectFormTool).catch(() => null);
   if (!scan) return login ? { status: 'manual', reason: 'login-required', log } : { status: 'failed', reason: 'no-form', log };

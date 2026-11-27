@@ -588,6 +588,29 @@ FIXTURES.push(
       <label for="m">How can we help? *</label><textarea id="m" name="message" required></textarea><button type="submit">Send</button></form>`),
   },
   {
+    id: 'popup-quote', industry: 'Roofing', note: 'Form hidden in a pop-up behind a "Get a Free Quote" button: the robot must open it and send', mode: 'json',
+    req: ['name', 'email', 'message'],
+    html: () => layout('Lone Star Roofing', `<p>Storm damage? We can help.</p><button type="button" id="open" class="btn-quote">Get a Free Quote</button>
+      <div id="modal" style="display:none;position:fixed;inset:10% 20%;background:#fff;border:1px solid #ccc;padding:20px"><form id="f">
+        <label for="a">Name *</label><input id="a" name="name" required><label for="b">Email *</label><input id="b" type="email" name="email" required>
+        <label for="m">Project details *</label><textarea id="m" name="message" required></textarea><button type="submit">Request quote</button></form></div>
+      <script>document.getElementById('open').onclick=function(){document.getElementById('modal').style.display='block';};</script>${ajax('popup-quote')}`),
+  },
+  {
+    id: 'hidden-dead-form', industry: 'Roofing', note: 'A form exists in the page code but is permanently hidden (unused theme leftover): no usable form', mode: 'html', expect: 'noform',
+    req: ['name', 'email', 'message'],
+    html: () => layout('Summit Roof Pros', `<p>Call us at (512) 555-0101 for a free inspection.</p><div style="display:none"><form method="post" action="/submit/hidden-dead-form"><!--ERR-->
+      <input name="name"><input type="email" name="email"><textarea name="message"></textarea><button type="submit">Send</button></form></div>`),
+  },
+  {
+    id: 'contact-subpage', industry: 'Roofing', note: 'No form on the home page; the Contact Us page has one (the website check must find it)', mode: 'html', expect: 'noform', embed: true,
+    req: ['name', 'email', 'message'],
+    html: () => layout('Ridgeline Roofing', `<p>Family owned. <a href="/embed/contact-subpage">Contact Us</a></p>`),
+    inner: () => layout('Contact Ridgeline Roofing', `<form method="post" action="/submit/contact-subpage"><!--ERR-->
+      <label for="a">Name *</label><input id="a" name="name" required><label for="b">Email *</label><input id="b" type="email" name="email" required>
+      <label for="m">Message *</label><textarea id="m" name="message" required></textarea><button type="submit">Send</button></form>`),
+  },
+  {
     id: 'ninja-forms', industry: 'Pest control', note: 'Ninja Forms: generic field names, submit is type=button, success message replaces fields', mode: 'json',
     req: ['nf-field-1', 'nf-field-2', 'nf-field-3'],
     html: () => layout('BugOut Pest Control', `<div class="nf-form-cont"><div class="nf-form-layout"><form id="nf" novalidate><div class="nf-form-content">

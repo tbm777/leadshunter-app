@@ -62,7 +62,7 @@ await Promise.all(Array.from({ length: 16 }, async () => {
     const url = sites[ci++], s0 = Date.now();
     try {
       const r = await checkSite(url, { form: true, email: false });
-      if ([FORM.NEEDS_BROWSER, FORM.OPEN, FORM.CAPTCHA].includes(r.form)) { try { const b = await browserFormCheck(r.form_url || url); if (b.form === FORM.OPEN || b.form === FORM.CAPTCHA || r.form === FORM.NEEDS_BROWSER) Object.assign(r, b); } catch { /* keep */ } }
+      if ([FORM.NEEDS_BROWSER, FORM.OPEN, FORM.CAPTCHA].includes(r.form) || (r.form === FORM.NONE && (r.site === SITE.LOADS || r.site === SITE.SLOW))) { try { const b = await browserFormCheck(r.form_url || url); if (b.form !== FORM.NEEDS_BROWSER) Object.assign(r, b); } catch { /* keep */ } }
       if (r.site === SITE.DOWN || r.site === SITE.PARKED || r.site === SITE.BLOCKED) tally.down++;
       else if (r.form === FORM.OPEN) tally.open++; else if (r.form === FORM.CAPTCHA) tally.captcha++; else if (r.form === FORM.NONE) tally.none++; else tally.other++;
     } catch { tally.other++; }

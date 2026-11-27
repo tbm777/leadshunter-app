@@ -6,11 +6,11 @@ import { engineProfile, localizeProfile } from '../public/shared/fallbacks.js';
 import { isSocialHost } from '../public/shared/normalize.js';
 import { Metrics } from './lib/metrics.mjs';
 import { shouldBlock } from './lib/block.mjs';
+import { contactPages } from './lib/contact.mjs';
 
 const CONCURRENCY = +process.env.OUTREACH_CONCURRENCY || 6;   // GitHub's runners have 4 cores; forms spend most of their time waiting on websites
 const ITEM_TIMEOUT = 120000;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
-const CONTACT_RE = /contact|get[\s-]?in[\s-]?touch|quote|estimate|appointment|book|request|reach[\s-]?us|consult|schedule/i;
 
 function withTimeout(p, ms) { let t; return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error('timeout')), ms); })]).finally(() => clearTimeout(t)); }
 const norm = u => { try { const x = new URL(u); x.hash = ''; return x.href.replace(/\/$/, ''); } catch { return null; } };
@@ -26,20 +26,6 @@ async function snapshot(page) {
     await page.evaluate(() => { const el = document.querySelector('[data-lh]'); if (el) { el.scrollIntoView({ block: 'start' }); window.scrollBy(0, -100); } });
     return await page.screenshot({ type: 'jpeg', quality: 50, timeout: 8000 });
   } catch { return null; }
-}
-
-/** Links on the page that look like a contact or quote page, same site only. */
-async function contactPages(page, base) {
-  const host = new URL(base).hostname.replace(/^www\./, '');
-  const links = await page.$$eval('a[href]', as => as.map(a => ({ href: a.href, text: (a.innerText || a.getAttribute('aria-label') || '').trim().slice(0, 60) }))).catch(() => []);
-  const out = [];
-  for (const l of links) {
-    let u; try { u = new URL(l.href); } catch { continue; }
-    if (!/^https?:$/.test(u.protocol) || u.hostname.replace(/^www\./, '') !== host) continue;
-    if (!CONTACT_RE.test(l.text) && !CONTACT_RE.test(u.pathname)) continue;
-    const n = norm(u.href); if (n && !out.includes(n)) out.push(n);
-  }
-  return out.sort((a, b) => (/contact/i.test(b) ? 1 : 0) - (/contact/i.test(a) ? 1 : 0)).slice(0, 3);
 }
 
 async function attempt(ctx, item, profile, dryRun, stat = {}) {

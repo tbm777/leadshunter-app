@@ -765,6 +765,8 @@ async function loadPostal(cc) {
   return ST.postal[cc];
 }
 const curInd = () => (FS.ind == null ? null : ST.industries.find(i => i.id === FS.ind)) || null;
+// Similar terms ("roofer", "roofing company") mostly find the same businesses: start with the first two.
+const defaultTerms = (d) => new Set((d?.terms || []).slice(0, 2).map((_, i) => i));
 const activeTerms = () => { const d = curInd(); return d ? [...d.terms.filter((_, i) => FS.terms.has(i)), ...FS.extra] : []; };
 const unitOf = cc => COUNTRY[cc].unit;
 const toKm = (v, cc) => unitOf(cc) === 'mi' ? v * 1.609 : v;
@@ -858,7 +860,7 @@ function fxsClose() { if (!FX.open) return; const id = FX.open; FX.open = null; 
 function fxsSet(id, raw) {
   if (id === 'sort') { L$.sort = raw; FX.open = null; fxsRerender('sort'); leadsUpdate(false); const vt = $('#vt'); if (vt) vt.scrollTop = 0; return; }
   const v = Number(raw);
-  if (id === 'ind') { FS.ind = v; FS.terms = new Set(curInd().terms.map((_, i) => i)); FS.extra = []; FX.open = null; fxsRerender('ind'); refreshFind(['what']); return; }
+  if (id === 'ind') { FS.ind = v; FS.terms = defaultTerms(curInd()); FS.extra = []; FX.open = null; fxsRerender('ind'); refreshFind(['what']); return; }
   if (id === 'limit') { FS.limit = v > 0 ? Math.floor(v) : 0; FX.open = null; fxsRerender('limit'); refreshFind([]); return; }
   const m = id.match(/^rad-(\d+)$/); if (m) { FS.locs[+m[1]].rad = v; FX.open = null; refreshFind(['where']); }
 }
@@ -907,7 +909,7 @@ function termHelp() {
 }
 function termsBox() {
   const d = curInd(); if (!d) return '';
-  return `<div class="termbox fx-termbox"><div class="termlist">${d.terms.map((t, i) => `<div class="termrow" data-fsterm="${i}" role="checkbox" tabindex="0" aria-checked="${FS.terms.has(i)}"><span class="cb ${FS.terms.has(i) ? 'on' : ''}"></span><span>${esc(t)}</span></div>`).join('')}
+  return `<div class="termbox fx-termbox"><p class="help fx-termhint">Similar terms mostly find the same businesses, so one or two distinct terms is usually enough.</p><div class="termlist">${d.terms.map((t, i) => `<div class="termrow" data-fsterm="${i}" role="checkbox" tabindex="0" aria-checked="${FS.terms.has(i)}"><span class="cb ${FS.terms.has(i) ? 'on' : ''}"></span><span>${esc(t)}</span></div>`).join('')}
    ${FS.extra.map((t, i) => `<div class="termrow"><span class="cb on"></span><span>${esc(t)}</span><span class="sub">This search only</span><button class="btn ghost sm" data-fsextra="${i}" aria-label="Remove ${esc(t)}">${ic('x', 13)}</button></div>`).join('')}
    <div class="termadd">${ic('plus', 14)}<input id="fs-extra" placeholder="Add a term for this search" autocomplete="off"></div></div></div>`;
 }
@@ -1333,7 +1335,7 @@ document.addEventListener('click', async (e) => {
   if ((v = ds('indmenu')) !== undefined) { e.stopPropagation(); IP.menu = IP.menu === +v ? null : +v; rerenderInd(); return; }
   if (IP.menu !== null && !t.closest('.menu')) { IP.menu = null; rerenderInd(); }
   if ((v = ds('indsort')) !== undefined) { IP.sort = v; document.querySelectorAll('[data-indsort]').forEach(b => { b.classList.toggle('on', b.dataset.indsort === v); b.setAttribute('aria-checked', b.dataset.indsort === v); }); rerenderInd(); return; }
-  if ((v = ds('indfind')) !== undefined) { const d = ST.industries.find(x => x.id === +v); FS.ind = d.id; FS.terms = new Set(d.terms.map((_, i) => i)); FS.extra = []; location.hash = '#find'; return; }
+  if ((v = ds('indfind')) !== undefined) { const d = ST.industries.find(x => x.id === +v); FS.ind = d.id; FS.terms = defaultTerms(d); FS.extra = []; location.hash = '#find'; return; }
   if ((v = ds('indleads')) !== undefined) { L$.F = defaultF(); L$.F.ind = new Set([+v]); L$.view = null; location.hash = '#leads'; return; }
   if ((v = ds('addcat')) !== undefined) { EDIT.name = $('#ind-name').value; for (const k of ['terms', 'categories']) { const x = $('#tok-' + k)?.value.trim(); if (x) EDIT[k].push(x); } EDIT.categories.push(v); indModal(); return; }
   if ((v = ds('indedit')) !== undefined) { IP.menu = null; const d = ST.industries.find(x => x.id === +v); EDIT = { id: d.id, orig: d.name, name: d.name, terms: [...d.terms], categories: [...d.categories] }; indModal(); return; }
@@ -1571,7 +1573,7 @@ document.addEventListener('change', async (e) => {
   if (t.dataset.xcol) { t.checked ? XP.cols.add(t.dataset.xcol) : XP.cols.delete(t.dataset.xcol); XP.preset = Object.entries(XPRESETS).find(([, a]) => a.length === XP.cols.size && a.every(c => XP.cols.has(c)))?.[0] || 'custom'; exportModal(); return; }
   if (t.name === 'lmpick') { lmPick(t.value === 'new' ? 'new' : +t.value); return; }
   if (t.dataset.ck) { CK[t.dataset.ck] = t.checked; t.closest('.opt').classList.toggle('on', t.checked); return; }
-  if (t.id === 'fs-ind') { FS.ind = +t.value; FS.terms = new Set(curInd().terms.map((_, i) => i)); FS.extra = []; refreshFind(['what']); return; }
+  if (t.id === 'fs-ind') { FS.ind = +t.value; FS.terms = defaultTerms(curInd()); FS.extra = []; refreshFind(['what']); return; }
   if (t.dataset.depth != null) { FS.depth = +t.dataset.depth; if (FS.depth === 0) FS.emails = false; $('#fs-collect').innerHTML = collectHTML(); refreshFind([]); return; }
   if (t.id === 'fs-emails') { FS.emails = t.checked; if (FS.emails && FS.depth === 0) FS.depth = 1; $('#fs-collect').innerHTML = collectHTML(); refreshFind([]); return; }
   if (t.dataset.locrad != null) { FS.locs[+t.dataset.locrad].rad = +t.value; refreshFind(['where']); return; }

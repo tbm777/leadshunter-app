@@ -44,6 +44,8 @@ jobs:
         run: |
           node tests/forms/run.mjs | tee suite.txt || true
           echo "summary=$(grep '^SUMMARY ' suite.txt | tail -1)" >> "$GITHUB_OUTPUT"
+      - name: Website check agrees with the robot
+        run: node tests/forms/check-agree.mjs || true
       - name: Real sends and score
         env:
           TEST_FORM_URL: ${{ secrets.TEST_FORM_URL }}
