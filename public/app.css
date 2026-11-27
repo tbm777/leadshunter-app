@@ -1594,3 +1594,23 @@ input[type=checkbox]:disabled,input[type=radio]:disabled{opacity:.55;cursor:defa
 .st-rm{color:var(--faint)}
 .st-rm:hover{color:var(--bad)}
 .sset-l p{font-size:12.5px}
+/* sequence timeline */
+.seqbar{display:flex;align-items:center;gap:16px;padding:14px 16px;flex-wrap:wrap}
+.seqtrack{display:flex;align-items:center;flex:1;min-width:0}
+.seqstep{flex:1 1 0;min-width:150px;max-width:240px;display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);cursor:pointer;text-align:left;font:inherit;color:var(--ink);transition:border-color .15s,background .15s,box-shadow .15s}
+.seqstep:hover{border-color:var(--faint)}
+.seqstep.on{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 12%,transparent)}
+.seqic{width:32px;height:32px;border-radius:9px;flex:none;display:grid;place-items:center;background:var(--surface-2);border:1px solid var(--line);color:var(--muted)}
+.seqstep.on .seqic{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.seqtx{display:flex;flex-direction:column;gap:1px;min-width:0}
+.seqtx small{font-size:11px;color:var(--faint);font-weight:550;letter-spacing:.01em;white-space:nowrap}
+.seqtx b{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.seqstep.on .seqtx small{color:var(--accent-text)}
+.seqlink{flex:0 0 64px;height:2px;background:var(--line);position:relative}
+.seqlink.ghost{flex-basis:28px;background:repeating-linear-gradient(90deg,var(--line) 0 4px,transparent 4px 8px)}
+.seqlink em{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-style:normal;font-size:11px;font-weight:550;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:2px 8px;white-space:nowrap}
+.seqadd{flex:none;display:flex;align-items:center;gap:6px;height:54px;padding:0 16px;border:1.5px dashed var(--line);border-radius:12px;background:none;color:var(--muted);font:inherit;font-size:13px;font-weight:550;cursor:pointer}
+.seqadd:hover{border-color:var(--accent);color:var(--accent-text)}
+.seqnote{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--faint);max-width:none;text-align:left;white-space:nowrap}
+.seqnote svg{color:var(--ok)}
+@media (max-width:900px){.seqtrack{flex-wrap:wrap;gap:8px}.seqlink{flex-basis:20px}.seqlink em{display:none}.seqnote{margin-left:0}}

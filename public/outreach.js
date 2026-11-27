@@ -351,11 +351,13 @@ async function flushSave() {
 const stepText = (c, n) => { if (!n || n <= 1) return { channel: 'form', subject: c.subject, message: c.message }; const st = (c.steps || []).find(x => x.step === n); return st ? { channel: st.channel, subject: st.subject || c.subject, message: st.message, delay_days: st.delay_days } : { channel: 'form', subject: c.subject, message: c.message }; };
 function seqBar(c) {
   const P = cp(c.id), steps = c.steps || [];
-  const chip = (n, ch, sub) => `<button class="seqstep ${P.step === n ? 'on' : ''}" data-seqstep="${n}"><i>${n}</i><span><b>${ch === 'call' ? 'Call' : 'Contact form'}</b><small>${sub}</small></span></button>`;
+  const chip = (n, ch, day) => `<button class="seqstep ${P.step === n ? 'on' : ''}" data-seqstep="${n}" aria-pressed="${P.step === n}">
+    <span class="seqic">${A.ic(ch === 'call' ? 'phone' : 'messages', 15)}</span>
+    <span class="seqtx"><small>Step ${n} · Day ${day}</small><b>${n === 1 ? 'First message' : ch === 'call' ? 'Call' : 'Follow-up'}</b></span></button>`;
   let day = 0;
-  return `<div class="card seqbar">${chip(1, 'form', 'Day 0 · first message')}${steps.map(x => { day += x.delay_days; return `<span class="seqwait">${A.ic('arrow', 13)}<small>wait ${x.delay_days} business day${x.delay_days === 1 ? '' : 's'}</small></span>${chip(x.step, x.channel, `Day ${day} · follow-up`)}`; }).join('')}
-    ${steps.length < 2 ? `<button class="seqadd" data-o="addstep">${A.ic('plus', 14)}Add follow-up</button>` : ''}
-    <span class="seqnote">${steps.length ? 'Stops when a lead replies.' : 'Add a follow-up or a call. Sequences stop when a lead replies.'}</span></div>`;
+  return `<div class="card seqbar"><div class="seqtrack">${chip(1, 'form', 0)}${steps.map(x => { day += x.delay_days; return `<span class="seqlink"><em>+${x.delay_days} day${x.delay_days === 1 ? '' : 's'}</em></span>${chip(x.step, x.channel, day)}`; }).join('')}
+    ${steps.length < 2 ? `<span class="seqlink ghost"></span><button class="seqadd" data-o="addstep">${A.ic('plus', 14)}Add step</button>` : ''}</div>
+    <span class="seqnote">${A.ic('check', 13)}${steps.length ? 'Stops when a lead replies' : 'Follow-ups stop when a lead replies'}</span></div>`;
 }
 function sequenceTab(c) {
   const P = cp(c.id); P.step ||= 1;
