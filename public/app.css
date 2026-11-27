@@ -1046,7 +1046,8 @@ select.fx-mini{min-width:120px;cursor:pointer}
 .ldo>summary>div:first-child{min-width:0;display:flex;flex-direction:column;gap:1px}
 .ldo b{font-size:13px;font-weight:600}.ldo small{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ldo-r{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex:none}
-.ld-status{grid-template-columns:repeat(3,1fr)!important}
+.ld-status{grid-template-columns:repeat(4,1fr)!important}
+@media (max-width:480px){.ld-status{grid-template-columns:repeat(2,1fr)!important}}
 .delsum{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
 .delsum b{color:var(--ink)}
 .btn.primary.danger-btn{background:var(--bad);border-color:var(--bad);color:#fff}
@@ -1457,3 +1458,26 @@ input[type=checkbox]:disabled,input[type=radio]:disabled{opacity:.55;cursor:defa
 .spc-id h3{white-space:normal;line-height:1.25}
 .spc-dh{display:flex;align-items:center;gap:12px;min-width:0}
 .spc-av.sm{width:40px;height:40px;border-radius:12px;font-size:14px}
+/* ---------- side panels → centered dialogs (lead details, industry, sender profile) */
+.scrim:not(.modal-scrim){justify-content:center;align-items:center;padding:24px}
+.drawer{width:min(600px,100%);height:auto;max-height:min(880px,calc(100vh - 48px));border:1px solid var(--line);border-radius:16px;box-shadow:0 24px 70px -12px rgba(10,12,20,.35);overflow-y:auto;overscroll-behavior:contain;animation:dlgIn .16s ease-out}
+.drawer.ld{width:min(640px,100%)}
+.drawer.inddrawer{width:min(560px,100%)}
+.drawer-h{position:sticky;top:0;z-index:2;background:var(--surface)}
+.drawer.ld .ld-top{position:sticky;top:0;z-index:2;background:var(--surface);padding-bottom:6px}
+.drawer-foot{border-radius:0 0 16px 16px}
+.scrim{animation:scrimIn .16s ease-out}
+@keyframes dlgIn{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+@keyframes scrimIn{from{background:rgba(10,12,16,0)}}
+@media (max-width:640px){.scrim:not(.modal-scrim){padding:0;align-items:flex-end}.drawer,.drawer.ld,.drawer.inddrawer{width:100%;max-height:92vh;border-radius:16px 16px 0 0;border-bottom:0}.drawer-foot{border-radius:0}}
+@media (prefers-reduced-motion:reduce){.drawer,.scrim{animation:none}}
+/* ---------- sender cards: calmer */
+.spc-top{background:none}
+.spc-av{width:44px;height:44px;border-radius:50%;font-size:14.5px;font-weight:650;color:var(--ink);background:var(--surface-2);border:1px solid var(--line);box-shadow:none}
+.spc-av.sm{width:38px;height:38px;border-radius:50%;font-size:13.5px}
+.spc-how .spc-hi{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+.spc-how em,.spc-auto{color:var(--muted);background:var(--surface-2);border:1px solid var(--line)}
+.spc-ic{background:none;border:0;width:20px;color:var(--faint)}
+.spc-meter i{background:var(--ink);opacity:.55}
+.spc-add:hover{background:transparent}
+.spc-add:hover .spc-plus{border-color:var(--accent);color:var(--accent-text)}
