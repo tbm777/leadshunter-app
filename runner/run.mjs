@@ -8,6 +8,7 @@ import { gzipSync } from 'node:zlib';
 import { splitCell } from '../public/shared/grid.js';
 import { checkSite, FORM } from './check.mjs';
 import { browserFormCheck, closeBrowser } from './browser.mjs';
+import { runOutreach } from './outreach.mjs';
 
 const API = (process.env.LH_API || '').replace(/\/$/, '');
 const SECRET = process.env.RUNNER_SECRET;
@@ -191,6 +192,16 @@ async function main() {
   log(`Job ${job.id} (${job.kind}), status ${job.status}`);
   const start = await api('POST', `/api/runner/jobs/${JOB}/start`, { run_url: process.env.RUN_URL || '' });
   if (!start.proceed) { log(`Nothing to do: job is ${start.status}.`); return; }
+  if (job.kind === 'outreach') {
+    let cancelled = false, error = null, requeue = [];
+    const hb = setInterval(() => api('POST', `/api/runner/jobs/${JOB}/heartbeat`).then(r => { if (r.status === 'cancelled') cancelled = true; }).catch(() => {}), 60000);
+    try { ({ requeue } = await runOutreach({ api, JOB, log, isCancelled: () => cancelled })); }
+    catch (e) { error = 'The outreach run failed: ' + String(e.message || e).slice(0, 200); }
+    clearInterval(hb);
+    await api('POST', `/api/runner/jobs/${JOB}/finish`, { error, requeue });
+    if (error) { log(error); process.exitCode = 1; }
+    return;
+  }
   checkOpts = { form: (job.params.depth || 0) >= 2, email: !!job.params.emails };
   const wantChecks = (job.params.depth || 0) >= 1 || job.params.emails;
   let error = null;

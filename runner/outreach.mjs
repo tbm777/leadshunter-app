@@ -1,0 +1,105 @@
+// Outreach job: fill and send (or test) the contact form of every lead in the batch.
+// Never logs lead data: the repository and its logs are public.
+import { getBrowser, closeBrowser } from './browser.mjs';
+import { submitForm } from './forms/filler.mjs';
+
+const CONCURRENCY = +process.env.OUTREACH_CONCURRENCY || 3;
+const ITEM_TIMEOUT = 150000;
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+const CONTACT_RE = /contact|get[\s-]?in[\s-]?touch|quote|estimate|appointment|book|request|reach[\s-]?us|consult|schedule/i;
+
+function withTimeout(p, ms) { let t; return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error('timeout')), ms); })]).finally(() => clearTimeout(t)); }
+const norm = u => { try { const x = new URL(u); x.hash = ''; return x.href.replace(/\/$/, ''); } catch { return null; } };
+
+function profileFrom(sender, campaign) {
+  return {
+    firstName: sender.first_name, lastName: sender.last_name, email: sender.email, phone: sender.phone, company: sender.company, website: sender.website,
+    address: sender.address, city: sender.city, state: sender.state, zip: sender.zip, country: sender.country,
+    subject: campaign.subject, message: campaign.message, fileTemplate: campaign.file_template,
+  };
+}
+
+/** Links on the page that look like a contact or quote page, same site only. */
+async function contactPages(page, base) {
+  const host = new URL(base).hostname.replace(/^www\./, '');
+  const links = await page.$$eval('a[href]', as => as.map(a => ({ href: a.href, text: (a.innerText || a.getAttribute('aria-label') || '').trim().slice(0, 60) }))).catch(() => []);
+  const out = [];
+  for (const l of links) {
+    let u; try { u = new URL(l.href); } catch { continue; }
+    if (!/^https?:$/.test(u.protocol) || u.hostname.replace(/^www\./, '') !== host) continue;
+    if (!CONTACT_RE.test(l.text) && !CONTACT_RE.test(u.pathname)) continue;
+    const n = norm(u.href); if (n && !out.includes(n)) out.push(n);
+  }
+  return out.sort((a, b) => (/contact/i.test(b) ? 1 : 0) - (/contact/i.test(a) ? 1 : 0)).slice(0, 3);
+}
+
+async function attempt(ctx, item, profile, dryRun) {
+  const lead = item.lead;
+  const tried = new Set();
+  const candidates = [lead.form_url, lead.website].map(norm).filter(Boolean);
+  let last = { status: 'failed', reason: 'no-form' };
+  const tryUrl = async (url) => {
+    if (tried.has(url)) return null;
+    tried.add(url);
+    const page = await ctx.newPage();
+    try {
+      const r = await submitForm(page, url, profile, { lead, dryRun });
+      r.form_url = page.url();
+      if (r.status === 'failed' && r.reason === 'no-form') { last = r; return { r, links: await contactPages(page, url) }; }
+      return { r, done: true };
+    } catch (e) {
+      last = e.message === 'unsupported-file-type' ? { status: 'manual', reason: 'file-type' } : { status: 'failed', reason: /timeout|Timeout/.test(e.message) ? 'site-too-slow' : /net::|ERR_/.test(e.message) ? 'site-unreachable' : 'page-error' };
+      return { r: last };
+    } finally { await page.close().catch(() => {}); }
+  };
+  const queue = [...candidates];
+  while (queue.length && tried.size < 5) {
+    const res = await tryUrl(queue.shift());
+    if (!res) continue;
+    if (res.done) return res.r;
+    for (const l of res.links || []) if (!tried.has(l)) queue.push(l);
+  }
+  return last;
+}
+
+export async function runOutreach({ api, JOB, log, isCancelled }) {
+  const data = await api('GET', `/api/runner/jobs/${JOB}/outreach`);
+  const dryRun = data.mode === 'test';
+  const profile = profileFrom(data.sender, data.campaign);
+  const items = [...data.items];
+  log(`${dryRun ? 'Testing' : 'Sending'} ${items.length} form${items.length === 1 ? '' : 's'}.`);
+  if (!items.length) return { requeue: [] };
+  const browser = await getBrowser();
+  const tally = {};
+  const unattempted = new Set(items.map(i => i.oid));
+  let stop = false, chain = Promise.resolve();
+  const report = (oid, r) => {
+    chain = chain.then(async () => {
+      const res = await api('POST', `/api/runner/jobs/${JOB}/outreach-result`, { oid, status: r.status, reason: r.reason || null, evidence: r.evidence || null, form_url: r.form_url || null });
+      if (res.stop) stop = true;
+    }).catch(e => log('Could not save a result:', e.message));
+    return chain;
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, items.length) }, async () => {
+    while (items.length && !stop && !isCancelled()) {
+      const item = items.shift();
+      // Record the start first: if the run dies mid-send, this form is flagged for a human check instead of being sent twice.
+      const st = await api('POST', `/api/runner/jobs/${JOB}/outreach-start`, { oid: item.oid }).catch(() => null);
+      if (!st) { items.unshift(item); stop = true; break; }
+      if (st.stop) { items.unshift(item); stop = true; break; }
+      unattempted.delete(item.oid);
+      const ctx = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: 'en-US' });
+      await ctx.route('**/*', route => (['media'].includes(route.request().resourceType()) ? route.abort() : route.continue()));
+      let r;
+      try { r = await withTimeout(attempt(ctx, item, profile, dryRun), ITEM_TIMEOUT); }
+      catch { r = { status: 'failed', reason: 'site-too-slow' }; }
+      await ctx.close().catch(() => {});
+      tally[r.status] = (tally[r.status] || 0) + 1;
+      await report(item.oid, r);
+    }
+  }));
+  await chain;
+  await closeBrowser();
+  log('Done:', Object.entries(tally).map(([k, v]) => `${v} ${k}`).join(', ') || 'nothing');
+  return { requeue: [...unattempted] };
+}

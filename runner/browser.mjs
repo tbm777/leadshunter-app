@@ -5,7 +5,7 @@ import { FORM } from './check.mjs';
 
 let browserPromise = null;
 
-async function getBrowser() {
+export async function getBrowser() {
   if (!browserPromise) {
     browserPromise = (async () => {
       let pw;
@@ -15,7 +15,8 @@ async function getBrowser() {
         execSync('npx playwright install --with-deps chromium', { cwd: new URL('.', import.meta.url).pathname, stdio: 'inherit' });
         pw = await import('playwright');
       }
-      try { return await pw.chromium.launch({ args: ['--no-sandbox'] }); }
+      const executablePath = process.env.CHROMIUM_PATH || undefined; // local testing with a preinstalled browser
+      try { return await pw.chromium.launch({ args: ['--no-sandbox'], executablePath }); }
       catch {
         // Cached install but missing browser or system libraries: install them once, then retry.
         console.log('Installing the browser for Playwright…');

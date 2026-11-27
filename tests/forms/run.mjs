@@ -19,7 +19,7 @@ export const PROFILE = {
 };
 
 const { results, close } = await startServer(PORT);
-const browser = await pw.chromium.launch();
+const browser = await pw.chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 const list = FIXTURES.filter(f => !only.length || only.includes(f.id));
 const rows = [];
 const t0 = Date.now();

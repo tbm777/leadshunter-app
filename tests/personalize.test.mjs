@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { personalize, cleanCompanyName } from '../runner/forms/personalize.mjs';
+import { personalize, cleanCompanyName } from '../public/shared/personalize.js';
 
 test('cleans keyword-stuffed Google Maps names', () => {
   assert.equal(cleanCompanyName('Summit Roofing Co. - #1 Roofer in Austin TX | Free Estimates'), 'Summit Roofing Co.');

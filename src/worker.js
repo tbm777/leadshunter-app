@@ -1,5 +1,6 @@
 // LeadsHunter API Worker. Serves the app (static assets), the JSON API and the runner endpoints.
 import { buildCells } from '../public/shared/grid.js';
+import * as O from './outreach.js';
 import { cleanWebsite, domainOf, isSharedDomain, isSocialHost, phoneE164, countryCode, categoryAccepted, parseAddress, prettyPhone } from '../public/shared/normalize.js';
 
 const MAX_TASKS = 6000;              // map searches per search job
@@ -10,11 +11,11 @@ export const LEAD_COLS = ['id', 'seq', 'name', 'industry_id', 'city', 'region', 
   'postal', 'maps_url', 'notes', 'deleted', 'checked_at', 'form_url', 'site_ms', 'lat', 'lon'];
 const COLS_SQL = LEAD_COLS.join(', ');
 
-const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), {
+export const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), {
   status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers },
 });
 const fail = (status, error) => json({ error }, status);
-class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
+export class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 const now = () => Date.now();
 
 export default {
@@ -22,7 +23,7 @@ export default {
     const url = new URL(req.url);
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(req);
     try {
-      return await route(req, { ...env, ORIGIN: url.origin }, url, ctx);
+      return await route(req, { ...env, ORIGIN: url.origin, CTX: ctx }, url, ctx);
     } catch (e) {
       if (e instanceof HttpError) return fail(e.status, e.message);
       console.error('API error', url.pathname, e && e.stack || e);
@@ -30,7 +31,13 @@ export default {
     }
   },
   async scheduled(_evt, env, ctx) {
-    ctx.waitUntil(reclaimStale(env));
+    ctx.waitUntil((async () => {
+      await reclaimStale(env);
+      await O.settleJobs(env);
+      // Scheduled runs have no request, so use the address saved when someone last used the app.
+      const origin = (await env.DB.prepare("SELECT v FROM meta WHERE k = 'origin'").first())?.v || '';
+      await O.runSchedules({ ...env, ORIGIN: origin });
+    })());
   },
 };
 
@@ -46,10 +53,24 @@ async function route(req, env, url, ctx) {
   const session = await readSession(req, env);
   if (!session) return fail(401, 'Please sign in.');
   if (p === '/api/me') return json({ ok: true, configured: configCheck(env) });
-
-  if (p === '/api/bootstrap' && m === 'GET') return bootstrap(env);
-  if (p === '/api/industries' && m === 'POST') return saveIndustry(env, await body(req));
   let mm;
+
+  if (p === '/api/bootstrap' && m === 'GET') {
+    ctx.waitUntil(env.DB.prepare("INSERT INTO meta (k, v) VALUES ('origin', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(url.origin).run().catch(() => {}));
+    return bootstrap(env);
+  }
+  if (p === '/api/outreach' && m === 'GET') return O.outreachOverview(env);
+  if (p === '/api/outreach/items' && m === 'GET') return O.listItems(env, url);
+  if ((mm = p.match(/^\/api\/outreach\/(\d+)$/)) && m === 'POST') return O.itemAction(env, +mm[1], await body(req));
+  if (p === '/api/senders' && m === 'POST') return O.saveSender(env, await body(req));
+  if ((mm = p.match(/^\/api\/senders\/(\d+)$/))) { if (m === 'PUT') return O.saveSender(env, await body(req), +mm[1]); if (m === 'DELETE') return O.archiveSender(env, +mm[1]); }
+  if (p === '/api/campaigns' && m === 'POST') return O.saveCampaign(env, await body(req));
+  if ((mm = p.match(/^\/api\/campaigns\/(\d+)$/))) { if (m === 'GET') return O.getCampaign(env, +mm[1]); if (m === 'PUT') return O.saveCampaign(env, await body(req), +mm[1]); }
+  if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/status$/)) && m === 'POST') return O.setCampaignStatus(env, +mm[1], await body(req));
+  if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/leads$/)) && m === 'POST') return O.addLeads(env, +mm[1], await body(req));
+  if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/remove$/)) && m === 'POST') return O.removeItems(env, +mm[1], await body(req));
+  if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/run$/)) && m === 'POST') return O.runCampaign(env, +mm[1], await body(req));
+  if (p === '/api/industries' && m === 'POST') return saveIndustry(env, await body(req));
   if ((mm = p.match(/^\/api\/industries\/(\d+)$/))) {
     if (m === 'PUT') return saveIndustry(env, await body(req), +mm[1]);
     if (m === 'DELETE') return archiveIndustry(env, +mm[1], 1);
@@ -141,7 +162,7 @@ async function requireRunner(req, env) {
 
 /* ------------------------------------------------------------------ helpers */
 /** Reserve n consecutive sequence numbers. D1 runs writes one at a time, so ranges never overlap. */
-async function reserveSeq(env, n) {
+export async function reserveSeq(env, n) {
   const r = await env.DB.prepare("UPDATE meta SET v = CAST(v AS INTEGER) + ? WHERE k = 'seq' RETURNING CAST(v AS INTEGER) AS v").bind(n).first();
   return r.v - n + 1;
 }
@@ -160,15 +181,15 @@ function searchOut(r) {
   };
 }
 const SEARCH_COLS = 'id, kind, name, industry_id, params, status, limit_n, total_tasks, done_tasks, found, new_count, dup, excluded, filtered, qualified, to_check, checked, limit_reached, error, run_url, created_at, started_at, finished_at, heartbeat_at';
-const inList = (n) => Array(n).fill('?').join(',');
-function chunk(arr, n) { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; }
+export const inList = (n) => Array(n).fill('?').join(',');
+export function chunk(arr, n) { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; }
 
 /* ------------------------------------------------------------------ bootstrap, industries, views */
 async function bootstrap(env) {
   const [ind, srch, hid, seq] = await env.DB.batch([
     env.DB.prepare('SELECT * FROM industries ORDER BY name COLLATE NOCASE'),
-    env.DB.prepare(`SELECT ${SEARCH_COLS} FROM searches WHERE hidden = 0 ORDER BY id DESC LIMIT 60`),
-    env.DB.prepare('SELECT id, name FROM searches WHERE hidden = 1 OR id <= (SELECT COALESCE(MIN(id), 0) FROM (SELECT id FROM searches WHERE hidden = 0 ORDER BY id DESC LIMIT 60))'),
+    env.DB.prepare(`SELECT ${SEARCH_COLS} FROM searches WHERE hidden = 0 AND kind != 'outreach' ORDER BY id DESC LIMIT 60`),
+    env.DB.prepare('SELECT id, name FROM searches WHERE hidden = 1 OR id <= (SELECT COALESCE(MIN(id), 0) FROM (SELECT id FROM searches WHERE hidden = 0 AND kind != \'outreach\' ORDER BY id DESC LIMIT 60))'),
     env.DB.prepare("SELECT CAST(v AS INTEGER) AS v FROM meta WHERE k = 'seq'"),
   ]);
   return json({ industries: ind.results.map(industryOut), searches: srch.results.map(searchOut), hiddenNames: Object.fromEntries(hid.results.map(r => [r.id, r.name])), seq: seq.results[0]?.v || 0, config: configCheck(env), cols: LEAD_COLS });
@@ -212,7 +233,7 @@ async function saveView(env, b) {
 /* ------------------------------------------------------------------ searches */
 async function listSearches(env, url) {
   const limit = Math.min(200, +url.searchParams.get('limit') || 60);
-  const r = await env.DB.prepare(`SELECT ${SEARCH_COLS} FROM searches WHERE hidden = 0 ORDER BY id DESC LIMIT ?`).bind(limit).all();
+  const r = await env.DB.prepare(`SELECT ${SEARCH_COLS} FROM searches WHERE hidden = 0 AND kind != 'outreach' ORDER BY id DESC LIMIT ?`).bind(limit).all();
   return json({ searches: r.results.map(searchOut) });
 }
 async function getSearch(env, id) {
@@ -268,7 +289,8 @@ async function dispatchAndReturn(env, row) {
   }
   return json({ search: searchOut(row) }, err ? 502 : 201);
 }
-async function dispatch(env, id) {
+export async function dispatch(env, id) {
+  if (env.DEV_NO_DISPATCH === '1') return null; // local testing only: the runner is started by hand
   if (!configCheck(env).github) return 'GitHub is not connected yet. Add the GH_TOKEN secret, deploy again, then press Retry.';
   const res = await fetch(`https://api.github.com/repos/${env.GH_REPO}/actions/workflows/runner.yml/dispatches`, {
     method: 'POST',
@@ -389,6 +411,9 @@ async function runnerRoute(req, env, url) {
     await env.DB.prepare("UPDATE searches SET status = 'running', started_at = COALESCE(started_at, ?), heartbeat_at = ?, run_url = ?, error = NULL WHERE id = ?").bind(now(), now(), String(b.run_url || '').slice(0, 300), id).run();
     return json({ proceed: true });
   }
+  if (action === '/outreach' && m === 'GET') return O.runnerItems(env, s, params);
+  if (action === '/outreach-start' && m === 'POST') return O.runnerStartItem(env, s, params, await body(req));
+  if (action === '/outreach-result' && m === 'POST') return O.runnerResult(env, s, params, await body(req));
   if (action === '/cell' && m === 'POST') return ingestCell(env, s, params, await body(req));
   if (action === '/checks' && m === 'POST') return ingestChecks(env, s, params, await body(req));
   if (action === '/pending-checks' && m === 'GET') {
@@ -420,6 +445,7 @@ async function runnerRoute(req, env, url) {
         for (const part of chunk(left.map(r => env.DB.prepare('UPDATE leads SET deleted = 1, seq = ?, updated_at = ? WHERE id = ?').bind(sq++, t, r.id)), 400)) await env.DB.batch(part);
       }
     }
+    if (s.kind === 'outreach') await O.runnerFinishOutreach(env, s);
     const status = s.status === 'cancelled' ? 'cancelled' : b.error ? 'failed' : 'done';
     await env.DB.prepare(`UPDATE searches SET status = ?, error = ?, finished_at = ?, heartbeat_at = ?${status === 'done' ? ", cells = '[]', done_bits = ''" : ''} WHERE id = ?`).bind(status, b.error ? String(b.error).slice(0, 500) : null, now(), now(), id).run();
     return json({ status });
@@ -588,7 +614,7 @@ async function ingestChecks(env, s, params, b) {
 
 /* ------------------------------------------------------------------ usage */
 /** Midnight in Los Angeles, as a timestamp, for "today" in the app's time zone. */
-function ptMidnight(at = new Date()) {
+export function ptMidnight(at = new Date()) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(at).map(x => [x.type, x.value]));
   const sinceMidnight = ((+parts.hour * 60 + +parts.minute) * 60 + +parts.second) * 1000;
   return at.getTime() - sinceMidnight - at.getMilliseconds();
@@ -647,7 +673,7 @@ async function usage(env) {
   const [leadsQ, searchQ] = await env.DB.batch([
     env.DB.prepare(`SELECT COUNT(*) AS total, SUM(created_at >= ?) AS today, SUM(created_at >= ?) AS d7, SUM(created_at >= ?) AS d30,
       SUM(website IS NOT NULL) AS withSite, SUM(form_status = 0) AS openForm, SUM(form_status = 1) AS captcha, SUM(email IS NOT NULL) AS emails FROM leads WHERE deleted = 0`).bind(today, t - 7 * 864e5, t - 30 * 864e5),
-    env.DB.prepare("SELECT COUNT(*) AS searches, SUM(kind = 'check') AS checkJobs, COALESCE(SUM(checked), 0) AS checked, COALESCE(SUM(new_count), 0) AS added FROM searches WHERE created_at >= ?").bind(today),
+    env.DB.prepare("SELECT SUM(kind = 'search') AS searches, SUM(kind = 'check') AS checkJobs, COALESCE(SUM(CASE WHEN kind != 'outreach' THEN checked END), 0) AS checked, COALESCE(SUM(new_count), 0) AS added, SUM(kind = 'outreach') AS outreachJobs FROM searches WHERE created_at >= ?").bind(today),
   ]);
   const [cloudflare, github] = await Promise.all([cloudflareUsage(env), githubUsage(env)]);
   return json({

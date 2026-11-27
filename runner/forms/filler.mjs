@@ -418,6 +418,14 @@ export async function submitForm(page, url, profile, opts = {}) {
     break;
   }
 
+  // Test run: everything is filled and valid, but nothing is sent.
+  if (opts.dryRun) {
+    const btn = pickSubmit(scan.buttons), bad = await invalidFields().catch(() => []);
+    const count = [...filled.keys()].filter(k => !String(k).startsWith('tried:')).length;
+    if (!btn) return { status: 'failed', reason: 'no-submit-button', log };
+    if (bad.length) return { status: 'failed', reason: 'fields-still-invalid', log };
+    return { status: 'ready', evidence: `Filled ${count} field${count === 1 ? '' : 's'}, ready to send with “${btn.text || 'Submit'}”`, log };
+  }
   // Submit, then read the outcome. Fix and resubmit when the site shows errors.
   let responses = [];
   page.on('response', (r) => { const m = r.request().method(); if (m === 'POST' || m === 'PUT') responses.push(r); });

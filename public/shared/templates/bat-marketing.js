@@ -1,12 +1,7 @@
 // "The Bat Marketing" outreach file. Page 1: the campaign's subject and message. Page 2: the offer.
-import fs from 'node:fs';
-
-const asset = (f, type) => `data:${type};base64,${fs.readFileSync(new URL(`./assets/${f}`, import.meta.url)).toString('base64')}`;
-let A = null;
-const assets = () => (A ||= {
-  r: asset('dmsans-400.woff2', 'font/woff2'), m: asset('dmsans-500.woff2', 'font/woff2'), b: asset('dmsans-700.woff2', 'font/woff2'), mascot: asset('bat-mascot.webp', 'image/webp'),
-});
+// Pure function shared by the app (live preview) and the runner (PDF/PNG). `assets` holds URLs or data URIs.
 const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+export const ASSETS = { r: 'dmsans-400.woff2', m: 'dmsans-500.woff2', b: 'dmsans-700.woff2', mascot: 'bat-mascot.webp' };
 
 export const DEFAULTS = {
   brand: 'THE BAT MARKETING', tagline: 'Marketing growth systems for contractors', website: 'thebatmarketing.com', bookUrl: 'https://thebatmarketing.com',
@@ -39,8 +34,8 @@ function messageHTML(message) {
   return paras.map(p => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('') + sign;
 }
 
-export function render(data) {
-  const d = { ...DEFAULTS, ...data }, a = assets();
+export function render(data, a) {
+  const d = { ...DEFAULTS, ...data };
   const head = (n) => `<div class="top"><div><i class="bar"></i><b>${esc(d.brand)}</b></div><span>0${n} / 02</span></div>`;
   const foot = `<div class="foot"><span>${esc(d.tagline)}</span><a href="https://${esc(d.website.replace(/^https?:\/\//, ''))}">${esc(d.website.replace(/^https?:\/\//, ''))}</a></div>`;
   return `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -84,18 +79,19 @@ export function render(data) {
     <div class="cta"><small>${esc(d.ctaKicker)}</small><h2>${esc(d.ctaTitle)}</h2><p>${esc(d.ctaText).replace(/\n/g, '<br>')}</p>
       <a href="${esc(d.bookUrl)}">${esc(d.ctaButton)} <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
       <img src="${a.mascot}" alt=""></div>${foot}</section>
+  <script>(${fit.toString()})()</script>
   </body></html>`;
 }
 
-// Long subjects or messages: shrink type until page 1 fits above the footer.
-export async function fit(page) {
-  await page.evaluate(async () => {
-    await document.fonts.ready;
+// Long subjects or messages: shrink type until page 1 fits above the footer. Runs inside the rendered page.
+function fit() {
+  document.fonts.ready.then(() => {
     const p = document.querySelector('.p1'), msg = document.getElementById('msg'), h = document.getElementById('subj'), foot = p.querySelector('.foot');
     const over = () => msg.getBoundingClientRect().bottom > foot.getBoundingClientRect().top - 24;
     let hs = 38, ms = 15.4;
     while (h.getBoundingClientRect().height > 140 && hs > 26) { hs -= 2; h.style.fontSize = hs + 'px'; }
     while (over() && ms > 11) { ms -= 0.4; msg.style.fontSize = ms + 'px'; }
-    if (over()) { msg.style.lineHeight = '1.45'; }
+    if (over()) msg.style.lineHeight = '1.45';
+    window.__fitted = true;
   });
 }

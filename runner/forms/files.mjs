@@ -1,6 +1,11 @@
 // Branded files for forms that require an upload. Each campaign picks a template (default: The Bat Marketing).
 // PDF → both pages. Image-only forms → page 1 (subject + message) as PNG/JPG. Plain text when only .txt is allowed.
-import * as bat from './templates/bat-marketing.mjs';
+import fs from 'node:fs';
+import * as bat from '../../public/shared/templates/bat-marketing.js';
+
+const TYPES = { woff2: 'font/woff2', webp: 'image/webp', png: 'image/png' };
+let DATA = null;
+const dataAssets = (tpl) => (DATA ||= Object.fromEntries(Object.entries(tpl.ASSETS).map(([k, f]) => [k, `data:${TYPES[f.split('.').pop()]};base64,${fs.readFileSync(new URL(`../../public/templates/assets/${f}`, import.meta.url)).toString('base64')}`])));
 
 const TEMPLATES = { 'bat-marketing': bat };
 
@@ -26,8 +31,8 @@ export async function brandedFile(context, accept, profile) {
   const page = await context.newPage();
   try {
     await page.setViewportSize({ width: 816, height: 1056 });
-    await page.setContent(tpl.render({ ...(profile.fileData || {}), subject: profile.subject, message: profile.message }), { waitUntil: 'load' });
-    await tpl.fit(page);
+    await page.setContent(tpl.render({ ...(profile.fileData || {}), subject: profile.subject, message: profile.message }, dataAssets(tpl)), { waitUntil: 'load' });
+    await page.waitForFunction(() => window.__fitted === true, null, { timeout: 8000 }).catch(() => {});
     if (kind === 'pdf') return { name: `${base}.pdf`, mimeType: 'application/pdf', buffer: await page.pdf({ format: 'Letter', printBackground: true, preferCSSPageSize: true }) };
     const type = kind === 'jpg' ? 'jpeg' : 'png';
     return { name: `${base}.${kind}`, mimeType: `image/${type}`, buffer: await page.locator('.p1').screenshot({ type, ...(type === 'jpeg' ? { quality: 88 } : {}) }) };

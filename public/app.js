@@ -1,6 +1,7 @@
 // LeadsHunter web app (phase 1: leads). Plain ES modules, no build step.
 import { buildCells, cityRadiusKm } from './shared/grid.js';
 import { parseAddress, prettyPhone } from './shared/normalize.js';
+import { install as installOutreach, loadOutreach, addToCampaign, outreachNav } from './outreach.js';
 
 /* ================================================================ basics */
 const $ = s => document.querySelector(s);
@@ -193,7 +194,6 @@ async function initLeads() {
 const NAV = [
   ['leads', 'Leads', 'leads'], ['find', 'Find leads', 'find'], ['industries', 'Industries', 'industries'],
 ];
-const SOON = [['Campaigns', 'campaigns'], ['Manual queue', 'manual'], ['Messages', 'messages'], ['Sender profiles', 'senders']];
 function shell() {
   $('#root').innerHTML = `<div class="app">
     <aside class="rail">
@@ -211,7 +211,7 @@ function shell() {
 }
 function renderNav(active) {
   $('#nav').innerHTML = `<div class="nav-label">Leads</div>` + NAV.map(([id, label, icon]) => `<a href="#${id}" class="${active === id ? 'on' : ''}">${ic(icon)}${label}${id === 'leads' ? `<span class="count">${ST.leads.length >= 1000 ? (ST.leads.length / 1000).toFixed(ST.leads.length >= 10000 ? 0 : 1) + 'k' : ST.leads.length}</span>` : ''}</a>`).join('')
-    + `<div class="nav-label">Outreach</div>` + SOON.map(([l, i]) => `<a class="soon" aria-disabled="true">${ic(i)}${l}<small>Next</small></a>`).join('')
+    + `<div class="nav-label">Outreach</div>` + outreachNav().map(([id, label, icon, n]) => `<a href="#${id}" class="${active === id ? 'on' : ''}">${ic(icon)}${label}${n ? `<span class="count hot">${n > 999 ? '999+' : n}</span>` : ''}</a>`).join('')
     + `<div class="nav-label">Workspace</div><a href="#usage" class="${active === 'usage' ? 'on' : ''}">${ic('chart')}Usage</a>`;
   const rc = $('#railcount'); if (rc) rc.textContent = `${fmt(ST.leads.length)} leads stored here, so filtering is instant and free.`;
 }
@@ -254,17 +254,17 @@ document.addEventListener('submit', async (e) => {
 
 /* ================================================================ router */
 const TITLES = { leads: 'Leads', find: 'Find leads', industries: 'Industries', usage: 'Usage' };
-const V = {}, MOUNT = {};
+const V = {}, MOUNT = {}, CRUMBS = {}, NAV_ACTIVE = {};
 function render() {
-  const view = (location.hash || '#leads').slice(1);
+  const [view, arg] = (location.hash || '#leads').slice(1).split('/');
   const v = V[view] ? view : 'leads';
-  CURRENT_VIEW = v;
-  renderNav(v);
-  $('#crumbs').innerHTML = `<span>Workspace</span><span>›</span><b>${TITLES[v]}</b>`;
-  $('#page').innerHTML = V[v]();
-  MOUNT[v] && MOUNT[v]();
+  CURRENT_VIEW = v; CURRENT_ARG = arg;
+  renderNav(NAV_ACTIVE[v] || v);
+  $('#crumbs').innerHTML = `<span>Workspace</span><span>›</span>` + (CRUMBS[v] ? CRUMBS[v](arg) : `<b>${TITLES[v]}</b>`);
+  $('#page').innerHTML = V[v](arg);
+  MOUNT[v] && MOUNT[v](arg);
 }
-let CURRENT_VIEW = null;
+let CURRENT_VIEW = null, CURRENT_ARG = null;
 window.addEventListener('hashchange', () => {
   // Remember where the leads list was, so coming back lands in the same place.
   if (CURRENT_VIEW === 'leads') { const vt = $('#vt'); if (vt) L$.vtScroll = vt.scrollTop; L$.winScroll = window.scrollY; }
@@ -272,7 +272,7 @@ window.addEventListener('hashchange', () => {
   if (CURRENT_VIEW !== 'leads') window.scrollTo(0, 0);
 });
 function onLeadsChanged() {
-  renderNav((location.hash || '#leads').slice(1));
+  if (CURRENT_VIEW) renderNav(NAV_ACTIVE[CURRENT_VIEW] || CURRENT_VIEW);
   if ($('#vt')) { L$.viewCounts = null; leadsUpdate(); }
   rerenderInd();
 }
@@ -468,7 +468,7 @@ function renderSel() {
   const n = L$.sel.size, m = L$.res.length, allIn = m && n >= m && L$.res.every(l => L$.sel.has(l.id));
   const cb = $('#cb-all'); if (cb) cb.className = 'cb ' + (allIn ? 'on' : n ? 'part' : '');
   $('#lf-selbar').innerHTML = n ? `<div class="selbar"><b class="num">${fmt(n)} selected</b>${!allIn && m > n ? `<button class="linkbtn" data-act="selall">Select all ${fmt(m)} matching</button>` : ''}<button class="linkbtn" data-act="clearsel">Clear selection</button>
-    <div class="selacts"><button class="btn sm ghost" data-act="export">${ic('download', 14)}Export</button><button class="btn sm ghost" data-act="checkmodal">${ic('globe', 14)}Check websites</button><button class="btn sm ghost" data-act="bdnc">${ic('shield', 14)}Do not contact</button></div></div>` : '';
+    <div class="selacts"><button class="btn sm" data-act="addcamp">${ic('campaigns', 14)}Add to campaign</button><button class="btn sm ghost" data-act="export">${ic('download', 14)}Export</button><button class="btn sm ghost" data-act="checkmodal">${ic('globe', 14)}Check websites</button><button class="btn sm ghost" data-act="bdnc">${ic('shield', 14)}Do not contact</button></div></div>` : '';
 }
 function renderRows() {
   const vt = $('#vt'), body = $('#vt-body'); if (!vt || !body) return;
@@ -1292,6 +1292,7 @@ document.addEventListener('click', async (e) => {
     case 'clearsel': L$.sel.clear(); renderSel(); renderRows(); break;
     case 'export': openExport(L$.sel.size ? 'sel' : 'view'); break;
     case 'checkmodal': checkModal([...L$.sel]); break;
+    case 'addcamp': addToCampaign([...L$.sel]); break;
     case 'checkone': checkModal([+t.closest('[data-id]').dataset.id]); break;
     case 'bdnc': {
       const ids = [...L$.sel];
@@ -1420,8 +1421,13 @@ async function boot() {
   ST.industries = data.industries; ST.searches = data.searches; ST.hiddenNames = data.hiddenNames || {}; ST.config = data.config; ST.cols = data.cols;
   try { ST.views = (await api('GET', '/api/views')).views; } catch { ST.views = []; }
   shell(); render();
+  loadOutreach();
   await initLeads();
   if (ST.searches.some(ACTIVE)) startPolling();
   setInterval(() => { if (!document.hidden && !pollTimer) sync(); }, 60000);
 }
+installOutreach({
+  $, esc, fmt, ic, api, toast, closeOverlay, whenPT, ST, V, MOUNT, TITLES, CRUMBS, NAV_ACTIVE, render, renderNav, sync: () => sync(),
+  currentView: () => CURRENT_VIEW, currentArg: () => CURRENT_ARG, clearSelection: () => { L$.sel.clear(); if ($('#vt')) { renderSel(); renderRows(); } },
+});
 boot();
