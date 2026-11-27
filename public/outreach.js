@@ -138,12 +138,17 @@ function actionsHTML(c) {
   if (c.mode === 'manual') {
     return `${c.status === 'active' ? `<a class="btn" href="#manual" data-o="toqueue">${A.ic('manual', 14)}Open Manual queue${c.counts.manual ? ` <span class="n num">${A.fmt(c.counts.manual)}</span>` : ''}</a><button class="btn" data-o="pause">Pause</button>` : `<button class="btn primary" data-o="launchmanual">${A.ic('play', 13)}${c.status === 'paused' ? 'Resume' : 'Launch campaign'}</button>`}`;
   }
-  const live = jobActive(c.job);
-  const left = Math.max(0, c.daily_limit - c.today);
-  return `<button class="btn" data-o="test" ${live || !c.counts.queued ? 'disabled' : ''} title="Fills up to 10 forms and stops before pressing send">${A.ic('check', 14)}Test run</button>
-    <button class="btn" data-o="sendnow" ${live || !c.counts.queued || !left || c.status === 'draft' ? 'disabled' : ''} title="${c.status === 'draft' ? 'Start the campaign first' : !left ? "Today's limit is reached" : 'Send the next batch now, outside the schedule'}">${A.ic('campaigns', 14)}Send now</button>
-    ${c.status === 'active' ? `<button class="btn" data-o="pause">${scheduled(c) ? 'Cancel schedule' : 'Pause'}</button>` : `<button class="btn primary" data-o="start">${A.ic('play', 13)}${c.status === 'paused' ? 'Resume' : 'Start campaign'}</button>`}`;
+  const live = jobActive(c.job), left = Math.max(0, c.daily_limit - c.today), canTest = !live && c.counts.queued > 0;
+  // Only show what can be used right now: no greyed-out buttons.
+  if (c.status === 'active') {
+    if (scheduled(c)) return `<button class="btn" data-o="pause">Cancel schedule</button>`;
+    const items = [canTest && left ? ['sendnow', A.ic('campaigns', 14), 'Send next batch now', `Up to ${Math.min(40, left, c.counts.queued)} forms, outside the schedule`] : null,
+      canTest ? ['test', A.ic('check', 14), 'Test run', 'Fills up to 10 forms without sending'] : null].filter(Boolean);
+    return `${items.length ? `<div class="kebab cmenu"><button class="iconbtn" data-o="cmenu" aria-label="More actions" aria-haspopup="menu">⋯</button>${CMENU.open ? `<div class="menu" role="menu">${items.map(([a, ic, t, d]) => `<button role="menuitem" data-o="${a}">${ic}<span><b>${t}</b><small>${d}</small></span></button>`).join('')}</div>` : ''}</div>` : ''}<button class="btn" data-o="pause">Pause</button>`;
+  }
+  return `${canTest ? `<button class="btn" data-o="test" title="Fills up to 10 forms and stops before pressing send">${A.ic('check', 14)}Test run</button>` : ''}<button class="btn primary" data-o="start">${A.ic('play', 13)}${c.status === 'paused' ? 'Resume' : 'Start campaign'}</button>`;
 }
+const CMENU = { open: false };
 function statsHTML(c) {
   const n = c.counts;
   return `<div><span>Queued</span><b class="num">${A.fmt(n.queued + n.sending)}</b></div><div><span>Sent</span><b class="num" style="color:var(--ok)">${A.fmt(contacted(c))}</b>${n.submitted ? `<button class="linkbtn muted" data-o="reviewnoconf" style="font-size:11.5px;text-align:left">${A.fmt(n.submitted)} without confirmation · Review</button>` : ''}</div>
@@ -704,7 +709,7 @@ const curCampaign = () => A.currentView() === 'campaign' ? OS.campaigns.find(c =
 
 async function onClick(e) {
   const t = e.target;
-  if (!t.closest('.kebab')) document.querySelectorAll('.oi .menu').forEach(m => m.remove());
+  if (!t.closest('.kebab')) { document.querySelectorAll('.oi .menu').forEach(m => m.remove()); if (CMENU.open) { CMENU.open = false; const c0 = curCampaign(); const el = A.$('#c-actions'); if (c0 && el) el.innerHTML = actionsHTML(c0); } }
   const cpy = t.closest('[data-copy]');
   if (cpy) { try { await navigator.clipboard.writeText(cpy.dataset.copy); const s = cpy.querySelector('span'); s.textContent = 'Copied'; setTimeout(() => { s.textContent = 'Copy'; }, 1400); } catch { A.toast('Copy failed. Select the text instead.', 'alert'); } return; }
   const tag = t.closest('[data-tag]');
@@ -777,12 +782,13 @@ async function onClick(e) {
       break;
     }
     case 'test': {
-      b.disabled = true;
+      CMENU.open = false; b.disabled = true;
       try { const r = await A.api('POST', `/api/campaigns/${c.id}/run`, { mode: 'test', count: 10 }); upsertCampaign(r.campaign); cp(c.id).prevJob = { status: 'queued', done: 0 }; refreshCampaignChrome(r.campaign); A.toast('Test run started. It fills up to 10 forms and sends nothing.'); refreshCampaign(c.id).catch(() => {}); }
       catch (err) { A.toast(err.message, 'alert'); b.disabled = false; }
       break;
     }
-    case 'sendnow': sendNowModal(c); break;
+    case 'sendnow': CMENU.open = false; sendNowModal(c); break;
+    case 'cmenu': CMENU.open = !CMENU.open; A.$('#c-actions').innerHTML = actionsHTML(c); break;
     case 'sendnowok': {
       const n = Math.max(1, +A.$('#sn-n').value || 0); b.disabled = true;
       try { const r = await A.api('POST', `/api/campaigns/${c.id}/run`, { mode: 'send', count: n }); upsertCampaign(r.campaign); A.closeOverlay(); cp(c.id).prevJob = { status: 'queued', done: 0 }; refreshCampaignChrome(r.campaign); A.toast(`Sending ${r.campaign.job?.total || n} forms now`); refreshCampaign(c.id).catch(() => {}); }
@@ -880,11 +886,11 @@ function startModal(c) {
   const times = []; for (let h = 0; h < 24; h++) for (const m of [0, 30]) times.push(`${String(h).padStart(2, '0')}:${m ? '30' : '00'}`);
   const tl = t => { const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
   A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Start campaign">
-    <div class="card-h"><div><h2>Start “${A.esc(c.name)}”</h2><p>Sends up to ${c.daily_limit} a day, ${schedLbl(c)}. All times are Los Angeles time.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
+    <div class="card-h"><div><h2>Start “${A.esc(c.name)}”</h2><p>Up to ${c.daily_limit} forms a day, ${schedLbl(c)}.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
     <div class="card-b" style="display:flex;flex-direction:column;gap:10px">
       <label class="opt on" id="st-o1"><input type="radio" name="stwhen" id="st-now" checked><div><b>Start now</b><span>${inWindowNow(c) ? 'The first batch goes out within a few minutes.' : `It's outside your sending hours, so sending begins ${nextWindowLbl(c)}.`}</span></div></label>
       <label class="opt" id="st-o2"><input type="radio" name="stwhen" id="st-later"><div style="flex:1"><b>Schedule a start</b><span>Nothing is sent before this time.</span>
-        <div class="row st-pick" style="margin-top:8px;flex-wrap:nowrap"><input class="input" type="date" id="st-date" min="${today}" value="${tomorrow}"><select class="input" id="st-time">${times.map(t => `<option value="${t}" ${t === `${String(c.window_start).padStart(2, '0')}:00` ? 'selected' : ''}>${tl(t)}</option>`).join('')}</select><span class="help" style="white-space:nowrap">PT</span></div></div></label>
+        <div class="st-pick"><input class="input" type="date" id="st-date" min="${today}" value="${tomorrow}" aria-label="Start date"><select class="input" id="st-time" aria-label="Start time">${times.map(t => `<option value="${t}" ${t === `${String(c.window_start).padStart(2, '0')}:00` ? 'selected' : ''}>${tl(t)}</option>`).join('')}</select><span class="st-tz">Los Angeles time</span></div></div></label>
       <div class="help" id="st-err" style="color:var(--bad)"></div></div>
     <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-o="startok">${A.ic('play', 13)}<span id="st-go">Start campaign</span></button></div></div></div>`;
 }

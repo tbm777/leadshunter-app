@@ -1277,3 +1277,18 @@ body.dragging-notes,body.dragging-notes *{user-select:none;cursor:grabbing!impor
 .ns-empty{padding:12px;color:var(--muted);font-size:13px;text-align:center}
 .mqbar .ns-btn.mqcamp{width:auto;flex:0 1 220px;min-width:150px}
 .st-pick .ns-btn{width:auto;min-width:120px}
+/* dialogs: the close button always stays in the top-right corner */
+.modal .card-h:first-child{flex-wrap:nowrap;align-items:flex-start}
+.modal .card-h:first-child>div{min-width:0;flex:1}
+.modal .card-h:first-child>[data-act="close"]{flex:none;margin:-4px -6px 0 0}
+/* start dialog */
+.st-pick{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
+.st-pick input[type=date]{width:auto;height:38px;padding:0 10px;color-scheme:light dark}
+.st-pick .ns-btn{width:auto;min-width:130px}
+.st-tz{font-size:12px;color:var(--muted)}
+/* campaign ⋯ menu */
+.cmenu .menu{min-width:260px;right:0;top:calc(100% + 6px)}
+.cmenu .menu button{align-items:flex-start;padding:9px 10px}
+.cmenu .menu button svg{margin-top:2px;color:var(--muted);flex:none}
+.cmenu .menu span{display:flex;flex-direction:column;gap:1px}.cmenu .menu b{font-weight:600;font-size:13px}.cmenu .menu small{font-size:12px;color:var(--muted)}
+.chead .row{align-items:center}
