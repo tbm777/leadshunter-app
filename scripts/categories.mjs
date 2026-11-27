@@ -20,7 +20,7 @@ const search = ([lat, lon], term) => new Promise(async (resolve) => {
   const killer = setTimeout(() => child.kill('SIGKILL'), 120000);
   child.on('close', async () => {
     clearTimeout(killer); const out = [];
-    try { for (const line of (await readFile(of, 'utf8')).split('\n')) { if (!line.trim()) continue; let v; try { v = JSON.parse(line); } catch { continue; } for (const o of (Array.isArray(v) ? v : [v])) if (o) out.push({ main: o.category || null, all: Array.isArray(o.categories) ? o.categories : [] }); } } catch { /* none */ }
+    try { for (const line of (await readFile(of, 'utf8')).split('\n')) { if (!line.trim()) continue; let v; try { v = JSON.parse(line); } catch { continue; } for (const o of (Array.isArray(v) ? v : [v])) if (o) { if (!search.keys) { search.keys = Object.keys(o).join(', '); } const cats = Array.isArray(o.categories) ? o.categories : Array.isArray(o.category) ? o.category : []; out.push({ main: (typeof o.category === 'string' && o.category) || o.main_category || o.type || cats[0] || null, all: cats }); } } } catch { /* none */ }
     rm(qf, { force: true }); rm(of, { force: true }); resolve(out);
   });
 });
@@ -29,6 +29,7 @@ const jobs = inds.flatMap(ind => JSON.parse(ind.terms || '[]').slice(0, 2).flatM
 const tally = {}; let i = 0;
 await Promise.all(Array.from({ length: 4 }, async () => { while (i < jobs.length) { const { ind, t, c } = jobs[i++]; for (const r of await search(c, t)) { const m = (tally[ind.name] ||= { main: {}, n: 0 }); m.n++; if (r.main) m.main[r.main] = (m.main[r.main] || 0) + 1; } } }));
 rm(dir, { recursive: true, force: true });
+console.log('Result fields:', search.keys);
 say('## Google categories found per industry (main category of each result; ✓ = currently accepted)');
 for (const ind of inds) {
   const t = tally[ind.name]; if (!t) { say(`\n### ${ind.name}: no results`); continue; }
