@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "LeadsHunter Form Filler",
+  "version": "1.0.0",
+  "description": "Fills contact forms from your LeadsHunter manual queue. You solve the CAPTCHA and press send.",
+  "permissions": ["storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{ "matches": ["<all_urls>"], "js": ["fill.js"], "run_at": "document_idle", "all_frames": true }],
+  "icons": { "48": "icon48.png", "128": "icon128.png" },
+  "action": { "default_title": "LeadsHunter Form Filler", "default_icon": { "48": "icon48.png" } }
+}
