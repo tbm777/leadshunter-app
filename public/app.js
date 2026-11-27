@@ -23,6 +23,7 @@ function dayPT(ms) {
   return k === dayKey.format(new Date()) ? 'Today' : k === dayKey.format(new Date(Date.now() - 864e5)) ? 'Yesterday' : dateFmt.format(new Date(ms));
 }
 const P = {
+  phone: '<path d="M5 3.5h3.2l1.6 4.2-2.1 1.4a11 11 0 0 0 5.7 5.7l1.4-2.1 4.2 1.6v3.2A2 2 0 0 1 17 20.5 14.5 14.5 0 0 1 3.5 7 2 2 0 0 1 5 3.5Z"/>',
   find: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   leads: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c1.8.7 3 2.5 3.5 5.2"/>',
@@ -78,8 +79,8 @@ const SS_SHORT = ['Loads', 'Slow', 'Down', 'Not checked', '', 'Blocked us', 'Par
 const SS_C = ['ok', 'warn', 'bad', 'faint', 'faint', 'warn', 'faint', 'faint'];
 const FM = ['Open form', 'CAPTCHA', 'No form found', 'Not checked yet', 'Needs browser check'];
 const PF = ['WordPress', 'Wix', 'Squarespace', 'Webflow', 'GoDaddy', 'Shopify', 'Duda', 'Weebly', 'HubSpot', 'Custom', 'Not checked'];
-const LS = ['New', 'In campaign', 'Contacted', 'Do not contact'];
-const LS_C = ['', 'info', 'ok', 'bad'];
+const LS = ['New', 'In campaign', 'Contacted', 'Do not contact', 'Replied'];
+const LS_C = ['', 'info', 'ok', 'bad', 'manual'];
 const LOCS = [];            // "City, Region" strings
 const LOC_IDX = new Map();
 function locKey(l) { const k = [l.city, l.region].filter(Boolean).join(', ') || l.country || 'Unknown'; let i = LOC_IDX.get(k); if (i === undefined) { i = LOCS.length; LOCS.push(k); LOC_IDX.set(k, i); } return i; }
@@ -291,7 +292,7 @@ const RV_STOPS = [0, 1, 10, 25, 50, 100, 250, 500, 1000, Infinity];
 const ROWH = 54;
 
 function facetArrays() {
-  return { 0: new Map(), 1: new Int32Array(LOCS.length), 2: new Int32Array(8), 3: new Int32Array(9), 4: new Int32Array(2), 5: new Int32Array(8), 6: new Int32Array(5), 7: new Int32Array(PF.length), 8: new Int32Array(2), 9: new Int32Array(2), 10: new Int32Array(4), 12: new Map() };
+  return { 0: new Map(), 1: new Int32Array(LOCS.length), 2: new Int32Array(8), 3: new Int32Array(9), 4: new Int32Array(2), 5: new Int32Array(8), 6: new Int32Array(5), 7: new Int32Array(PF.length), 8: new Int32Array(2), 9: new Int32Array(2), 10: new Int32Array(5), 12: new Map() };
 }
 function runFilter() {
   const t0 = performance.now(), F = L$.F, q = F.q.trim().toLowerCase();
@@ -571,7 +572,7 @@ function leadDrawer(id) {
       ${row('Category', esc(L.category || '—'))}
       ${row('Found by', `${esc(searchName(L.search_id))} · ${dayPT(L.created_at)}`)}</dl></section>
     <section class="ld-sec"><h5>Status</h5>
-      <div class="seg-c ld-status" role="radiogroup" aria-label="Lead status">${[0, 2, 3].map(i => `<button type="button" role="radio" aria-checked="${L.status === i}" class="${L.status === i ? 'on' : ''}" data-lstat="${L.id}:${i}">${LS[i]}</button>`).join('')}</div>
+      <div class="seg-c ld-status" role="radiogroup" aria-label="Lead status">${[0, 2, 4, 3].map(i => `<button type="button" role="radio" aria-checked="${L.status === i}" class="${L.status === i ? 'on' : ''}" data-lstat="${L.id}:${i}">${LS[i]}</button>`).join('')}</div>
       <div id="ld-out" data-lid="${L.id}">${L.status === 1 ? '<span class="help">In a campaign…</span>' : ''}</div></section>
     <section class="ld-sec" style="border-bottom:0"><h5>Notes</h5><textarea class="input" id="dnote" data-lnote="${L.id}" style="min-height:84px" placeholder="Add a note about this business">${esc(L.notes || '')}</textarea><span class="help" id="dnote-h">Saved automatically.</span></section>
   </div></div>`;
@@ -1232,7 +1233,7 @@ document.addEventListener('click', async (e) => {
     const [lid, st] = v.split(':').map(Number), cur = ST.byId.get(lid);
     if (cur && cur.status === st) return;
     if (cur && cur.status === 1 && st === 0) { toast('This lead is in a campaign. Open the campaign and remove it there to set it back to New.', 'alert'); return; }
-    saveLead(lid, { status: st }, () => { toast(st === 3 ? 'Marked do not contact. Unsent campaign messages are skipped.' : st === 2 && cur?.status === 1 ? 'Marked contacted. Unsent campaign messages are skipped.' : 'Status saved'); if (DRAWER_ID === lid) leadDrawer(lid); });
+    saveLead(lid, { status: st }, () => { toast(st === 4 ? 'Marked replied. Follow-ups for this lead are stopped.' : st === 3 ? 'Marked do not contact. Unsent campaign messages are skipped.' : st === 2 && cur?.status === 1 ? 'Marked contacted. Unsent campaign messages are skipped.' : 'Status saved'); if (DRAWER_ID === lid) leadDrawer(lid); });
     return;
   }
   if ((v = ds('xpreset')) !== undefined) { XP.preset = v; XP.custom = false; XP.cols = new Set(XPRESETS[v]); exportModal(); return; }

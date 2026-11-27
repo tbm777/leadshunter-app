@@ -76,6 +76,7 @@ async function route(req, env, url, ctx) {
   if ((mm = p.match(/^\/api\/senders\/(\d+)$/))) { if (m === 'PUT') return O.saveSender(env, await body(req), +mm[1]); if (m === 'DELETE') return O.archiveSender(env, +mm[1]); }
   if (p === '/api/campaigns' && m === 'POST') return O.saveCampaign(env, await body(req));
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)$/))) { if (m === 'GET') return O.getCampaign(env, +mm[1]); if (m === 'PUT') return O.saveCampaign(env, await body(req), +mm[1]); if (m === 'DELETE') return O.deleteCampaign(env, +mm[1], await body(req)); }
+  if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/steps$/)) && m === 'PUT') return O.saveSteps(env, +mm[1], await body(req));
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/status$/)) && m === 'POST') return O.setCampaignStatus(env, +mm[1], await body(req));
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/leads$/)) && m === 'POST') return O.addLeads(env, +mm[1], await body(req));
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/remove$/)) && m === 'POST') return O.removeItems(env, +mm[1], await body(req));
@@ -369,7 +370,7 @@ async function getChanges(env, url) {
   return json({ cols: LEAD_COLS, rows: r, seq: last, more: r.length === limit });
 }
 // 1 (in campaign) is set by campaigns only, never by hand.
-const LEAD_STATUS = [0, 2, 3];
+const LEAD_STATUS = [0, 2, 3, 4];   // 4 = replied: stops follow-ups
 async function patchLead(env, id, b) {
   const sets = [], vals = [];
   if (b.status !== undefined) { if (+b.status === 1) throw new HttpError(400, '“In campaign” is set automatically when you add a lead to a campaign.');

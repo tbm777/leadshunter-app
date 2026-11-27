@@ -128,7 +128,7 @@ function campaignView(arg) {
     <div id="c-banner">${bannerHTML(c)}</div>
     ${c.status === 'draft' ? `<div id="c-ready">${readyHTML(c)}</div>` : ''}
     <div class="card ministats ostats" id="c-stats">${statsHTML(c)}</div>
-    <div class="ctabs" role="tablist">${[['leads', 'Leads', c.counts.total], ['message', 'Message'], ['settings', 'Settings']].map(([k, l, n]) => `<button role="tab" aria-selected="${P.tab === k}" class="${P.tab === k ? 'on' : ''}" data-ctab="${k}">${l}${n != null ? ` <span class="n num">${A.fmt(n)}</span>` : ''}</button>`).join('')}</div>
+    <div class="ctabs" role="tablist">${[['leads', 'Leads', c.counts.total], ['message', c.steps && c.steps.length ? `Sequence <span class="n num">${c.steps.length + 1} steps</span>` : 'Sequence'], ['settings', 'Settings']].map(([k, l, n]) => `<button role="tab" aria-selected="${P.tab === k}" class="${P.tab === k ? 'on' : ''}" data-ctab="${k}">${l}${n != null ? ` <span class="n num">${A.fmt(n)}</span>` : ''}</button>`).join('')}</div>
     <div id="c-tab">${tabHTML(c)}</div>`;
 }
 function cmeta(c) {
@@ -152,7 +152,7 @@ const CMENU = { open: false };
 function statsHTML(c) {
   const n = c.counts;
   return `<div><span>Queued</span><b class="num">${A.fmt(n.queued + n.sending)}</b></div><div><span>Sent</span><b class="num" style="color:var(--ok)">${A.fmt(contacted(c))}</b>${n.submitted ? `<button class="linkbtn muted" data-o="reviewnoconf" style="font-size:11.5px;text-align:left">${A.fmt(n.submitted)} without confirmation · Review</button>` : ''}</div>
-    <div><span>Needs you</span><b class="num" style="color:${n.manual ? 'var(--manual)' : 'inherit'}">${A.fmt(n.manual)}</b></div><div><span>Failed or skipped</span><b class="num">${A.fmt(n.failed + n.skipped)}</b></div>
+    <div><span>Needs you</span><b class="num" style="color:${n.manual ? 'var(--manual)' : 'inherit'}">${A.fmt(n.manual)}</b></div>${(c.steps || []).length ? `<div><span>Replied</span><b class="num" style="color:var(--manual)">${A.fmt(n.replied || 0)}</b>${n.scheduled ? `<small class="help">${A.fmt(n.scheduled)} follow-up${n.scheduled === 1 ? '' : 's'} scheduled</small>` : ''}</div>` : ''}<div><span>Failed or skipped</span><b class="num">${A.fmt(n.failed + n.skipped)}</b></div>
     <div><span>Today</span><b class="num">${A.fmt(c.today)}${c.mode === 'manual' ? '' : ` <small>/ ${c.daily_limit}</small>`}</b></div>`;
 }
 function readyHTML(c) {
@@ -180,7 +180,7 @@ function bannerHTML(c) {
 }
 function tabHTML(c) {
   const P = cp(c.id);
-  if (P.tab === 'message') return messageTab(c);
+  if (P.tab === 'message') return sequenceTab(c);
   if (P.tab === 'settings') return settingsTab(c);
   return leadsTab(c);
 }
@@ -207,9 +207,11 @@ function itemRow(it, withCampaign = false) {
   const test = it.test_status ? `<span class="dtag ${it.test_status === 'ready' ? 'okt' : it.test_status === 'manual' ? 'mant' : 'badt'}" title="${A.esc(reasonText(it.test_reason) || it.evidence || '')}">${it.test_status === 'ready' ? 'Ready' : it.test_status === 'manual' ? 'Needs you' : 'Failed'}</span>${it.test_reason ? `<small>${A.esc(reasonText(it.test_reason))}</small>` : ''}` : '<span class="faint">—</span>';
   const when = it.sent_at || it.updated_at;
   const form = it.form_url || it.website;
+  const cc = OS.campaigns.find(x => x.id === it.campaign_id), total = 1 + ((cc && cc.steps) || []).length;
+  const seq = total > 1 && SENT.concat('manual', 'sending').includes(it.status) ? (it.lead_status === 4 ? '<small class="seqp rep">Replied · sequence stopped</small>' : it.next_at ? `<small class="seqp">Step ${it.step} of ${total} next · ${A.esc(A.whenPT(it.next_at).replace(' PT', ''))}</small>` : it.step >= total && SENT.includes(it.status) ? `<small class="seqp done">All ${total} steps done</small>` : it.step > 1 ? `<small class="seqp">Step ${it.step} of ${total}</small>` : '') : '';
   return `<div class="oi oi-click" data-oid="${it.id}" data-olead="${it.lead_id}" data-camp="${it.campaign_id}" title="Show lead details and what was sent">
     <div class="oi-b"><b>${A.esc(it.name)}</b><span>${A.esc(domain(it.website))}${withCampaign ? ` · ${A.esc(it.campaign)}` : ''}</span></div>
-    <div class="oi-r">${pill(it.status)}${reason ? `<small title="${A.esc(reason)}">${A.esc(reason)}</small>` : ''}</div>
+    <div class="oi-r">${pill(it.status)}${reason ? `<small title="${A.esc(reason)}">${A.esc(reason)}</small>` : ''}${seq}</div>
     <div class="oi-t">${test}</div>
     <div class="oi-w num">${when ? A.esc(A.whenPT(when).replace(' PT', '')) : ''}</div>
     <div class="oi-a">${form ? `<a class="iconbtn sm" href="${A.esc(form)}" target="_blank" rel="noopener" title="Open the form" aria-label="Open the form">${A.ic('ext', 14)}</a>` : ''}
@@ -221,6 +223,7 @@ function kebabMenu(it) {
   if (['manual', 'failed', 'queued'].includes(it.status)) acts.push(['sent', A.ic('check', 14) + 'Mark as sent']);
   if (['manual', 'failed', 'queued'].includes(it.status)) acts.push(['skip', A.ic('x', 14) + 'Skip']);
   if (['queued', 'manual', 'failed', 'skipped'].includes(it.status)) acts.push(['remove', A.ic('trash', 14) + 'Remove from campaign']);
+  if (SENT.concat('manual').includes(it.status) && it.lead_status !== 4) acts.push(['replied', A.ic('messages', 14) + 'Mark replied (stops follow-ups)']);
   acts.push(['dnc', A.ic('shield', 14) + 'Do not contact', 'danger']);
   return `<div class="menu" role="menu">${acts.map(([a, l, cls]) => `<button role="menuitem" class="${cls || ''}" data-oact="${a}">${l}</button>`).join('')}</div>`;
 }
@@ -262,7 +265,7 @@ function renderPreview(c) {
   const P = cp(c.id), el = A.$('#pv'); if (!el) return;
   const leads = previewLeads(c); P.previewIdx = ((P.previewIdx % leads.length) + leads.length) % leads.length;
   const lead = leads[P.previewIdx];
-  const subj = A.$('#m-subj')?.value ?? c.subject, body = A.$('#m-body')?.value ?? c.message;
+  const subj = (A.$('#m-subj') || A.$('#st-subj'))?.value || c.subject, body = (A.$('#m-body') || A.$('#st-body'))?.value ?? c.message;
   A.$('#pv-who').textContent = lead === SAMPLE ? 'Sample business' : `${cleanCompanyName(lead.name)}${leads.length > 1 ? ` · ${P.previewIdx + 1}/${leads.length}` : ''}`;
   const s = personalize(subj, lead), m = personalize(body, lead);
   if (P.previewMode === 'file') {
@@ -300,6 +303,61 @@ async function flushSave() {
     try { const r = await A.api('PUT', `/api/campaigns/${c.id}`, { subject, message }); upsertCampaign(r.campaign); const sv = A.$('#m-save'); if (sv) sv.innerHTML = `<span class="okline">${A.ic('check', 12)}Saved</span>`; const rd = A.$('#c-ready'); if (rd) rd.innerHTML = readyHTML(r.campaign); }
     catch (e) { const sv = A.$('#m-save'); if (sv) sv.innerHTML = `<span style="color:var(--bad)">${A.esc(e.message)}</span>`; else A.toast(e.message, 'alert'); }
   }
+}
+
+/* sequence tab: step 1 is the campaign message; follow-ups are steps 2 and 3 */
+const stepText = (c, n) => { if (!n || n <= 1) return { channel: 'form', subject: c.subject, message: c.message }; const st = (c.steps || []).find(x => x.step === n); return st ? { channel: st.channel, subject: st.subject || c.subject, message: st.message, delay_days: st.delay_days } : { channel: 'form', subject: c.subject, message: c.message }; };
+function seqBar(c) {
+  const P = cp(c.id), steps = c.steps || [];
+  const chip = (n, ch, sub) => `<button class="seqstep ${P.step === n ? 'on' : ''}" data-seqstep="${n}"><i>${n}</i><span><b>${ch === 'call' ? 'Call' : 'Contact form'}</b><small>${sub}</small></span></button>`;
+  let day = 0;
+  return `<div class="card seqbar">${chip(1, 'form', 'Day 0 · first message')}${steps.map(x => { day += x.delay_days; return `<span class="seqwait">${A.ic('arrow', 13)}<small>wait ${x.delay_days} business day${x.delay_days === 1 ? '' : 's'}</small></span>${chip(x.step, x.channel, `Day ${day} · follow-up`)}`; }).join('')}
+    ${steps.length < 2 ? `<button class="seqadd" data-o="addstep">${A.ic('plus', 14)}Add follow-up</button>` : ''}
+    <span class="seqnote">${steps.length ? 'Stops for a lead when you mark them Replied or Do not contact.' : 'Add a follow-up or a call. Sequences stop when a lead replies.'}</span></div>`;
+}
+function sequenceTab(c) {
+  const P = cp(c.id); P.step ||= 1;
+  if (P.step > 1 && !(c.steps || []).some(x => x.step === P.step)) P.step = 1;
+  return `${seqBar(c)}${P.step === 1 ? messageTab(c) : stepEditor(c, (c.steps || []).find(x => x.step === P.step))}`;
+}
+function stepEditor(c, st) {
+  const isCall = st.channel === 'call';
+  return `<div class="msgrid">
+    <div class="card"><div class="card-h"><div><h3>Step ${st.step}: ${isCall ? 'Call' : 'Follow-up message'}</h3><p>${isCall ? 'Shows up in your Manual queue with their phone number and this script.' : c.mode === 'manual' ? 'Goes to your Manual queue to send with Fill form.' : 'The robot sends it through the same contact form.'}</p></div><span class="help" id="st-save"></span></div>
+      <div class="card-b" style="display:flex;flex-direction:column;gap:14px">
+        <div class="row" style="gap:14px;align-items:flex-end">
+          <div class="field"><span class="flabel">Type</span><div class="seg-c"><button class="${!isCall ? 'on' : ''}" data-stch="form">${A.ic('messages', 13)}Contact form</button><button class="${isCall ? 'on' : ''}" data-stch="call">${A.ic('phone', 13)}Call</button></div></div>
+          <div class="field"><label for="st-delay">Send after</label><div class="sset-suffix"><input class="input" id="st-delay" type="number" min="1" max="30" value="${st.delay_days}"><span>business days</span></div></div>
+          <button class="btn ghost sm" data-o="rmstep" style="margin-left:auto;color:var(--bad)">${A.ic('trash', 13)}Remove step</button>
+        </div>
+        ${isCall ? '' : `<div class="field"><label for="st-subj">Subject <span class="opt-tag">empty = same as step 1</span></label><input class="input big" id="st-subj" value="${A.esc(st.subject)}" maxlength="200" placeholder="${A.esc(c.subject)}"></div>`}
+        <div class="field"><div class="row" style="justify-content:space-between"><label for="st-body">${isCall ? 'Call script' : 'Message'}</label><button class="linkbtn muted" data-o="frombook">${A.ic('playbook', 13)} Use from Playbook</button></div>
+          <textarea class="input mbody" id="st-body" maxlength="5000" placeholder="${isCall ? 'Hi, this is Alfred from The Bat Marketing. I sent a note through your website about…' : 'Hi [Company Name] team,&#10;&#10;Just following up on my note from last week…&#10;&#10;Best,&#10;Alfred'}">${A.esc(st.message)}</textarea></div>
+        <div class="tagbar"><span class="help">Insert</span>${MERGE_TAGS.map(t => `<button class="chip" data-tag="[${t}]">[${t}]</button>`).join('')}</div>
+      </div></div>
+    ${isCall ? `<div class="card pvcard"><div class="card-h"><h3>How it looks in your queue</h3></div><div class="card-b"><div class="callprev"><span class="pill" style="--c:var(--info)">Call</span><b>${A.esc(cleanCompanyName(previewLeads(c)[0].name))}</b><a class="callnum">${A.ic('phone', 15)}(512) 555-0142</a><p>${A.esc(personalize(st.message || 'Your script appears here.', previewLeads(c)[0]))}</p><div class="row" style="gap:6px"><span class="btn sm">Talked</span><span class="btn sm">Voicemail</span><span class="btn sm">No answer</span></div></div></div></div>`
+      : `<div class="card pvcard"><div class="card-h"><div class="seg-c"><button class="${cp(c.id).previewMode === 'text' ? 'on' : ''}" data-pvmode="text">Form text</button><button class="${cp(c.id).previewMode === 'file' ? 'on' : ''}" data-pvmode="file">File</button></div>
+      <div class="row pvnav"><button class="iconbtn sm" data-pvnav="-1" aria-label="Previous lead">${A.ic('back', 14)}</button><span id="pv-who" class="help"></span><button class="iconbtn sm" data-pvnav="1" aria-label="Next lead">${A.ic('arrow', 14)}</button></div></div><div id="pv" class="card-b"></div></div>`}
+  </div>`;
+}
+let stT = 0, stPendingC = null;
+function flushSteps() { if (stT) { clearTimeout(stT); stT = 0; if (stPendingC) saveSteps(stPendingC); } }
+function queueSteps(c, immediate) {
+  stPendingC = c;
+  const P = cp(c.id), st = (c.steps || []).find(x => x.step === P.step);
+  if (st && A.$('#st-body')) { st.message = A.$('#st-body').value; if (A.$('#st-subj')) st.subject = A.$('#st-subj').value; st.delay_days = Math.max(1, Math.min(30, +A.$('#st-delay').value || 3)); }
+  const sv = A.$('#st-save'); if (sv) sv.textContent = 'Saving…';
+  clearTimeout(stT); stT = setTimeout(() => { stT = 0; saveSteps(c); }, immediate ? 0 : 700);
+}
+async function saveSteps(c) {
+  try { const r = await A.api('PUT', `/api/campaigns/${c.id}/steps`, { steps: (c.steps || []).map(x => ({ channel: x.channel, delay_days: x.delay_days, subject: x.subject, message: x.message })) }); upsertCampaign(r.campaign); const sv = A.$('#st-save'); if (sv) sv.innerHTML = `<span class="okline">${A.ic('check', 12)}Saved</span>`; const bar = document.querySelector('.seqbar'); if (bar) bar.outerHTML = seqBar(r.campaign); }
+  catch (e) { const sv = A.$('#st-save'); if (sv) sv.innerHTML = `<span style="color:var(--bad)">${A.esc(e.message)}</span>`; else A.toast(e.message, 'alert'); }
+}
+async function playbookPicker(c) {
+  if (!NT.loaded) await loadNotes();
+  A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Use from Playbook">
+    <div class="card-h"><div><h2>Use from Playbook</h2><p>Copies the note's subject and message into this step.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
+    <div class="card-b" style="display:flex;flex-direction:column;gap:8px;max-height:60vh;overflow-y:auto">${NT.notes.length ? NT.notes.map(n => `<button class="opt sm pbpick" data-pbnote="${n.id}"><div style="text-align:left"><b>${A.esc(n.title || 'Untitled')}</b><span>${A.esc((n.subject || n.body || '').replace(/\s+/g, ' ').slice(0, 90))}</span></div></button>`).join('') : '<p class="help" style="margin:0">Your Playbook is empty. Write notes there first.</p>'}</div></div></div>`;
 }
 
 /* settings tab */
@@ -430,11 +488,11 @@ function extGuide() {
       <p class="help" style="margin:12px 0 0">Updating: download again, replace the folder's files, then click the reload icon on the extension in <code>opera://extensions</code>. The extension only acts on pages you open with Fill form, and it never solves CAPTCHAs.</p></div>
     <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Done</button></div></div></div>`;
 }
-const MQ_REASONS = [['all', 'All'], ['manual', 'Manual campaigns'], ['captcha', 'CAPTCHA'], ['interrupted', 'Interrupted'], ['login-required', 'Login'], ['other', 'Other']];
-const mqGroup = r => ['manual', 'captcha', 'interrupted', 'login-required'].includes(r) ? r : 'other';
+const MQ_REASONS = [['all', 'All'], ['call', 'Calls'], ['followup', 'Follow-ups'], ['manual', 'Manual campaigns'], ['captcha', 'CAPTCHA'], ['interrupted', 'Interrupted'], ['login-required', 'Login'], ['other', 'Other']];
+const mqGroup = r => ['call', 'followup', 'manual', 'captcha', 'interrupted', 'login-required'].includes(r) ? r : 'other';
 const ageLbl = t => { const m = Math.round((Date.now() - t) / 60000); return m < 60 ? `${Math.max(1, m)}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`; };
-const REASON_C = { manual: 'var(--accent)', captcha: 'var(--manual)', interrupted: 'var(--warn)', 'login-required': 'var(--info)', other: 'var(--idle)' };
-const REASON_SHORT = { manual: 'Manual', captcha: 'CAPTCHA', interrupted: 'Interrupted', 'login-required': 'Login', 'file-type': 'Word file', 'directory-page': 'Directory page' };
+const REASON_C = { call: 'var(--info)', followup: 'var(--ok)', manual: 'var(--accent)', captcha: 'var(--manual)', interrupted: 'var(--warn)', 'login-required': 'var(--info)', other: 'var(--idle)' };
+const REASON_SHORT = { call: 'Call', followup: 'Follow-up', manual: 'Manual', captcha: 'CAPTCHA', interrupted: 'Interrupted', 'login-required': 'Login', 'file-type': 'Word file', 'directory-page': 'Directory page' };
 function mqFiltered() {
   const q = (MQ.q || '').trim().toLowerCase();
   return MQ.items.filter(it => (MQ.reason === 'all' || mqGroup(it.reason) === MQ.reason) && (!MQ.camp || it.campaign_id === MQ.camp) && (!q || `${it.name} ${it.website || ''}`.toLowerCase().includes(q)));
@@ -454,7 +512,7 @@ function manualView() {
     <div class="mqgrid"><div class="card mqlist" id="mq-list">${mqList()}</div><div class="card mqwork" id="mq-detail">${mqDetail()}</div></div>`;
 }
 function mqHead() {
-  return `<div class="head"><div><div class="eyebrow">Outreach</div><h1>Manual queue</h1><p>${MQ.items.length ? `<b class="num">${A.fmt(MQ.items.length)}</b> form${MQ.items.length === 1 ? '' : 's'} need you.` : ''} Forms with a CAPTCHA to solve, plus anything the robot couldn't finish.${MQ.done ? ` <span class="okline">${A.ic('check', 12)}${MQ.done} done this session</span>` : ''}</p></div>
+  return `<div class="head"><div><div class="eyebrow">Outreach</div><h1>Manual queue</h1><p>${MQ.items.length ? `<b class="num">${A.fmt(MQ.items.length)}</b> ${MQ.items.length === 1 ? 'task needs' : 'tasks need'} you.` : ''} Calls and manual follow-ups from your sequences, forms with a CAPTCHA, and anything the robot couldn't finish.${MQ.done ? ` <span class="okline">${A.ic('check', 12)}${MQ.done} done this session</span>` : ''}</p></div>
     <div class="row">${hasExt() ? `<span class="extok">${A.ic('check', 13)}Form filler installed</span>` : `<button class="btn primary" data-o="extguide">${A.ic('download', 14)}Get the form filler</button>`}</div></div>`;
 }
 function mqBulkHTML() {
@@ -477,12 +535,14 @@ function mqList() {
 function mqDetail() {
   const it = MQ.items[MQ.sel]; if (!it || !mqFiltered().includes(it)) return `<div class="empty">Pick a form on the left.</div>`;
   const c = OS.campaigns.find(x => x.id === it.campaign_id), snd = c && senderOf(c), lead = leadFor(it);
-  const subj = c ? personalize(c.subject, lead) : '', msg = c ? personalize(c.message, lead) : '';
+  const stx = c ? stepText(c, it.step) : null;
+  const subj = stx ? personalize(stx.subject, lead) : '', msg = stx ? personalize(stx.message, lead) : '';
   const url = it.form_url || it.website;
   const list = mqFiltered(), pos = list.indexOf(it);
+  if (it.reason === 'call') return mqCall(it, c, lead, msg, pos, list);
   const canFill = hasExt() && it.fill_token && snd && subj && msg && url && it.reason !== 'login-required';
   const f = (k, v) => v ? `<div class="mfield"><span class="k">${k}</span><span class="val">${A.esc(v)}</span><button class="dcopy" data-copy="${A.esc(v)}">${A.ic('copy', 12)}<span>Copy</span></button></div>` : '';
-  const why = it.reason === 'manual' ? 'This campaign is manual, so you send each form yourself. Fill form opens it already filled in.' : it.reason === 'captcha' ? 'This form has a CAPTCHA you need to solve. Everything else is filled in for you.' : it.reason === 'interrupted' ? 'The robot stopped while sending this one. Open the form and check whether it went through before sending again.' : reasonText(it.reason);
+  const why = it.reason === 'followup' ? `Follow-up (step ${it.step}) for a manual campaign. Fill form opens it with the follow-up message.` : it.reason === 'manual' ? 'This campaign is manual, so you send each form yourself. Fill form opens it already filled in.' : it.reason === 'captcha' ? 'This form has a CAPTCHA you need to solve. Everything else is filled in for you.' : it.reason === 'interrupted' ? 'The robot stopped while sending this one. Open the form and check whether it went through before sending again.' : reasonText(it.reason);
   return `<div class="mqw-h"><div><h2>${A.esc(cleanCompanyName(it.name))}</h2><p>${url ? `<a href="${A.esc(url)}" target="_blank" rel="noopener">${A.esc(domain(url))}</a> · ` : ''}${A.esc(it.campaign)}</p></div><div class="mqw-nav"><button class="iconbtn sm" data-mqnav="-1" aria-label="Previous" ${pos <= 0 ? 'disabled' : ''}>${A.ic('back', 14)}</button><span class="num">${pos + 1} / ${list.length}</span><button class="iconbtn sm" data-mqnav="1" aria-label="Next" ${pos >= list.length - 1 ? 'disabled' : ''}>${A.ic('arrow', 14)}</button></div></div>
     <div class="mqw-b">
       <div class="note ${it.reason === 'interrupted' ? '' : 'neutral'}">${A.ic('alert')}<div>${A.esc(why)}</div></div>
@@ -492,6 +552,16 @@ function mqDetail() {
       <details class="mqfields" ${canFill ? '' : 'open'}><summary>${canFill ? 'Copy fields by hand instead' : 'Fields to paste'}</summary><div>${f('Subject', subj)}${f('Message', msg)}${snd ? f('First name', snd.first_name) + f('Last name', snd.last_name) + f('Email', snd.email) + f('Phone', snd.phone) + f('Company', snd.company) + f('Website', snd.website) : ''}</div></details>
     </div>
     <div class="mqw-f"><button class="btn primary" data-mqact="sent">${A.ic('check', 14)}Mark as sent<span class="kbd2">S</span></button><button class="btn" data-mqact="retry" title="Send back to the robot">${A.ic('retry', 14)}Try robot<span class="kbd2">R</span></button><button class="btn" data-mqact="skip">Skip<span class="kbd2">X</span></button><button class="btn ghost" data-mqact="dnc" style="margin-left:auto;color:var(--bad)">${A.ic('shield', 14)}Do not contact</button></div>`;
+}
+function mqCall(it, c, lead, script, pos, list) {
+  const tel = String(it.phone || '').replace(/[^\d+]/g, '');
+  return `<div class="mqw-h"><div><h2>${A.esc(cleanCompanyName(it.name))}</h2><p>Call · step ${it.step} · ${A.esc(it.campaign)}</p></div><div class="mqw-nav"><button class="iconbtn sm" data-mqnav="-1" aria-label="Previous" ${pos <= 0 ? 'disabled' : ''}>${A.ic('back', 14)}</button><span class="num">${pos + 1} / ${list.length}</span><button class="iconbtn sm" data-mqnav="1" aria-label="Next" ${pos >= list.length - 1 ? 'disabled' : ''}>${A.ic('arrow', 14)}</button></div></div>
+    <div class="mqw-b">
+      ${it.phone ? `<a class="btn primary mqopen" href="tel:${A.esc(tel)}">${A.ic('phone', 15)}Call ${A.esc(it.phone)}</a>` : `<div class="note">${A.ic('alert')}<div>No phone number for this business. Skip it or mark the outcome.</div></div>`}
+      ${it.website ? `<a class="linkbtn muted" href="${A.esc(it.website)}" target="_blank" rel="noopener">${A.esc(domain(it.website))}</a>` : ''}
+      <div class="callscript"><h6>Script</h6><p>${A.esc(script || 'No script written for this step.')}</p></div>
+    </div>
+    <div class="mqw-f"><span class="help" style="width:100%">How did it go?</span><button class="btn primary" data-mqcall="talked">Talked</button><button class="btn" data-mqcall="voicemail">Left voicemail</button><button class="btn" data-mqcall="noanswer">No answer</button><button class="btn" data-mqact="replied" title="Stops their sequence">${A.ic('messages', 14)}They replied</button><button class="btn ghost" data-mqact="skip" style="margin-left:auto">Skip</button></div>`;
 }
 function mqRender(parts = ['list', 'detail', 'bulk']) {
   if (parts.includes('list')) { const el = A.$('#mq-list'); if (el) el.innerHTML = mqList(); }
@@ -516,16 +586,16 @@ async function loadManual() {
     if (A.currentView() === 'manual') A.render();
   } catch (e) { A.toast(e.message, 'alert'); } finally { MQ.loading = false; }
 }
-async function mqAction(act) {
+async function mqAction(act, outcome) {
   const it = MQ.items[MQ.sel]; if (!it) return;
   const list = mqFiltered(), pos = list.indexOf(it);
   try {
-    await A.api('POST', `/api/outreach/${it.id}`, { action: act });
+    await A.api('POST', `/api/outreach/${it.id}`, { action: act, outcome });
     MQ.items.splice(MQ.sel, 1); MQ.checked?.delete(it.id); MQ.done = (MQ.done || 0) + 1;
     const rest = list.filter(x => x !== it), next = rest[Math.min(pos, rest.length - 1)];
     MQ.sel = next ? MQ.items.indexOf(next) : 0;
     OS.manual = Math.max(0, OS.manual - 1); A.renderNav('manual');
-    A.toast({ sent: 'Marked as sent', retry: 'Sent back to the robot', skip: 'Skipped', dnc: 'Marked do not contact' }[act]);
+    A.toast({ sent: 'Marked as sent', retry: 'Sent back to the robot', skip: 'Skipped', dnc: 'Marked do not contact', call: 'Call logged', replied: 'Marked replied. Their sequence is stopped.' }[act]);
     if (!MQ.items.length) A.render(); else { mqRender(); const h = document.querySelector('.head p'); if (h) h.outerHTML = mqHead().match(/<p>[\s\S]*?<\/p>/)[0]; }
     A.sync();
   } catch (e) { A.toast(e.message, 'alert'); }
@@ -721,8 +791,19 @@ async function onClick(e) {
   if (cpy) { try { await navigator.clipboard.writeText(cpy.dataset.copy); const s = cpy.querySelector('span'); s.textContent = 'Copied'; setTimeout(() => { s.textContent = 'Copy'; }, 1400); } catch { A.toast('Copy failed. Select the text instead.', 'alert'); } return; }
   const tag = t.closest('[data-tag]');
   if (tag) { insertTag(tag.dataset.tag); return; }
+  const ldr = t.closest('[data-ldreplied]');
+  if (ldr) { try { await A.api('POST', `/api/outreach/${+ldr.dataset.ldreplied}`, { action: 'replied' }); A.toast('Marked replied. Follow-ups stopped.'); A.sync(); loadOutreach(); setTimeout(() => { const L = A.ST.byId.get(+document.querySelector('#ld-out')?.dataset.lid); if (L) A.openLead(L.id); }, 700); } catch (err) { A.toast(err.message, 'alert'); } return; }
+  const sst = t.closest('[data-seqstep]');
+  if (sst) { const c = curCampaign(); await flushSave(); flushSteps(); cp(c.id).step = +sst.dataset.seqstep; A.$('#c-tab').innerHTML = tabHTML(c); renderPreview(c); return; }
+  const stch = t.closest('[data-stch]');
+  if (stch) { const c = curCampaign(), st = c.steps.find(x => x.step === cp(c.id).step); queueSteps(c, true); st.channel = stch.dataset.stch; A.$('#c-tab').innerHTML = tabHTML(c); renderPreview(c); return; }
+  const pbn = t.closest('[data-pbnote]');
+  if (pbn) { const c = curCampaign(), n = NT.notes.find(x => x.id === +pbn.dataset.pbnote), P = cp(c.id); A.closeOverlay();
+    if (P.step === 1) { A.$('#m-subj').value = n.subject || A.$('#m-subj').value; A.$('#m-body').value = n.body; queueSave(c); }
+    else { const st = c.steps.find(x => x.step === P.step); st.subject = n.subject || st.subject; st.message = n.body; A.$('#c-tab').innerHTML = tabHTML(c); queueSteps(c, true); }
+    renderPreview(c); A.toast(`Used “${n.title || 'note'}”`); return; }
   const tab = t.closest('[data-ctab]');
-  if (tab) { const c = curCampaign(); if (!c) return; await flushSave(); cp(c.id).tab = tab.dataset.ctab; A.render(); return; }
+  if (tab) { const c = curCampaign(); if (!c) return; await flushSave(); flushSteps(); cp(c.id).tab = tab.dataset.ctab; A.render(); return; }
   const flt = t.closest('[data-ofilter]');
   if (flt) { const c = curCampaign(); const P = cp(c.id); P.filter = flt.dataset.ofilter; P.items = null; document.querySelectorAll('[data-ofilter]').forEach(b => b.classList.toggle('on', b === flt)); A.$('#c-items').innerHTML = itemsHTML(c); return; }
   const pvm = t.closest('[data-pvmode]');
@@ -741,6 +822,8 @@ async function onClick(e) {
   if (mqn) { mqMove(+mqn.dataset.mqnav); return; }
   const mq = t.closest('[data-mq]');
   if (mq) { MQ.sel = +mq.dataset.mq; mqRender(['list', 'detail']); return; }
+  const mqc = t.closest('[data-mqcall]');
+  if (mqc) { mqAction('call', mqc.dataset.mqcall); return; }
   const mqa = t.closest('[data-mqact]');
   if (mqa) { mqAction(mqa.dataset.mqact); return; }
   const nrow = t.closest('[data-note]');
@@ -828,6 +911,9 @@ async function onClick(e) {
     case 'dismissbanner': A.$('#c-banner').innerHTML = ''; break;
     case 'moreitems': loadItems(c.id, true); break;
     case 'extguide': extGuide(); break;
+    case 'addstep': { await flushSave(); c.steps = c.steps || []; const n = c.steps.length + 2; c.steps.push({ step: n, channel: 'form', delay_days: 3, subject: '', message: '' }); cp(c.id).step = n; A.$('#c-tab').innerHTML = tabHTML(c); renderPreview(c); queueSteps(c, true); setTimeout(() => A.$('#st-body')?.focus(), 0); break; }
+    case 'rmstep': { const P = cp(c.id); clearTimeout(stT); stT = 0; c.steps = c.steps.filter(x => x.step !== P.step).map((x, i) => ({ ...x, step: i + 2 })); P.step = 1; A.$('#c-tab').innerHTML = tabHTML(c); renderPreview(c); await saveSteps(c); A.toast('Step removed. Anything scheduled for it is cancelled.'); break; }
+    case 'frombook': playbookPicker(c); break;
     case 'previewfile': { const P = cp(c.id); P.tab = 'message'; P.previewMode = 'file'; A.render(); setTimeout(() => document.querySelector('.pvcard')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); break; }
     case 'reviewnoconf': { const P = cp(c.id); P.tab = 'leads'; P.filter = 'noconf'; P.items = null; A.render(); break; }
     case 'newnote': {
@@ -917,19 +1003,20 @@ async function itemAct(oid, act) {
   try {
     if (act === 'remove') await A.api('POST', `/api/campaigns/${c.id}/remove`, { ids: [oid] });
     else await A.api('POST', `/api/outreach/${oid}`, { action: act });
-    A.toast({ retry: 'Queued again', sent: 'Marked as sent', skip: 'Skipped', remove: 'Removed from the campaign', dnc: 'Marked do not contact' }[act]);
+    A.toast({ retry: 'Queued again', sent: 'Marked as sent', skip: 'Skipped', remove: 'Removed from the campaign', dnc: 'Marked do not contact', replied: 'Marked replied. Follow-ups stopped.' }[act]);
     await refreshCampaign(c.id, { items: false }); loadItems(c.id); A.sync(); loadOutreach();
   } catch (e) { A.toast(e.message, 'alert'); }
 }
 let lastField = 'm-body';
 function insertTag(tag) {
-  const el = A.$('#' + lastField) || A.$('#m-body'); if (!el) return;
+  const el = A.$('#' + lastField) || A.$('#m-body') || A.$('#st-body'); if (!el) return;
   const s = el.selectionStart ?? el.value.length, e = el.selectionEnd ?? s;
   el.value = el.value.slice(0, s) + tag + el.value.slice(e); el.focus(); el.setSelectionRange(s + tag.length, s + tag.length);
   el.dispatchEvent(new Event('input', { bubbles: true }));
 }
 function onInput(e) {
   const t = e.target, c = curCampaign();
+  if (c && ['st-subj', 'st-body', 'st-delay'].includes(t.id)) { lastField = t.id; queueSteps(c); try { renderPreview(c); } catch { /* preview optional */ } return; }
   if (t.id === 'mq-q') { MQ.q = t.value; mqRender(['list', 'detail']); return; }
   if (t.id === 'nt-q') { NT.q = t.value; A.$('#nt-list').innerHTML = ntList(); return; }
   if (['nt-title', 'nt-subj', 'nt-body', 'nt-memo'].includes(t.id)) { ntLast = t.id === 'nt-title' ? ntLast : t.id; ntQueueSave(); return; }
@@ -978,6 +1065,16 @@ function onKey(e) {
 
 /* ------------------------------------------------------------------ lead panel: campaign history */
 let openFor = null;   // campaign to expand when the lead panel opens from a campaign
+const EVK = { sent: 'Sent', submitted: 'Sent (no confirmation)', sent_manual: 'Sent by you', failed: 'Didn’t go through', manual: 'Moved to your Manual queue', stopped: 'Sequence stopped', call_talked: 'Call: talked', call_voicemail: 'Call: left a voicemail', call_noanswer: 'Call: no answer' };
+function seqTimeline(it, L) {
+  const total = 1 + (it.steps || []).length;
+  if (total < 2 && !(it.events || []).length) return '';
+  const rows = (it.events || []).map(e => `<li class="ev-${e.kind.replace(/_.*/, '')}"><b>Step ${e.step}</b> ${EVK[e.kind] || e.kind}${e.detail && !/^Call:/.test(e.detail) ? ` <span>“${A.esc(e.detail.slice(0, 80))}”</span>` : ''}<small>${A.esc(A.whenPT(e.at).replace(' PT', ''))}</small></li>`);
+  const nextSt = (it.steps || []).find(x => x.step === it.step);
+  if (it.next_at && nextSt) rows.push(`<li class="ev-next"><b>Step ${it.step}</b> ${nextSt.channel === 'call' ? 'Call' : 'Follow-up'} scheduled<small>${A.esc(A.whenPT(it.next_at).replace(' PT', ''))}</small></li>`);
+  else if (L.status === 4 && total > 1) rows.push(`<li class="ev-stopped"><b>Replied</b> follow-ups stopped</li>`);
+  return rows.length ? `<div class="ldo-tl"><h6>Sequence${total > 1 ? ` · ${total} steps` : ''}</h6><ul>${rows.join('')}</ul></div>` : '';
+}
 export async function leadOutreachInto(el, L) {
   if (!el) return;
   const expand = openFor; openFor = null;
@@ -999,7 +1096,8 @@ export async function leadOutreachInto(el, L) {
             ${it.form_url ? `<div class="dk"><dt>Form</dt><dd><a href="${A.esc(it.form_url)}" target="_blank" rel="noopener">${A.esc(domain(it.form_url))}${A.esc((() => { try { return new URL(it.form_url).pathname.replace(/\/$/, ''); } catch { return ''; } })())}</a></dd></div>` : ''}</dl>
           <div class="ldo-msg"><h6>${sentOrWill}</h6><b>${A.esc(personalize(it.subject, lead))}</b><p>${A.esc(personalize(it.message, lead))}</p></div>
           ${answers.length ? `<div class="ldo-ans"><h6>Other answers the robot gave</h6><ul>${answers.map(a => { const i = a.indexOf(': '); return `<li><span>${A.esc(i > 0 ? a.slice(0, i) : 'Field')}</span><b>${A.esc(i > 0 ? a.slice(i + 2) : a)}</b></li>`; }).join('')}</ul></div>` : ''}
-          <a class="linkbtn muted" href="#campaign/${it.campaign_id}">Open campaign</a>
+          ${seqTimeline(it, L)}
+          <div class="row" style="justify-content:space-between">${SENT.concat('manual').includes(it.status) && L.status !== 4 && L.status !== 3 ? `<button class="btn sm" data-ldreplied="${it.id}">${A.ic('messages', 13)}Mark replied${it.steps && it.steps.length ? ' (stops follow-ups)' : ''}</button>` : '<span></span>'}<a class="linkbtn muted" href="#campaign/${it.campaign_id}">Open campaign</a></div>
         </div></details>`;
     }).join('')}</div>`;
   } catch { el.innerHTML = ''; }
@@ -1029,7 +1127,7 @@ export function install(ctx) {
   document.addEventListener('pointerup', ntPointerUp);
   document.addEventListener('pointercancel', ntPointerUp);
   document.addEventListener('touchmove', (e) => { if (ntDrag.started || ntDrag.armed && ntDrag.card) e.preventDefault(); }, { passive: false });
-  window.addEventListener('hashchange', () => { stopPoll(); flushSave(); ntFlush(); });
+  window.addEventListener('hashchange', () => { stopPoll(); flushSave(); ntFlush(); flushSteps(); });
   document.addEventListener('lh-ext-ready', () => { if (A.currentView() === 'manual' && MQ.loaded) A.render(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && A.currentView() === 'manual' && MQ.loaded && !MQ.fresh) { MQ.fresh = true; loadManual().then(() => { MQ.fresh = false; }); loadOutreach(); } });
   window.addEventListener('beforeunload', () => { if (pendingSave) navigator.sendBeacon && flushSave(); });

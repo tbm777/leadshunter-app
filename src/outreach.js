@@ -8,25 +8,57 @@ const TEST_MAX = 25;
 const SENT = ['sent', 'submitted', 'sent_manual'];
 const STATUSES = ['queued', 'sending', 'sent', 'submitted', 'manual', 'sent_manual', 'failed', 'skipped'];
 const str = (v, n = 200) => String(v ?? '').trim().slice(0, n);
+const STOP = '(SELECT id FROM leads WHERE status IN (3,4))';   // do not contact, replied: sequences stop
+const ptDay = t => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short' }).format(new Date(t)));
+/** t plus n business days (Mon–Fri, Los Angeles), same time of day. */
+function addBizDays(t, n) { let d = t, left = Math.max(0, n); if (!left) return t; while (left > 0) { d += 864e5; const w = ptDay(d); if (w !== 0 && w !== 6) left--; } return d; }
+async function stepsOf(env, cid) { return (await env.DB.prepare('SELECT * FROM campaign_steps WHERE campaign_id = ? ORDER BY step').bind(cid).all()).results; }
+async function logEvent(env, o, kind, detail = null) {
+  await env.DB.prepare('INSERT INTO outreach_events (outreach_id, lead_id, campaign_id, step, kind, detail, at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(o.id, o.lead_id, o.campaign_id, o.step || 1, kind, detail ? String(detail).slice(0, 300) : null, now()).run();
+}
+/** A step went out: log it, then schedule the next step (unless the lead replied or asked not to be contacted). */
+async function afterSent(env, oid, kind, detail) {
+  const o = await env.DB.prepare('SELECT o.*, l.status AS lead_status FROM outreach o JOIN leads l ON l.id = o.lead_id WHERE o.id = ?').bind(oid).first();
+  if (!o) return;
+  await logEvent(env, o, kind, detail);
+  const next = [3, 4].includes(o.lead_status) ? null : await env.DB.prepare('SELECT delay_days FROM campaign_steps WHERE campaign_id = ? AND step = ?').bind(o.campaign_id, (o.step || 1) + 1).first();
+  if (next) await env.DB.prepare('UPDATE outreach SET step = step + 1, next_at = ?, prev_status = NULL WHERE id = ?').bind(addBizDays(now(), next.delay_days), oid).run();
+  else await env.DB.prepare('UPDATE outreach SET next_at = NULL, prev_status = NULL WHERE id = ?').bind(oid).run();
+}
+/** Stop every sequence for these leads (they replied, or asked not to be contacted). */
+export async function stopSequences(env, leadIds, why) {
+  for (const part of chunk(leadIds, 90)) {
+    const L = inList(part.length);
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO outreach_events (outreach_id, lead_id, campaign_id, step, kind, detail, at) SELECT id, lead_id, campaign_id, step, 'stopped', ?, ? FROM outreach WHERE lead_id IN (${L}) AND (next_at IS NOT NULL OR (status = 'manual' AND step > 1))`).bind(why, now(), ...part),
+      env.DB.prepare(`UPDATE outreach SET status = COALESCE(prev_status, 'sent'), reason = NULL, prev_status = NULL WHERE lead_id IN (${L}) AND status = 'manual' AND step > 1`).bind(...part),
+      env.DB.prepare(`UPDATE outreach SET next_at = NULL WHERE lead_id IN (${L}) AND next_at IS NOT NULL`).bind(...part),
+    ]);
+  }
+}
 
 /* ------------------------------------------------------------------ overview */
 export async function outreachOverview(env) {
   const today = ptMidnight();
-  const [snd, cmp, stats, todayQ, manual, jobs] = await env.DB.batch([
+  const [snd, cmp, stats, todayQ, manual, jobs, stp, sq] = await env.DB.batch([
     env.DB.prepare('SELECT * FROM senders WHERE archived = 0 ORDER BY id'),
     env.DB.prepare("SELECT * FROM campaigns WHERE status != 'archived' ORDER BY id DESC"),
     env.DB.prepare('SELECT campaign_id, status, COUNT(*) AS n FROM outreach GROUP BY campaign_id, status'),
     env.DB.prepare(`SELECT campaign_id, COUNT(*) AS n FROM outreach WHERE sent_at >= ? AND status IN ('sent','submitted','sent_manual') GROUP BY campaign_id`).bind(today),
     env.DB.prepare("SELECT COUNT(*) AS n FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE o.status = 'manual' AND c.status = 'active'"),
     env.DB.prepare("SELECT id, campaign_id, status, params, to_check, checked, created_at, started_at, finished_at, error, run_url FROM searches WHERE kind = 'outreach' AND id IN (SELECT MAX(id) FROM searches WHERE kind = 'outreach' GROUP BY campaign_id)"),
+    env.DB.prepare('SELECT * FROM campaign_steps ORDER BY campaign_id, step'),
+    env.DB.prepare('SELECT o.campaign_id, SUM(o.next_at IS NOT NULL) AS sched, SUM(l.status = 4) AS replied FROM outreach o JOIN leads l ON l.id = o.lead_id GROUP BY o.campaign_id'),
   ]);
+  const stepsBy = {}; for (const r of stp.results) (stepsBy[r.campaign_id] ||= []).push(r);
+  const seqBy = Object.fromEntries(sq.results.map(r => [r.campaign_id, r]));
   const by = {};
   for (const r of stats.results) (by[r.campaign_id] ||= {})[r.status] = r.n;
   const td = Object.fromEntries(todayQ.results.map(r => [r.campaign_id, r.n]));
   const jb = Object.fromEntries(jobs.results.map(j => [j.campaign_id, jobOut(j)]));
   return json({
     senders: snd.results.map(senderOut),
-    campaigns: cmp.results.map(c => campaignOut(c, by[c.id] || {}, td[c.id] || 0, jb[c.id] || null)),
+    campaigns: cmp.results.map(c => campaignOut(c, by[c.id] || {}, td[c.id] || 0, jb[c.id] || null, stepsBy[c.id] || [], seqBy[c.id] || {})),
     manual: manual.results[0].n,
   });
 }
@@ -34,28 +66,32 @@ function jobOut(j) {
   let mode = 'send'; try { mode = JSON.parse(j.params).mode || 'send'; } catch { /* default */ }
   return { id: j.id, status: j.status, mode, total: j.to_check, done: j.checked, created_at: j.created_at, started_at: j.started_at, finished_at: j.finished_at, error: j.error, run_url: j.run_url };
 }
+const stepOut = s => ({ step: s.step, channel: s.channel, delay_days: s.delay_days, subject: s.subject, message: s.message });
 const senderOut = s => ({ id: s.id, label: s.label, first_name: s.first_name, last_name: s.last_name, email: s.email, phone: s.phone, company: s.company, website: s.website, address: s.address, city: s.city, state: s.state, zip: s.zip, country: s.country });
-function campaignOut(c, counts = {}, today = 0, job = null) {
+function campaignOut(c, counts = {}, today = 0, job = null, steps = [], seq = {}) {
   const n = k => counts[k] || 0;
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   return {
     id: c.id, name: c.name, sender_id: c.sender_id, subject: c.subject, message: c.message, file_template: c.file_template,
     daily_limit: c.daily_limit, window_start: c.window_start, window_end: c.window_end, weekdays: c.weekdays, status: c.status, mode: c.mode || 'auto', start_at: c.start_at || null, msg_version: c.msg_version || 1,
     created_at: c.created_at, updated_at: c.updated_at, today, job,
-    counts: { total, queued: n('queued'), sending: n('sending'), sent: n('sent'), submitted: n('submitted'), sent_manual: n('sent_manual'), manual: n('manual'), failed: n('failed'), skipped: n('skipped') },
+    counts: { total, queued: n('queued'), sending: n('sending'), sent: n('sent'), submitted: n('submitted'), sent_manual: n('sent_manual'), manual: n('manual'), failed: n('failed'), skipped: n('skipped'), scheduled: seq.sched || 0, replied: seq.replied || 0 },
+    steps: steps.map(stepOut),
   };
 }
 async function campaignById(env, id) {
   const today = ptMidnight();
-  const [c, st, td, jb] = await env.DB.batch([
+  const [c, st, td, jb, stp, sq] = await env.DB.batch([
     env.DB.prepare('SELECT * FROM campaigns WHERE id = ?').bind(id),
     env.DB.prepare('SELECT status, COUNT(*) AS n FROM outreach WHERE campaign_id = ? GROUP BY status').bind(id),
     env.DB.prepare(`SELECT COUNT(*) AS n FROM outreach WHERE campaign_id = ? AND sent_at >= ? AND status IN ('sent','submitted','sent_manual')`).bind(id, today),
     env.DB.prepare("SELECT id, campaign_id, status, params, to_check, checked, created_at, started_at, finished_at, error, run_url FROM searches WHERE kind = 'outreach' AND campaign_id = ? ORDER BY id DESC LIMIT 1").bind(id),
+    env.DB.prepare('SELECT * FROM campaign_steps WHERE campaign_id = ? ORDER BY step').bind(id),
+    env.DB.prepare('SELECT SUM(o.next_at IS NOT NULL) AS sched, SUM(l.status = 4) AS replied FROM outreach o JOIN leads l ON l.id = o.lead_id WHERE o.campaign_id = ?').bind(id),
   ]);
   const row = c.results[0];
   if (!row) throw new HttpError(404, 'Campaign not found.');
-  return campaignOut(row, Object.fromEntries(st.results.map(r => [r.status, r.n])), td.results[0].n, jb.results[0] ? jobOut(jb.results[0]) : null);
+  return campaignOut(row, Object.fromEntries(st.results.map(r => [r.status, r.n])), td.results[0].n, jb.results[0] ? jobOut(jb.results[0]) : null, stp.results, sq.results[0] || {});
 }
 export async function getCampaign(env, id) { return json({ campaign: await campaignById(env, id) }); }
 
@@ -116,6 +152,26 @@ export async function saveCampaign(env, b, id) {
   }
   return getCampaign(env, id);
 }
+/** Replace the follow-up steps (2 and 3). Leads that already finished get the new step scheduled. */
+export async function saveSteps(env, id, b) {
+  const c = await env.DB.prepare('SELECT * FROM campaigns WHERE id = ?').bind(id).first();
+  if (!c) throw new HttpError(404, 'Campaign not found.');
+  const steps = (Array.isArray(b.steps) ? b.steps : []).slice(0, 2).map((x, i) => ({
+    step: i + 2, channel: x.channel === 'call' ? 'call' : 'form', delay_days: Math.max(1, Math.min(30, Math.floor(+x.delay_days || 3))),
+    subject: str(x.subject, 200), message: String(x.message ?? '').slice(0, 5000),
+  }));
+  const old = await stepsOf(env, id), oldMax = 1 + old.length, newMax = 1 + steps.length, t = now();
+  const stmts = [env.DB.prepare('DELETE FROM campaign_steps WHERE campaign_id = ?').bind(id),
+    ...steps.map(x => env.DB.prepare('INSERT INTO campaign_steps (campaign_id, step, channel, delay_days, subject, message) VALUES (?, ?, ?, ?, ?, ?)').bind(id, x.step, x.channel, x.delay_days, x.subject, x.message))];
+  // Removed steps: cancel what was scheduled for them.
+  if (newMax < oldMax) stmts.push(
+    env.DB.prepare('UPDATE outreach SET next_at = NULL, step = ? WHERE campaign_id = ? AND step > ? AND next_at IS NOT NULL').bind(newMax, id, newMax),
+    env.DB.prepare("UPDATE outreach SET status = COALESCE(prev_status, 'sent'), reason = NULL, step = ? WHERE campaign_id = ? AND step > ? AND status = 'manual'").bind(newMax, id, newMax));
+  // Added steps: leads that finished the old last step get the next one (roughly business days, never in the past).
+  if (newMax > oldMax) { const nx = steps.find(x => x.step === oldMax + 1); stmts.push(env.DB.prepare(`UPDATE outreach SET step = step + 1, next_at = MAX(?, COALESCE(sent_at, ?) + ?) WHERE campaign_id = ? AND step = ? AND next_at IS NULL AND status IN ('sent','submitted','sent_manual') AND lead_id NOT IN ${STOP}`).bind(t + 6e5, t, Math.round(nx.delay_days * 864e5 * 7 / 5), id, oldMax)); }
+  await env.DB.batch(stmts);
+  return getCampaign(env, id);
+}
 function checkReady(c) {
   if (!c.sender_id) throw new HttpError(400, 'Pick a sender profile first. Forms need your name, email and phone.');
   if (!str(c.subject)) throw new HttpError(400, 'Write a subject line first.');
@@ -166,7 +222,7 @@ export async function addLeads(env, id, b) {
     if (l.deleted) continue;
     if (inThis.has(l.id)) out.skipped.already++;
     else if (l.status === 3) out.skipped.dnc++;
-    else if (!b.includeContacted && (l.status === 2 || contacted.has(l.id))) out.skipped.contacted++;
+    else if (!b.includeContacted && (l.status === 2 || l.status === 4 || contacted.has(l.id))) out.skipped.contacted++;
     else if (!l.website) out.skipped.noWebsite++;
     else if (l.site_status === 7 || (() => { try { return isSocialHost(new URL(l.website).hostname); } catch { return false; } })()) out.skipped.profile++;
     else if (l.form_status === 2) out.skipped.noForm++;
@@ -219,6 +275,8 @@ export async function deleteCampaign(env, id, b) {
   await setLeadStatus(env, free, 0, [1]);
   await env.DB.batch([
     env.DB.prepare('DELETE FROM outreach WHERE campaign_id = ?').bind(id),
+    env.DB.prepare('DELETE FROM outreach_events WHERE campaign_id = ?').bind(id),
+    env.DB.prepare('DELETE FROM campaign_steps WHERE campaign_id = ?').bind(id),
     env.DB.prepare('UPDATE searches SET campaign_id = NULL WHERE campaign_id = ?').bind(id),
     env.DB.prepare('DELETE FROM campaigns WHERE id = ?').bind(id),
   ]);
@@ -243,7 +301,8 @@ export async function extSent(env, b) {
   if (!SENT.includes(o.status)) {
     const t = now();
     await env.DB.prepare("UPDATE outreach SET status = 'sent_manual', reason = NULL, evidence = ?, sent_at = ?, updated_at = ? WHERE id = ?").bind(str(b.evidence, 300) || 'Sent with the extension', t, t, oid).run();
-    await setLeadStatus(env, [o.lead_id], 2);
+    await setLeadStatus(env, [o.lead_id], 2, [0, 1]);
+    await afterSent(env, oid, 'sent_manual', str(b.evidence, 300) || 'Sent with the extension');
   }
   return json({ ok: true });
 }
@@ -260,7 +319,7 @@ export async function listItems(env, url) {
   // Campaign lists keep the order leads were added, so rows don't jump while a run updates them.
   const order = q.get('order') === 'sent' ? 'o.sent_at DESC, o.id DESC' : q.get('order') === 'recent' ? 'o.updated_at DESC, o.id DESC' : 'o.id';
   const limit = Math.min(500, +q.get('limit') || 200), offset = Math.max(0, +q.get('offset') || 0);
-  const sql = `SELECT o.id, o.campaign_id, o.lead_id, o.status, o.reason, o.evidence, o.form_url, o.test_status, o.test_reason, o.test_at, o.sent_at, o.updated_at,
+  const sql = `SELECT o.id, o.campaign_id, o.lead_id, o.status, o.reason, o.evidence, o.form_url, o.test_status, o.test_reason, o.test_at, o.sent_at, o.updated_at, o.step, o.next_at, l.status AS lead_status,
       l.name, l.website, l.city, l.region, l.phone, l.category, l.industry_id, c.name AS campaign
     FROM outreach o JOIN leads l ON l.id = o.lead_id JOIN campaigns c ON c.id = o.campaign_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${order} LIMIT ? OFFSET ?`;
@@ -273,10 +332,16 @@ export async function itemAction(env, oid, b) {
   const o = await env.DB.prepare('SELECT * FROM outreach WHERE id = ?').bind(oid).first();
   if (!o) throw new HttpError(404, 'Not found.');
   const t = now();
-  if (b.action === 'sent') {
+  if (b.action === 'sent' || b.action === 'call') {
     if (SENT.includes(o.status)) return json({ ok: true });
-    await env.DB.prepare("UPDATE outreach SET status = 'sent_manual', reason = NULL, sent_at = ?, updated_at = ? WHERE id = ?").bind(t, t, oid).run();
-    await setLeadStatus(env, [o.lead_id], 2);
+    const CALL = { talked: 'Talked to them', voicemail: 'Left a voicemail', noanswer: 'No answer' };
+    const ev = b.action === 'call' ? `Call: ${CALL[b.outcome] || 'Called'}` : null;
+    await env.DB.prepare("UPDATE outreach SET status = 'sent_manual', reason = NULL, evidence = COALESCE(?, evidence), sent_at = ?, updated_at = ? WHERE id = ?").bind(ev, t, t, oid).run();
+    await setLeadStatus(env, [o.lead_id], 2, [0, 1]);
+    await afterSent(env, oid, b.action === 'call' ? `call_${CALL[b.outcome] ? b.outcome : 'talked'}` : 'sent_manual', ev);
+  } else if (b.action === 'replied') {
+    await setLeadStatus(env, [o.lead_id], 4);
+    await skipUnsent(env, [o.lead_id], 4);
   } else if (b.action === 'skip') {
     if (['sending', ...SENT].includes(o.status)) throw new HttpError(409, 'This one is already sent or sending.');
     await env.DB.prepare("UPDATE outreach SET status = 'skipped', reason = COALESCE(reason, 'skipped by you'), updated_at = ? WHERE id = ?").bind(t, oid).run();
@@ -292,28 +357,35 @@ export async function itemAction(env, oid, b) {
     if (['sending'].includes(o.status)) throw new HttpError(409, 'This one is sending right now.');
     if (!SENT.includes(o.status)) await env.DB.prepare("UPDATE outreach SET status = 'skipped', reason = 'do not contact', updated_at = ? WHERE id = ?").bind(t, oid).run();
     await setLeadStatus(env, [o.lead_id], 3);
+    await stopSequences(env, [o.lead_id], 'do not contact');
   } else throw new HttpError(400, 'Unknown action.');
   return json({ ok: true });
 }
 
 /** A lead marked contacted (some other way) or do-not-contact by hand: don't send it anything still waiting. */
 export async function skipUnsent(env, leadIds, status) {
-  if (![2, 3].includes(status) || !leadIds.length) return;
-  const reason = status === 3 ? 'do not contact' : 'already contacted';
-  for (const part of chunk(leadIds, 90)) await env.DB.prepare(`UPDATE outreach SET status = 'skipped', reason = ?, updated_at = ? WHERE lead_id IN (${inList(part.length)}) AND status IN ('queued','manual','failed')`).bind(reason, now(), ...part).run();
+  if (![2, 3, 4].includes(status) || !leadIds.length) return;
+  if (status !== 2) await stopSequences(env, leadIds, status === 4 ? 'replied' : 'do not contact');
+  const reason = status === 3 ? 'do not contact' : status === 4 ? 'replied' : 'already contacted';
+  for (const part of chunk(leadIds, 90)) await env.DB.prepare(`UPDATE outreach SET status = 'skipped', reason = ?, updated_at = ? WHERE lead_id IN (${inList(part.length)}) AND status IN ('queued','manual','failed') AND step = 1`).bind(reason, now(), ...part).run();
 }
 export async function leadOutreach(env, id) {
   const r = await env.DB.prepare(`SELECT o.id, o.campaign_id, c.name AS campaign, o.status, o.reason, o.evidence, o.form_url, o.sent_at, o.updated_at, o.created_at, o.test_status, o.test_reason, o.test_at, o.answers,
-      COALESCE(m.subject, c.subject) AS subject, COALESCE(m.message, c.message) AS message, o.msg_version, c.sender_id
+      COALESCE(m.subject, c.subject) AS subject, COALESCE(m.message, c.message) AS message, o.msg_version, c.sender_id, o.step, o.next_at
     FROM outreach o JOIN campaigns c ON c.id = o.campaign_id LEFT JOIN campaign_messages m ON m.campaign_id = o.campaign_id AND m.version = o.msg_version
     WHERE o.lead_id = ? ORDER BY o.id DESC`).bind(id).all();
+  const [ev, st] = await env.DB.batch([
+    env.DB.prepare('SELECT outreach_id, step, kind, detail, at FROM outreach_events WHERE lead_id = ? ORDER BY at').bind(id),
+    env.DB.prepare('SELECT s.* FROM campaign_steps s WHERE s.campaign_id IN (SELECT campaign_id FROM outreach WHERE lead_id = ?) ORDER BY s.campaign_id, s.step').bind(id),
+  ]);
+  for (const it of r.results) { it.events = ev.results.filter(e => e.outreach_id === it.id); it.steps = st.results.filter(x => x.campaign_id === it.campaign_id).map(stepOut); }
   return json({ items: r.results });
 }
 
 /** The same actions for many manual-queue items at once (max 100 per request). */
 export async function bulkItems(env, b) {
   const ids = [...new Set((b.ids || []).map(Number).filter(Number.isInteger))].slice(0, 100);
-  if (!ids.length || !['sent', 'skip', 'retry', 'dnc'].includes(b.action)) throw new HttpError(400, 'Select items and an action.');
+  if (!ids.length || !['sent', 'skip', 'retry', 'dnc', 'replied'].includes(b.action)) throw new HttpError(400, 'Select items and an action.');
   let done = 0, failed = 0;
   for (const id of ids) { try { await itemAction(env, id, { action: b.action }); done++; } catch { failed++; } }
   return json({ ok: true, done, failed });
@@ -397,7 +469,11 @@ async function startJob(env, c, mode, count) {
       env.DB.prepare("UPDATE outreach SET status = 'skipped', reason = 'directory-page', updated_at = ? WHERE campaign_id = ? AND status = 'queued' AND lead_id IN (SELECT id FROM leads WHERE site_status = 7)").bind(t, c.id),
       env.DB.prepare('INSERT OR IGNORE INTO campaign_messages (campaign_id, version, subject, message, created_at) VALUES (?, ?, ?, ?, ?)').bind(c.id, c.msg_version || 1, c.subject, c.message, t),
     ]);
-    n = (await env.DB.prepare("UPDATE outreach SET status = 'sending', job_id = ?, msg_version = ?, attempt_at = NULL, attempts = attempts + 1, updated_at = ? WHERE id IN (SELECT id FROM outreach WHERE campaign_id = ? AND status = 'queued' ORDER BY id LIMIT ?)").bind(job.id, c.msg_version || 1, t, c.id, count).run()).meta.changes;
+    // Follow-ups that are due go first, so they're never stuck behind new leads.
+    const formSteps = (await stepsOf(env, c.id)).filter(x => x.channel === 'form').map(x => x.step);
+    let fu = 0;
+    if (formSteps.length) fu = (await env.DB.prepare(`UPDATE outreach SET prev_status = status, status = 'sending', job_id = ?, next_at = NULL, attempt_at = NULL, attempts = attempts + 1, updated_at = ? WHERE id IN (SELECT id FROM outreach WHERE campaign_id = ? AND next_at IS NOT NULL AND next_at <= ? AND status IN ('sent','submitted','sent_manual') AND step IN (${formSteps.join(',')}) AND lead_id NOT IN ${STOP} ORDER BY next_at LIMIT ?)`).bind(job.id, t, c.id, t, count).run()).meta.changes;
+    n = fu + (count - fu > 0 ? (await env.DB.prepare("UPDATE outreach SET status = 'sending', job_id = ?, msg_version = ?, attempt_at = NULL, attempts = attempts + 1, updated_at = ? WHERE id IN (SELECT id FROM outreach WHERE campaign_id = ? AND status = 'queued' ORDER BY id LIMIT ?)").bind(job.id, c.msg_version || 1, t, c.id, count - fu).run()).meta.changes : 0);
   }
   if (!n) { await env.DB.prepare('DELETE FROM searches WHERE id = ?').bind(job.id).run(); return { error: null, empty: true }; }
   await env.DB.prepare('UPDATE searches SET to_check = ? WHERE id = ?').bind(n, job.id).run();
@@ -405,7 +481,7 @@ async function startJob(env, c, mode, count) {
   if (err) {
     await env.DB.batch([
       env.DB.prepare("UPDATE searches SET status = 'failed', error = ?, finished_at = ? WHERE id = ?").bind(err, now(), job.id),
-      env.DB.prepare("UPDATE outreach SET status = 'queued', job_id = NULL WHERE job_id = ? AND status = 'sending'").bind(job.id),
+      env.DB.prepare("UPDATE outreach SET status = CASE WHEN step > 1 THEN COALESCE(prev_status, 'sent') ELSE 'queued' END, next_at = CASE WHEN step > 1 THEN ? ELSE next_at END, job_id = NULL WHERE job_id = ? AND status = 'sending'").bind(now(), job.id),
     ]);
     return { error: err };
   }
@@ -443,15 +519,24 @@ async function tickCampaign(env, c) {
   const r = await startJob(env, c, 'send', Math.min(BATCH, left));
   return r.error && !r.error.startsWith('A run') ? r.error : null;
 }
+/** Due steps that need a person: calls (any campaign) and every step of a manual campaign go to the Manual queue. */
+async function promoteDue(env, c) {
+  const steps = await stepsOf(env, c.id); if (!steps.length) return;
+  const toQueue = steps.filter(x => x.channel === 'call' || c.mode === 'manual').map(x => x.step);
+  if (!toQueue.length) return;
+  const calls = steps.filter(x => x.channel === 'call').map(x => x.step).concat(0).join(',');
+  await env.DB.prepare(`UPDATE outreach SET prev_status = status, status = 'manual', reason = CASE WHEN step IN (${calls}) THEN 'call' ELSE 'followup' END, next_at = NULL, updated_at = ?
+    WHERE campaign_id = ? AND next_at IS NOT NULL AND next_at <= ? AND status IN ('sent','submitted','sent_manual') AND step IN (${toQueue.join(',')}) AND lead_id NOT IN ${STOP}`).bind(now(), c.id, now()).run();
+}
 export async function runSchedules(env) {
   const r = await env.DB.prepare("SELECT * FROM campaigns WHERE status = 'active'").all();
-  for (const c of r.results) { try { await tickCampaign(env, c); } catch (e) { console.error('campaign tick', c.id, e); } }
+  for (const c of r.results) { try { await promoteDue(env, c); await tickCampaign(env, c); } catch (e) { console.error('campaign tick', c.id, e); } }
 }
 /** Rows left "sending" by a job that ended: requeue if the job never started, otherwise send to the manual queue to check. */
 export async function settleJobs(env) {
   const ended = "SELECT id FROM searches WHERE kind = 'outreach' AND status IN ('failed','cancelled','done')";
   await env.DB.batch([
-    env.DB.prepare(`UPDATE outreach SET status = 'queued', job_id = NULL WHERE status = 'sending' AND attempt_at IS NULL AND job_id IN (${ended})`),
+    env.DB.prepare(`UPDATE outreach SET status = CASE WHEN step > 1 THEN COALESCE(prev_status, 'sent') ELSE 'queued' END, next_at = CASE WHEN step > 1 THEN ? ELSE next_at END, job_id = NULL WHERE status = 'sending' AND attempt_at IS NULL AND job_id IN (${ended})`).bind(now()),
     env.DB.prepare(`UPDATE outreach SET status = 'manual', reason = 'interrupted', updated_at = ? WHERE status = 'sending' AND job_id IN (${ended})`).bind(now()),
   ]);
 }
@@ -462,11 +547,12 @@ export async function runnerItems(env, s, params) {
   const sender = c && c.sender_id ? await env.DB.prepare('SELECT * FROM senders WHERE id = ?').bind(c.sender_id).first() : null;
   if (!c || !sender) throw new HttpError(409, 'The campaign or its sender profile is missing.');
   const where = params.mode === 'test' ? 'o.test_job = ?' : "o.job_id = ? AND o.status = 'sending'";
-  const r = await env.DB.prepare(`SELECT o.id AS oid, l.name, l.city, l.region, l.website, COALESCE(o.form_url, l.form_url) AS form_url, l.category, i.name AS industry
+  const r = await env.DB.prepare(`SELECT o.id AS oid, o.step, l.name, l.city, l.region, l.website, COALESCE(o.form_url, l.form_url) AS form_url, l.category, i.name AS industry
     FROM outreach o JOIN leads l ON l.id = o.lead_id LEFT JOIN industries i ON i.id = l.industry_id WHERE ${where} ORDER BY o.id`).bind(s.id).all();
   return json({
-    mode: params.mode, campaign: { id: c.id, subject: c.subject, message: c.message, file_template: c.file_template },
-    sender: senderOut(sender), items: r.results.map(x => ({ oid: x.oid, lead: { name: x.name, city: x.city, state: x.region, website: x.website, form_url: x.form_url, category: x.category, industry: x.industry } })),
+    mode: params.mode, campaign: { id: c.id, subject: c.subject, message: c.message, file_template: c.file_template,
+      steps: Object.fromEntries((await stepsOf(env, c.id)).map(x => [x.step, { subject: x.subject || c.subject, message: x.message }])) },
+    sender: senderOut(sender), items: r.results.map(x => ({ oid: x.oid, step: params.mode === 'test' ? 1 : x.step || 1, lead: { name: x.name, city: x.city, state: x.region, website: x.website, form_url: x.form_url, category: x.category, industry: x.industry } })),
   });
 }
 const RESULT = { confirmed: 'sent', submitted: 'submitted', manual: 'manual', failed: 'failed', ready: 'ready' };
@@ -494,16 +580,24 @@ export async function runnerResult(env, s, params, b) {
       env.DB.prepare('UPDATE searches SET checked = checked + 1, heartbeat_at = ? WHERE id = ?').bind(t, s.id),
     ]);
   } else {
-    const o = await env.DB.prepare("SELECT lead_id FROM outreach WHERE id = ? AND job_id = ? AND status = 'sending'").bind(oid, s.id).first();
-    if (o) {
+    const o = await env.DB.prepare("SELECT lead_id, step, prev_status FROM outreach WHERE id = ? AND job_id = ? AND status = 'sending'").bind(oid, s.id).first();
+    if (o && o.step > 1 && !SENT.includes(st)) {
+      // A follow-up that didn't go out: CAPTCHA → Manual queue; otherwise the sequence stops and the lead keeps its earlier result.
+      const toManual = st === 'manual';
+      await env.DB.batch([
+        env.DB.prepare('UPDATE outreach SET status = ?, reason = ?, form_url = COALESCE(?, form_url), next_at = NULL, updated_at = ? WHERE id = ?').bind(toManual ? 'manual' : (o.prev_status || 'sent'), toManual ? reason : null, formUrl, t, oid),
+        env.DB.prepare('UPDATE searches SET checked = checked + 1, heartbeat_at = ? WHERE id = ?').bind(t, s.id),
+      ]);
+      await logEvent(env, { id: oid, lead_id: o.lead_id, campaign_id: params.campaign_id, step: o.step }, toManual ? 'manual' : 'failed', reason);
+    } else if (o) {
       const final = st === 'ready' ? 'failed' : st;
       await env.DB.batch([
         env.DB.prepare('UPDATE outreach SET status = ?, reason = ?, evidence = ?, answers = ?, form_url = COALESCE(?, form_url), sent_at = ?, updated_at = ? WHERE id = ?')
           .bind(final, final === 'sent' ? null : reason, evidence, answers, formUrl, SENT.includes(final) ? t : null, t, oid),
         env.DB.prepare('UPDATE searches SET checked = checked + 1, heartbeat_at = ? WHERE id = ?').bind(t, s.id),
       ]);
-      if (SENT.includes(final)) await setLeadStatus(env, [o.lead_id], 2);
-      else if (final === 'failed') await setLeadStatus(env, [o.lead_id], 0, [1]);
+      if (SENT.includes(final)) { await setLeadStatus(env, [o.lead_id], 2, [0, 1]); await afterSent(env, oid, final, evidence); }
+      else { if (final === 'failed') await setLeadStatus(env, [o.lead_id], 0, [1]); await logEvent(env, { id: oid, lead_id: o.lead_id, campaign_id: params.campaign_id, step: 1 }, final, reason); }
     }
   }
   await fixLabel().catch(e => console.error('label fix', e));
@@ -512,7 +606,7 @@ export async function runnerResult(env, s, params, b) {
 }
 export async function runnerFinishOutreach(env, s) {
   await env.DB.batch([
-    env.DB.prepare("UPDATE outreach SET status = 'queued', job_id = NULL WHERE job_id = ? AND status = 'sending' AND attempt_at IS NULL").bind(s.id),
+    env.DB.prepare("UPDATE outreach SET status = CASE WHEN step > 1 THEN COALESCE(prev_status, 'sent') ELSE 'queued' END, next_at = CASE WHEN step > 1 THEN ? ELSE next_at END, job_id = NULL WHERE job_id = ? AND status = 'sending' AND attempt_at IS NULL").bind(now(), s.id),
     env.DB.prepare("UPDATE outreach SET status = 'manual', reason = 'interrupted', updated_at = ? WHERE job_id = ? AND status = 'sending'").bind(now(), s.id),
   ]);
 }

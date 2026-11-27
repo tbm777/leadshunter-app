@@ -92,7 +92,10 @@ export async function runOutreach({ api, JOB, log, isCancelled }) {
       const ctx = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: 'en-US' });
       await ctx.route('**/*', route => (['media'].includes(route.request().resourceType()) ? route.abort() : route.continue()));
       let r;
-      try { r = await withTimeout(attempt(ctx, item, profile, dryRun), ITEM_TIMEOUT); }
+      // Each lead gets the text for the step it's on (follow-ups have their own message).
+      const stepText = (data.campaign.steps || {})[item.step];
+      const prof = stepText && item.step > 1 ? { ...profile, subject: stepText.subject || profile.subject, message: stepText.message || profile.message } : profile;
+      try { r = await withTimeout(attempt(ctx, item, prof, dryRun), ITEM_TIMEOUT); }
       catch { r = { status: 'failed', reason: 'site-too-slow' }; }
       await ctx.close().catch(() => {});
       tally[r.status] = (tally[r.status] || 0) + 1;
