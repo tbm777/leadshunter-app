@@ -1,6 +1,7 @@
 // LeadsHunter form engine: find the contact form, give every field a valid value, submit, and prove the result.
 // Works on a Playwright Page. Never bypasses CAPTCHAs: those are reported as manual.
 import { brandedFile } from './files.mjs';
+import { personalize, cleanCompanyName } from './personalize.mjs';
 
 const SUCCESS = /(thank\s?(you|s)\b|message (has been |was )?(sent|received|delivered)|we('ll| will) (be in touch|get back|contact you|respond|reach out)|successfully (sent|submitted)|submission (received|successful)|request (has been |was )?(received|sent|submitted)|we (have|'ve) received|form (has been |was )?submitted|thanks for (reaching|contacting|getting)|your (message|inquiry|enquiry|request) (has been|was) )/i;
 const SUBMIT_TEXT = /^(send|submit|send message|send now|submit (form|request|message|inquiry)|request|get (a |my |your )?(free )?(quote|estimate)|request (a )?(quote|estimate|call|callback|appointment|service)|contact( us)?|book( now)?|schedule|get started|send request|let'?s talk|go)\b/i;
@@ -233,6 +234,8 @@ export function valueFor(f, cls, profile) {
 
 /* ------------------------------------------------------------------ the engine */
 export async function submitForm(page, url, profile, opts = {}) {
+  // Fill merge tags like [Company Name] from the lead (also used inside the uploaded file).
+  if (opts.lead) profile = { ...profile, subject: personalize(profile.subject, opts.lead), message: personalize(profile.message, opts.lead), leadCompany: cleanCompanyName(opts.lead.name) };
   const log = [];
   const T0 = Date.now(); const note = (m) => { log.push(m); if (opts.debug) console.log('   ·', ((Date.now() - T0) / 1000).toFixed(1) + 's', m); };
   const timeout = opts.timeout || 25000;

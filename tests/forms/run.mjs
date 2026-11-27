@@ -11,10 +11,11 @@ let pw; try { pw = require('playwright'); } catch { pw = createRequire('/opt/nod
 const args = process.argv.slice(2), debug = args.includes('--debug'), only = args.filter(a => !a.startsWith('--'));
 const PORT = 8899, BASE = `http://localhost:${PORT}`;
 export const PROFILE = {
-  firstName: 'Alex', lastName: 'Morgan', email: 'alex@brightline-studio.com', phone: '+1 512 555 0142',
-  company: 'Brightline Studio', website: 'brightline-studio.com', city: 'Austin', state: 'TX', stateName: 'Texas', zip: '78701', country: 'United States',
-  address: '100 Congress Ave', subject: 'Quick question about your website',
-  message: 'Hi there, I came across your business on Google Maps and loved your reviews. We help local businesses get more calls from their website. Would you be open to a quick 10-minute chat this week?',
+  firstName: 'Dustin', lastName: 'Morgan', email: 'hello@thebatmarketing.com', phone: '+1 512 555 0142',
+  company: 'The Bat Marketing', website: 'thebatmarketing.com', city: 'Austin', state: 'TX', stateName: 'Texas', zip: '78701', country: 'United States',
+  address: '100 Congress Ave',
+  subject: 'Quick question about missed calls at [Company Name]',
+  message: "Hi [Company Name] team,\n\nWhen a homeowner calls you and nobody picks up, most of them don't leave a voicemail. They call the next contractor on the list. That's a job lost before anyone knew it existed.\n\nWe set up simple systems for contractors that fix this. If you miss a call, the caller gets a text right away. Questions from your website land on your phone as texts. After each job, customers get a polite request for a Google review.\n\nWe build it and connect everything for you. Your team runs it from a phone. No jargon, no training course, and no long-term contract.\n\nWould a 15-minute call next week make sense? If it isn't a fit, I'll tell you.\n\nBest,\nDustin\nThe Bat Marketing",
 };
 
 const { results, close } = await startServer(PORT);
@@ -29,12 +30,18 @@ await Promise.all(Array.from({ length: 4 }, async () => {
     const page = await ctx.newPage();
     const s = Date.now();
     let out;
-    try { out = await submitForm(page, `${BASE}/f/${fx.id}`, PROFILE, { debug: debug && only.length > 0 }); }
+    const lead = { name: `${fx.industry} Pros - Best ${fx.industry} in Austin TX | Free Quotes`, city: 'Austin' };
+    try { out = await submitForm(page, `${BASE}/f/${fx.id}`, PROFILE, { lead, debug: debug && only.length > 0 }); }
     catch (e) { out = { status: 'error', reason: e.message.split('\n')[0], log: [] }; }
     await ctx.close();
     const r = results[fx.id] || { posts: 0, valid: 0, errors: [], trap: false, wrongForm: 0 };
     const expect = fx.expect || 'confirmed';
-    const pass = expect === 'manual' ? out.status === 'manual' && r.posts === 0 : out.status === 'confirmed' && r.valid >= 1 && !r.trap && !r.wrongForm && r.valid === 1;
+    const sent = JSON.stringify(r.data || {});
+    const tagsLeft = /\[Company Name\]|\{\{?\s*company/i.test(sent);
+    const filesOk = !(fx.files || []).length || (r.files || []).some(f => /^the-bat-marketing-for-[a-z0-9-]+\.(pdf|png|jpg)/.test(f));
+    if (tagsLeft) out.reason = 'merge tag left unfilled';
+    if (!filesOk) out.reason = 'upload missing or not branded';
+    const pass = expect === 'manual' ? out.status === 'manual' && r.posts === 0 : out.status === 'confirmed' && r.valid === 1 && !r.trap && !r.wrongForm && !tagsLeft && filesOk;
     rows.push({ fx, out, r, pass, ms: Date.now() - s });
   }
 }));
@@ -42,7 +49,8 @@ await browser.close(); close();
 
 rows.sort((a, b) => FIXTURES.indexOf(a.fx) - FIXTURES.indexOf(b.fx));
 for (const { fx, out, r, pass, ms } of rows) {
-  console.log(`${pass ? '✔' : '✘'} ${fx.id.padEnd(26)} ${fx.industry.padEnd(18)} ${String(out.status).padEnd(10)} ${(out.reason || out.evidence || '').slice(0, 60).padEnd(60)} posts=${r.posts} valid=${r.valid}${r.trap ? ' TRAP' : ''}${r.wrongForm ? ' WRONG-FORM' : ''} ${(ms / 1000).toFixed(1)}s`);
+  if (r.files?.length) out.evidence = (out.evidence || '') + ' · file: ' + r.files.join(', ');
+  console.log(`${pass ? '✔' : '✘'} ${fx.id.padEnd(26)} ${fx.industry.padEnd(18)} ${String(out.status).padEnd(10)} ${(out.reason || out.evidence || '').slice(0, 90).padEnd(90)} posts=${r.posts} valid=${r.valid}${r.trap ? ' TRAP' : ''}${r.wrongForm ? ' WRONG-FORM' : ''} ${(ms / 1000).toFixed(1)}s`);
   if (!pass) { for (const e of r.errors) console.log('     server:', e); if (!debug) for (const l of out.log || []) console.log('     ·', l); }
 }
 const passed = rows.filter(r => r.pass).length;
