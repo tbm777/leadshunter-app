@@ -1,0 +1,26 @@
+-- Search terms rewritten best-first: the first term finds the most businesses, the second finds different ones (searches
+-- start with these two). Accepted Google categories match the new terms so their results are kept.
+UPDATE industries SET terms = '["plumber", "drain cleaning service", "water heater installation service"]', categories = '["Plumber", "Plumbing contractor", "Drainage service", "Water heater installation service"]' WHERE name = 'Plumbers';
+UPDATE industries SET terms = '["HVAC contractor", "air conditioning repair service", "furnace repair service"]', categories = '["HVAC contractor", "Air conditioning contractor", "Heating contractor", "Air conditioning repair service", "Furnace repair service"]' WHERE name = 'HVAC Contractors';
+UPDATE industries SET terms = '["roofing contractor", "roof repair", "roofer"]', categories = '["Roofing contractor", "Roofer"]' WHERE name = 'Roofers';
+UPDATE industries SET terms = '["electrician", "electrical repair service", "lighting contractor"]', categories = '["Electrician", "Electrical installation service", "Electrical repair shop", "Lighting contractor"]' WHERE name = 'Electricians';
+UPDATE industries SET terms = '["landscaper", "lawn care service", "landscape designer"]', categories = '["Landscaper", "Lawn care service", "Landscape designer", "Gardener"]' WHERE name = 'Landscapers';
+UPDATE industries SET terms = '["general contractor", "home builder", "construction company"]', categories = '["General contractor", "Construction company", "Home builder", "Custom home builder"]' WHERE name = 'General Contractors';
+UPDATE industries SET terms = '["remodeler", "kitchen remodeler", "bathroom remodeler"]', categories = '["Remodeler", "Kitchen remodeler", "Bathroom remodeler", "General contractor"]' WHERE name = 'Remodeling';
+UPDATE industries SET terms = '["house cleaning service", "maid service", "move out cleaning service"]', categories = '["House cleaning service", "Maid service", "Cleaning service"]' WHERE name = 'House Cleaners';
+UPDATE industries SET terms = '["pest control service", "exterminator", "termite inspection"]', categories = '["Pest control service", "Exterminator"]' WHERE name = 'Pest Control Companies';
+UPDATE industries SET terms = '["painting contractor", "house painter", "commercial painter"]', categories = '["Painter", "Painting contractor", "House painter"]' WHERE name = 'Painters';
+UPDATE industries SET terms = '["moving company", "moving and storage service", "movers"]', categories = '["Moving company", "Mover", "Moving and storage service"]' WHERE name = 'Movers';
+UPDATE industries SET terms = '["handyman", "home repair service"]', categories = '["Handyman/Handywoman/Handyperson", "Handyman", "Contractor"]' WHERE name = 'Handyman';
+UPDATE industries SET terms = '["tree service", "tree removal", "stump removal service"]', categories = '["Tree service", "Arborist and tree surgeon", "Arborist service"]' WHERE name = 'Tree Service';
+UPDATE industries SET terms = '["garage door repair", "garage door installation"]', categories = '["Garage door supplier", "Garage door repair service"]' WHERE name = 'Garage Door Companies';
+UPDATE industries SET terms = '["window installation service", "door installation", "window replacement"]', categories = '["Window installation service", "Window supplier", "Door supplier", "Door shop"]' WHERE name = 'Windows & Doors';
+UPDATE industries SET terms = '["fence contractor", "fence company", "gate installation"]', categories = '["Fence contractor", "Fence supply store"]' WHERE name = 'Fence Installers';
+UPDATE industries SET terms = '["pressure washing service", "power washing", "window cleaning service"]', categories = '["Pressure washing service", "Window cleaning service", "Gutter cleaning service"]' WHERE name = 'Pressure Washing';
+UPDATE industries SET terms = '["carpet cleaning service", "tile and grout cleaning", "floor cleaning service"]', categories = '["Carpet cleaning service", "Floor cleaning service", "Upholstery cleaning service"]' WHERE name = 'Floor & Carpet Cleaning';
+UPDATE industries SET terms = '["siding contractor", "siding installation", "gutter installation"]', categories = '["Siding contractor", "Gutter service"]' WHERE name = 'Siding';
+UPDATE industries SET terms = '["deck builder", "patio builder", "pergola builder"]', categories = '["Deck builder", "Patio enclosure supplier", "Landscaper"]' WHERE name = 'Decks & Patios';
+UPDATE industries SET terms = '["paving contractor", "asphalt contractor", "concrete contractor"]', categories = '["Paving contractor", "Asphalt contractor", "Concrete contractor"]' WHERE name = 'Paving';
+UPDATE industries SET terms = '["swimming pool contractor", "pool builder", "swimming pool repair service"]', categories = '["Swimming pool contractor", "Swimming pool repair service"]' WHERE name = 'Pool Construction';
+UPDATE industries SET terms = '["hardscape contractor", "paver installation", "retaining wall contractor"]', categories = '["Landscape designer", "Landscaper", "Concrete contractor", "Masonry contractor"]' WHERE name = 'Hardscaping';
+UPDATE industries SET terms = '["dog groomer", "pet groomer", "mobile dog grooming"]', categories = '["Pet groomer"]' WHERE name = 'Dog Groomers';
