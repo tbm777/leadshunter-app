@@ -278,8 +278,9 @@ function render() {
   NAV_LAST[NAV_ACTIVE[v] || v] = location.hash || '#' + v;
   renderNav(NAV_ACTIVE[v] || v);
   $('#crumbs').innerHTML = `<span>Workspace</span><span>›</span>` + (CRUMBS[v] ? CRUMBS[v](arg) : `<b>${TITLES[v]}</b>`);
-  $('#page').innerHTML = V[v](arg);
-  MOUNT[v] && MOUNT[v](arg);
+  // A page that fails to draw shows an error card, never the previous page under the new menu highlight.
+  try { $('#page').innerHTML = V[v](arg); MOUNT[v] && MOUNT[v](arg); }
+  catch (e) { console.error(e); $('#page').innerHTML = `<div class="card"><div class="empty"><b>This page couldn't load</b>Refresh to try again. If it keeps happening, tell us what you clicked.</div></div>`; }
 }
 let CURRENT_VIEW = null, CURRENT_ARG = null;
 let LAST_HASH = location.hash;
@@ -1036,7 +1037,7 @@ function jobsHTML() {
     const actions = active
       ? `${j.run_url ? `<a class="btn sm ghost" href="${esc(j.run_url)}" target="_blank" rel="noopener">${ic('ext', 13)}Log</a>` : ''}${stuck ? `<button class="btn sm" data-jact="retry" data-id="${j.id}">${ic('retry', 13)}Retry</button>` : ''}<button class="btn sm ghost" data-jact="cancel" data-id="${j.id}">Cancel</button>`
       : `${j.status === 'failed' || j.status === 'cancelled' ? `<button class="btn sm" data-jact="retry" data-id="${j.id}" title="Continue where it stopped">${ic('retry', 13)}${j.done ? 'Resume' : 'Retry'}</button>` : ''}
-         ${!check && viewN(j) ? `<button class="btn sm btn-soft" data-jact="view" data-id="${j.id}">View ${fmtviewN(j)} lead${viewN(j) === 1 ? '' : 's'} ${ic('arrow', 13)}</button>` : ''}
+         ${!check && viewN(j) ? `<button class="btn sm btn-soft" data-jact="view" data-id="${j.id}">View ${fmt(viewN(j))} lead${viewN(j) === 1 ? '' : 's'} ${ic('arrow', 13)}</button>` : ''}
          <div class="kebab"><button class="iconbtn sm" data-menu="${j.id}" aria-label="More actions" aria-haspopup="true">⋯</button>${OPENMENU === j.id ? `<div class="menu" role="menu">
            ${!check && j.new ? `<button role="menuitem" data-jact="export" data-id="${j.id}">${ic('download', 14)}Export leads</button>` : ''}
            ${!check ? `<button role="menuitem" data-jact="again" data-id="${j.id}">${ic('play', 13)}Run again</button>` : ''}
