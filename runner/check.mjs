@@ -1,4 +1,5 @@
 // Website checks: does it load, how fast, platform, contact form, CAPTCHA, email.
+import { captchaFromHtml, isInvisible } from './forms/captcha-probe.mjs';
 // Plain HTTP first. Sites that need JavaScript to show a form are flagged for a browser check.
 import { isSocialHost } from '../public/shared/normalize.js';
 
@@ -52,13 +53,7 @@ export function detectPlatform(html) {
 }
 const JS_PLATFORMS = new Set(['Wix', 'Squarespace', 'Webflow', 'Duda', 'GoDaddy', 'Weebly']);
 
-export function detectCaptcha(html) {
-  if (/challenges\.cloudflare\.com\/turnstile|cf-turnstile/i.test(html)) return 'Turnstile';
-  if (/hcaptcha\.com|h-captcha/i.test(html)) return 'hCaptcha';
-  if (/recaptcha\/(api|enterprise)\.js|g-recaptcha|grecaptcha|recaptcha_public_key|www\.google\.com\/recaptcha/i.test(html)) return 'reCAPTCHA';
-  if (/friendlycaptcha|frc-captcha/i.test(html)) return 'Friendly Captcha';
-  return null;
-}
+export function detectCaptcha(html) { return captchaFromHtml(html); }
 
 const EMBEDS = [/jotform\.(com|us)\/(jsform|[0-9])/i, /js\.hsforms\.net|hsforms\.com|hbspt\.forms/i, /typeform\.com\/to\//i, /docs\.google\.com\/forms/i,
   /formstack\.com\/forms/i, /wufoo\.com/i, /cognitoforms\.com/i, /forms\.zohopublic|zoho\.com\/forms/i, /123formbuilder/i, /paperform\.co/i, /tally\.so\/embed/i, /form\.jotformpro/i, /podium\.com|widget\.podium/i, /housecallpro\.com|book\.housecallpro/i, /servicetitan|scheduler\.servicetitan/i, /getjobber\.com|clienthub\.getjobber/i];
@@ -156,7 +151,7 @@ export async function checkSite(url, opts = {}) {
       if (!f.found) { const g = detectForm(sub.html); if (g.found) { f = g; formUrl = sub.url; } }
     }
     if (opts.form) {
-      if (f.found) { out.form = f.captcha ? FORM.CAPTCHA : FORM.OPEN; out.captcha = f.captcha || null; out.form_url = formUrl; }
+      if (f.found) { out.form = f.captcha && !isInvisible(f.captcha) ? FORM.CAPTCHA : FORM.OPEN; out.captcha = f.captcha || null; out.form_url = formUrl; }
       else if (JS_PLATFORMS.has(out.platform) || text.length < 600) { out.form = FORM.NEEDS_BROWSER; out.form_url = links[0] || r.url; }
       else out.form = FORM.NONE;
     }

@@ -452,6 +452,38 @@ export const FIXTURES = [
       <label for="c">Phone</label><input id="c" type="tel" name="phone" required><label for="m">Message</label><textarea id="m" name="message" required></textarea><button>Send</button></form>
       <script>var f=document.getElementById('f');f.addEventListener('submit',function(e){e.preventDefault();fetch('/submit/silent-reset',{method:'POST',body:new FormData(f)}).then(function(r){if(r.ok)f.reset();});});</script>`),
   },
+  {
+    id: 'masked-phone', industry: 'Remodeling', note: 'Phone input mask that only accepts real typing (ignores values set by script)', mode: 'json',
+    req: ['name', 'email', 'phone', 'message'],
+    check: (b) => (!/^\(\d{3}\) \d{3}-\d{4}$/.test(b.phone) ? 'Enter a full phone number.' : null),
+    html: () => layout('SRT Building & Renovation', `<form id="f"><input name="name" placeholder="Name" required><input name="phone" id="ph" placeholder="Phone number" required>
+      <input name="email" type="email" placeholder="Email" required><textarea name="message" placeholder="Message" required></textarea><button>Send Message</button></form>
+      <script>(function(){var el=document.getElementById('ph'),d='';function fmt(x){if(!x)return '';var a=x.slice(0,3),b=x.slice(3,6),c=x.slice(6,10);return '('+a+(x.length>3?') '+b:'')+(x.length>6?'-'+c:'');}
+        el.addEventListener('beforeinput',function(e){e.preventDefault();if(e.inputType==='insertText'&&e.data){d=(d+e.data.replace(/\D/g,'')).slice(0,10);}else if(/delete/.test(e.inputType)){d=el.selectionStart===0&&el.selectionEnd===el.value.length?'':d.slice(0,-1);}el.value=fmt(d);});
+        el.addEventListener('input',function(){el.value=fmt(d);});})();</script>${ajax('masked-phone')}`),
+  },
+  {
+    id: 'invisible-captcha', industry: 'Builder', note: 'Only an invisible reCAPTCHA badge: nothing to solve, so the robot sends it', mode: 'html',
+    req: ['name', 'email', 'message'],
+    html: () => layout('Invisible Check Builders', `<form method="post" action="/submit/invisible-captcha"><!--ERR--><input name="name" placeholder="Name" required><input name="email" type="email" placeholder="Email" required>
+      <textarea name="message" placeholder="Message" required></textarea><button type="submit">Send</button></form>
+      <div class="grecaptcha-badge" style="position:fixed;right:0;bottom:14px;width:256px;height:60px"><iframe title="reCAPTCHA" src="about:blank#recaptcha-anchor?size=invisible" style="width:256px;height:60px;border:0"></iframe></div>`),
+  },
+  {
+    id: 'wpforms-real', industry: 'Remodeling', note: 'Real WPForms markup (srtbuilding.com): number-type phone, two honeypots, invisible reCAPTCHA v3 on the page', mode: 'redirect',
+    req: ['wpforms[fields][0]', 'wpforms[fields][4]', 'wpforms[fields][3]', 'wpforms[fields][1]', 'wpforms[fields][2]'], traps: ['wpforms[fields][5]', 'wpforms[fields][6]'],
+    check: (b) => (!/^\d{10}$/.test(b['wpforms[fields][4]']) ? 'Phone must be digits.' : null),
+    html: () => layout('SRT Building & Renovation', `<script src="https://www.google.com/recaptcha/api.js?render=6LcFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"></script>
+      <section class="widget wpforms-widget"><h2>REQUEST A FREE CONSULTATION</h2><form id="wpforms-form-19" class="wpforms-validate wpforms-form" method="post" action="/submit/wpforms-real" novalidate><!--ERR-->
+      <div class="wpforms-field"><label class="wpforms-label-hide" for="f0" style="position:absolute;clip:rect(0 0 0 0);width:1px;height:1px;overflow:hidden">Name <span>*</span></label><input type="text" id="f0" name="wpforms[fields][0]" placeholder="Full name" required></div>
+      <div class="wpforms-field"><label class="wpforms-label-hide" for="f4" style="position:absolute;clip:rect(0 0 0 0);width:1px;height:1px;overflow:hidden">Number <span>*</span></label><input type="number" id="f4" name="wpforms[fields][4]" placeholder="Phone number " step="any" required></div>
+      <div class="wpforms-field"><label class="wpforms-label-hide" for="f3" style="position:absolute;clip:rect(0 0 0 0);width:1px;height:1px;overflow:hidden">When are you ready to start? <span>*</span></label><input type="text" id="f3" name="wpforms[fields][3]" placeholder="When are you ready to start?" required></div>
+      <div class="wpforms-field"><label for="f5" aria-hidden="true">you Number Email</label><input type="text" id="f5" name="wpforms[fields][5]" tabindex="-1" aria-hidden="true"></div>
+      <div class="wpforms-field" style="position:absolute!important;overflow:hidden!important;display:inline!important;height:1px!important;width:1px!important;z-index:-1000!important;padding:0!important"><label for="f6" aria-hidden="true"></label><input type="text" id="f6" name="wpforms[fields][6]" aria-hidden="true" style="visibility:hidden" tabindex="-1"></div>
+      <div class="wpforms-field"><label class="wpforms-label-hide" for="f1" style="position:absolute;clip:rect(0 0 0 0);width:1px;height:1px;overflow:hidden">Email <span>*</span></label><input type="email" id="f1" name="wpforms[fields][1]" placeholder="Email address" required></div>
+      <div class="wpforms-field"><label class="wpforms-label-hide" for="f2" style="position:absolute;clip:rect(0 0 0 0);width:1px;height:1px;overflow:hidden">Project Description <span>*</span></label><textarea id="f2" name="wpforms[fields][2]" placeholder="Project description" required></textarea></div>
+      <button type="submit" class="wpforms-submit">Send Message</button></form></section><div class="grecaptcha-badge" style="position:fixed;right:0;bottom:14px;width:256px;height:60px"></div>`),
+  },
 ];
 
 export const byId = Object.fromEntries(FIXTURES.map(f => [f.id, f]));

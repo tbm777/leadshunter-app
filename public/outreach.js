@@ -388,14 +388,6 @@ function showOpenLink(id) {
 }
 
 /* ------------------------------------------------------------------ manual queue */
-function manualView() {
-  if (!MQ.loaded) { loadManual(); return loading(); }
-  const its = MQ.items;
-  return `<div class="head"><div><div class="eyebrow">Outreach</div><h1>Manual queue</h1><p>Forms the robot couldn't send on its own. Open the form, paste the fields, send, then mark it sent. Everything is already filled in for each business.</p></div>
-    <div class="row"><span class="help">Shortcuts: <span class="kbd">J</span> <span class="kbd">K</span> move, <span class="kbd">S</span> mark sent</span>${hasExt() ? `<span class="okline">${A.ic('check', 13)}Form filler installed</span>` : `<button class="btn primary" data-o="extguide">${A.ic('download', 14)}Get the form filler</button>`}</div></div>
-  ${its.length ? `<div class="split mq"><div class="card list" id="mq-list">${mqList()}</div><div class="card" id="mq-detail">${mqDetail()}</div></div>`
-    : `<div class="card"><div class="empty"><b>All clear</b>Nothing needs you right now. CAPTCHA forms and anything the robot couldn't finish land here.</div></div>`}`;
-}
 const hasExt = () => !!document.documentElement.dataset.lhExt;
 function b64url(str) { return btoa(unescape(encodeURIComponent(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 function fillUrl(it, c, snd, url, subject, message) {
@@ -406,52 +398,122 @@ function extGuide() {
   A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Install the extension">
     <div class="card-h"><div><h2>Install the form filler</h2><p>Works in Opera, Chrome and Edge. Takes about two minutes, once.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
     <div class="card-b"><ol class="extsteps">
-      <li><a class="btn sm primary" href="/leadshunter-extension.zip" download>${A.ic('download', 13)}Download the extension</a> and unzip it (double-click the file).</li>
+      <li><a class="btn sm primary" href="/leadshunter-extension.zip" download>${A.ic('download', 13)}Download the extension</a> and unzip it.</li>
       <li>Open <code>opera://extensions</code> in a new tab (in Chrome: <code>chrome://extensions</code>).</li>
       <li>Turn on <b>Developer mode</b> (top right).</li>
-      <li>Click <b>Load unpacked</b> and choose the unzipped <b>leadshunter-extension</b> folder.</li>
+      <li>Click <b>Load unpacked</b> and choose the <b>leadshunter-extension</b> folder that contains <code>manifest.json</code>.</li>
       <li>Come back here and reload the page. The button changes to <b>Fill form</b>.</li></ol>
-      <p class="help" style="margin:12px 0 0">The extension only acts on pages you open with Fill form. It never solves CAPTCHAs; you do that and press send yourself.</p></div>
+      <p class="help" style="margin:12px 0 0">Updating: download again, replace the folder's files, then click the reload icon on the extension in <code>opera://extensions</code>. The extension only acts on pages you open with Fill form, and it never solves CAPTCHAs.</p></div>
     <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Done</button></div></div></div>`;
 }
+const MQ_REASONS = [['all', 'All'], ['captcha', 'CAPTCHA'], ['interrupted', 'Interrupted'], ['login-required', 'Login'], ['other', 'Other']];
+const mqGroup = r => ['captcha', 'interrupted', 'login-required'].includes(r) ? r : 'other';
+const ageLbl = t => { const m = Math.round((Date.now() - t) / 60000); return m < 60 ? `${Math.max(1, m)}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`; };
+const REASON_C = { captcha: 'var(--manual)', interrupted: 'var(--warn)', 'login-required': 'var(--info)', other: 'var(--idle)' };
+const REASON_SHORT = { captcha: 'CAPTCHA', interrupted: 'Interrupted', 'login-required': 'Login', 'file-type': 'Word file', 'directory-page': 'Directory page' };
+function mqFiltered() {
+  const q = (MQ.q || '').trim().toLowerCase();
+  return MQ.items.filter(it => (MQ.reason === 'all' || mqGroup(it.reason) === MQ.reason) && (!MQ.camp || it.campaign_id === MQ.camp) && (!q || `${it.name} ${it.website || ''}`.toLowerCase().includes(q)));
+}
+function manualView() {
+  if (!MQ.loaded) { loadManual(); return loading(); }
+  MQ.reason ||= 'all'; MQ.checked ||= new Set(); MQ.done ||= 0;
+  const all = MQ.items;
+  if (!all.length) return `${mqHead()}<div class="card"><div class="empty mqempty"><b>${MQ.done ? `All done. ${MQ.done} handled this session.` : 'All clear'}</b>Nothing needs you right now. Forms with a CAPTCHA to solve, and anything the robot couldn't finish, land here.</div></div>`;
+  return `${mqHead()}
+    <div class="card mqbar">
+      <div class="tabs">${MQ_REASONS.map(([k, l]) => { const n = k === 'all' ? all.length : all.filter(i => mqGroup(i.reason) === k).length; return n || k === 'all' ? `<button class="${MQ.reason === k ? 'on' : ''}" data-mqreason="${k}">${l}<span class="n">${A.fmt(n)}</span></button>` : ''; }).join('')}</div>
+      <select class="input mqcamp" id="mq-camp"><option value="0">All campaigns</option>${[...new Map(all.map(i => [i.campaign_id, i.campaign])).entries()].map(([id, n]) => `<option value="${id}" ${MQ.camp === id ? 'selected' : ''}>${A.esc(n)}</option>`).join('')}</select>
+      <div class="lsearch mqsearch">${A.ic('find', 15)}<input id="mq-q" placeholder="Search business or website" value="${A.esc(MQ.q || '')}" autocomplete="off"></div>
+    </div>
+    <div id="mq-bulk">${mqBulkHTML()}</div>
+    <div class="mqgrid"><div class="card mqlist" id="mq-list">${mqList()}</div><div class="card mqwork" id="mq-detail">${mqDetail()}</div></div>`;
+}
+function mqHead() {
+  return `<div class="head"><div><div class="eyebrow">Outreach</div><h1>Manual queue</h1><p>${MQ.items.length ? `<b class="num">${A.fmt(MQ.items.length)}</b> form${MQ.items.length === 1 ? '' : 's'} need you.` : ''} Forms with a CAPTCHA to solve, plus anything the robot couldn't finish.${MQ.done ? ` <span class="okline">${A.ic('check', 12)}${MQ.done} done this session</span>` : ''}</p></div>
+    <div class="row">${hasExt() ? `<span class="extok">${A.ic('check', 13)}Form filler installed</span>` : `<button class="btn primary" data-o="extguide">${A.ic('download', 14)}Get the form filler</button>`}</div></div>`;
+}
+function mqBulkHTML() {
+  const n = MQ.checked ? MQ.checked.size : 0;
+  if (!n) return '';
+  return `<div class="selbar mqsel"><b class="num">${A.fmt(n)} selected</b><button class="linkbtn" data-mqbulk="all">Select all ${A.fmt(mqFiltered().length)} shown</button><button class="linkbtn" data-mqbulk="none">Clear</button>
+    <div class="selacts"><button class="btn sm" data-mqbulk="retry" title="Send back to the robot: it sends the ones without a CAPTCHA to solve">${A.ic('retry', 14)}Try robot again</button><button class="btn sm ghost" data-mqbulk="sent">${A.ic('check', 14)}Mark sent</button><button class="btn sm ghost" data-mqbulk="skip">${A.ic('x', 14)}Skip</button></div></div>`;
+}
 function mqList() {
-  return MQ.items.map((it, i) => `<button class="${i === MQ.sel ? 'on' : ''}" data-mq="${i}"><b>${A.esc(cleanCompanyName(it.name))}</b><span>${A.esc(reasonText(it.reason))} · ${A.esc(it.campaign)}</span></button>`).join('');
+  const list = mqFiltered();
+  if (!list.length) return `<div class="empty"><b>Nothing matches</b>Try another filter.</div>`;
+  const sel = MQ.items[MQ.sel];
+  if (!sel || !list.includes(sel)) MQ.sel = MQ.items.indexOf(list[0]);
+  return list.slice(0, MQ.limit || 300).map(it => { const i = MQ.items.indexOf(it), g = mqGroup(it.reason);
+    return `<div class="mqrow ${i === MQ.sel ? 'on' : ''}" data-mq="${i}"><span class="cb ${MQ.checked.has(it.id) ? 'on' : ''}" data-mqchk="${it.id}" role="checkbox" aria-checked="${MQ.checked.has(it.id)}" aria-label="Select"></span>
+      <div class="mqrow-b"><b>${A.esc(cleanCompanyName(it.name))}</b><span>${A.esc(domain(it.website))} · ${A.esc(it.campaign)}</span></div>
+      <div class="mqrow-r"><span class="pill" style="--c:${REASON_C[g]}">${REASON_SHORT[it.reason] || 'Other'}</span><small class="num">${ageLbl(it.updated_at)}</small></div></div>`; }).join('')
+    + (list.length > (MQ.limit || 300) ? `<button class="btn ghost sm mqmore" data-mqbulk="more">Show ${A.fmt(Math.min(300, list.length - (MQ.limit || 300)))} more</button>` : '');
 }
 function mqDetail() {
-  const it = MQ.items[MQ.sel]; if (!it) return '';
+  const it = MQ.items[MQ.sel]; if (!it || !mqFiltered().includes(it)) return `<div class="empty">Pick a form on the left.</div>`;
   const c = OS.campaigns.find(x => x.id === it.campaign_id), snd = c && senderOf(c), lead = leadFor(it);
   const subj = c ? personalize(c.subject, lead) : '', msg = c ? personalize(c.message, lead) : '';
   const url = it.form_url || it.website;
+  const list = mqFiltered(), pos = list.indexOf(it);
+  const canFill = hasExt() && it.fill_token && snd && subj && msg && url && it.reason !== 'login-required';
   const f = (k, v) => v ? `<div class="mfield"><span class="k">${k}</span><span class="val">${A.esc(v)}</span><button class="dcopy" data-copy="${A.esc(v)}">${A.ic('copy', 12)}<span>Copy</span></button></div>` : '';
-  return `<div class="card-h"><div><h3>${A.esc(cleanCompanyName(it.name))}</h3><p>${A.esc(reasonText(it.reason))}</p></div><span class="help num">${MQ.sel + 1} of ${MQ.items.length}</span></div>
-    <div class="card-b" style="display:flex;flex-direction:column;gap:14px">
-      ${url ? (hasExt() && it.fill_token && snd && subj && msg
-        ? `<a class="btn primary mqopen" href="${A.esc(fillUrl(it, c, snd, url, subj, msg))}" target="_blank" rel="noopener">${A.ic('edit', 15)}Fill form<span class="mqurl">${A.esc(domain(url))}</span></a><div class="row" style="justify-content:space-between"><span class="help">Opens the form already filled in. Solve the CAPTCHA and press send: it's marked sent here automatically.</span><a class="linkbtn muted" href="${A.esc(url)}" target="_blank" rel="noopener">Open without filling</a></div>`
-        : `<a class="btn primary mqopen" href="${A.esc(url)}" target="_blank" rel="noopener">${A.ic('ext', 15)}Open the form<span class="mqurl">${A.esc(domain(url))}</span></a>
-           <div class="extcta">${A.ic('edit', 16)}<div><b>Fill these forms in one click</b><span>Install the LeadsHunter extension for Opera, Chrome or Edge. Forms open already filled in.</span></div><button class="btn sm" data-o="extguide">Get the extension</button></div>`) : ''}
-      <div>${f('Subject', subj)}${f('Message', msg)}${snd ? f('First name', snd.first_name) + f('Last name', snd.last_name) + f('Email', snd.email) + f('Phone', snd.phone) + f('Company', snd.company) + f('Website', snd.website) : ''}</div>
-      <div class="row mqacts"><button class="btn primary" data-mqact="sent">${A.ic('check', 14)}Mark as sent</button><button class="btn" data-mqact="retry" title="Send it back to the robot">${A.ic('retry', 14)}Try robot again</button><button class="btn" data-mqact="skip">Skip</button><button class="btn ghost" data-mqact="dnc" style="color:var(--bad)">${A.ic('shield', 14)}Do not contact</button></div>
-    </div>`;
+  const why = it.reason === 'captcha' ? 'This form has a CAPTCHA you need to solve. Everything else is filled in for you.' : it.reason === 'interrupted' ? 'The robot stopped while sending this one. Open the form and check whether it went through before sending again.' : reasonText(it.reason);
+  return `<div class="mqw-h"><div><h2>${A.esc(cleanCompanyName(it.name))}</h2><p>${url ? `<a href="${A.esc(url)}" target="_blank" rel="noopener">${A.esc(domain(url))}</a> · ` : ''}${A.esc(it.campaign)}</p></div><div class="mqw-nav"><button class="iconbtn sm" data-mqnav="-1" aria-label="Previous" ${pos <= 0 ? 'disabled' : ''}>${A.ic('back', 14)}</button><span class="num">${pos + 1} / ${list.length}</span><button class="iconbtn sm" data-mqnav="1" aria-label="Next" ${pos >= list.length - 1 ? 'disabled' : ''}>${A.ic('arrow', 14)}</button></div></div>
+    <div class="mqw-b">
+      <div class="note ${it.reason === 'interrupted' ? '' : 'neutral'}">${A.ic('alert')}<div>${A.esc(why)}</div></div>
+      ${canFill ? `<a class="btn primary mqopen" href="${A.esc(fillUrl(it, c, snd, url, subj, msg))}" target="_blank" rel="noopener" data-mqopened>${A.ic('edit', 15)}Fill form<span class="kbd2">F</span></a>
+          <ol class="mqsteps"><li>The form opens already filled in</li><li>${it.reason === 'interrupted' ? 'Check it wasn’t already sent, then press send' : it.reason === 'captcha' ? 'Solve the CAPTCHA and press send' : 'Check the fields and press send'}</li><li>It's marked sent here automatically</li></ol>`
+        : url ? `<a class="btn primary mqopen" href="${A.esc(url)}" target="_blank" rel="noopener" data-mqopened>${A.ic('ext', 15)}Open the form<span class="kbd2">F</span></a>${hasExt() ? '' : `<div class="extcta">${A.ic('edit', 16)}<div><b>Skip the copy-paste</b><span>With the form filler extension, forms open already filled in and are marked sent automatically.</span></div><button class="btn sm" data-o="extguide">Get it</button></div>`}` : ''}
+      <details class="mqfields" ${canFill ? '' : 'open'}><summary>${canFill ? 'Copy fields by hand instead' : 'Fields to paste'}</summary><div>${f('Subject', subj)}${f('Message', msg)}${snd ? f('First name', snd.first_name) + f('Last name', snd.last_name) + f('Email', snd.email) + f('Phone', snd.phone) + f('Company', snd.company) + f('Website', snd.website) : ''}</div></details>
+    </div>
+    <div class="mqw-f"><button class="btn primary" data-mqact="sent">${A.ic('check', 14)}Mark as sent<span class="kbd2">S</span></button><button class="btn" data-mqact="retry" title="Send back to the robot">${A.ic('retry', 14)}Try robot<span class="kbd2">R</span></button><button class="btn" data-mqact="skip">Skip<span class="kbd2">X</span></button><button class="btn ghost" data-mqact="dnc" style="margin-left:auto;color:var(--bad)">${A.ic('shield', 14)}Do not contact</button></div>`;
+}
+function mqRender(parts = ['list', 'detail', 'bulk']) {
+  if (parts.includes('list')) { const el = A.$('#mq-list'); if (el) el.innerHTML = mqList(); }
+  if (parts.includes('detail')) { const el = A.$('#mq-detail'); if (el) el.innerHTML = mqDetail(); }
+  if (parts.includes('bulk')) { const el = A.$('#mq-bulk'); if (el) el.innerHTML = mqBulkHTML(); }
+  document.querySelector('#mq-list .on')?.scrollIntoView({ block: 'nearest' });
+}
+function mqMove(step) {
+  const list = mqFiltered(), pos = list.indexOf(MQ.items[MQ.sel]);
+  const next = list[Math.max(0, Math.min(list.length - 1, pos + step))];
+  if (next) { MQ.sel = MQ.items.indexOf(next); mqRender(['list', 'detail']); }
 }
 async function loadManual() {
   if (MQ.loading) return; MQ.loading = true;
   try {
     await loadOutreach();   // fresh campaigns and senders: the Fill form link carries them
     const r = await A.api('GET', '/api/outreach/items?status=manual&order=recent&limit=500&tokens=1');
-    MQ.items = r.items; MQ.sel = Math.min(MQ.sel, Math.max(0, MQ.items.length - 1)); MQ.loaded = true;
+    const cur = MQ.items[MQ.sel]?.id;
+    MQ.items = r.items; MQ.loaded = true;
+    const keep = MQ.items.findIndex(i => i.id === cur); MQ.sel = keep >= 0 ? keep : Math.min(MQ.sel || 0, Math.max(0, MQ.items.length - 1));
+    if (MQ.checked) for (const id of [...MQ.checked]) if (!MQ.items.some(i => i.id === id)) MQ.checked.delete(id);
     if (A.currentView() === 'manual') A.render();
   } catch (e) { A.toast(e.message, 'alert'); } finally { MQ.loading = false; }
 }
 async function mqAction(act) {
   const it = MQ.items[MQ.sel]; if (!it) return;
+  const list = mqFiltered(), pos = list.indexOf(it);
   try {
     await A.api('POST', `/api/outreach/${it.id}`, { action: act });
-    MQ.items.splice(MQ.sel, 1); MQ.sel = Math.min(MQ.sel, Math.max(0, MQ.items.length - 1));
+    MQ.items.splice(MQ.sel, 1); MQ.checked?.delete(it.id); MQ.done = (MQ.done || 0) + 1;
+    const rest = list.filter(x => x !== it), next = rest[Math.min(pos, rest.length - 1)];
+    MQ.sel = next ? MQ.items.indexOf(next) : 0;
     OS.manual = Math.max(0, OS.manual - 1); A.renderNav('manual');
     A.toast({ sent: 'Marked as sent', retry: 'Sent back to the robot', skip: 'Skipped', dnc: 'Marked do not contact' }[act]);
-    if (!MQ.items.length) A.render(); else { A.$('#mq-list').innerHTML = mqList(); A.$('#mq-detail').innerHTML = mqDetail(); }
+    if (!MQ.items.length) A.render(); else { mqRender(); const h = document.querySelector('.head p'); if (h) h.outerHTML = mqHead().match(/<p>[\s\S]*?<\/p>/)[0]; }
     A.sync();
   } catch (e) { A.toast(e.message, 'alert'); }
+}
+async function mqBulk(act) {
+  const ids = [...MQ.checked]; if (!ids.length) return;
+  const label = { retry: 'Sent back to the robot', sent: 'Marked as sent', skip: 'Skipped' }[act];
+  let done = 0;
+  for (let i = 0; i < ids.length; i += 100) { const r = await A.api('POST', '/api/outreach/bulk', { ids: ids.slice(i, i + 100), action: act }).catch(e => { A.toast(e.message, 'alert'); return null; }); if (r) done += r.done; }
+  MQ.checked.clear(); MQ.done = (MQ.done || 0) + done;
+  A.toast(`${label}: ${A.fmt(done)}`);
+  await loadManual(); A.sync();
 }
 
 /* ------------------------------------------------------------------ messages log */
@@ -544,8 +606,16 @@ async function onClick(e) {
   if (pvn) { const c = curCampaign(); cp(c.id).previewIdx += +pvn.dataset.pvnav; renderPreview(c); return; }
   const day = t.closest('[data-day]');
   if (day) { const c = curCampaign(); const set = new Set(c.weekdays); const d = day.dataset.day; set.has(d) ? set.delete(d) : set.add(d); if (!set.size) { A.toast('Keep at least one sending day.', 'alert'); return; } day.classList.toggle('on'); saveSetting(c, { weekdays: [...set].join('') }); return; }
+  const chk = t.closest('[data-mqchk]');
+  if (chk) { const id = +chk.dataset.mqchk; MQ.checked.has(id) ? MQ.checked.delete(id) : MQ.checked.add(id); mqRender(['list', 'bulk']); return; }
+  const mqr = t.closest('[data-mqreason]');
+  if (mqr) { MQ.reason = mqr.dataset.mqreason; A.render(); return; }
+  const mqb = t.closest('[data-mqbulk]');
+  if (mqb) { const a = mqb.dataset.mqbulk; if (a === 'all') { mqFiltered().forEach(i => MQ.checked.add(i.id)); mqRender(['list', 'bulk']); } else if (a === 'none') { MQ.checked.clear(); mqRender(['list', 'bulk']); } else if (a === 'more') { MQ.limit = (MQ.limit || 300) + 300; mqRender(['list']); } else { mqb.disabled = true; mqBulk(a); } return; }
+  const mqn = t.closest('[data-mqnav]');
+  if (mqn) { mqMove(+mqn.dataset.mqnav); return; }
   const mq = t.closest('[data-mq]');
-  if (mq) { MQ.sel = +mq.dataset.mq; A.$('#mq-list').innerHTML = mqList(); A.$('#mq-detail').innerHTML = mqDetail(); return; }
+  if (mq) { MQ.sel = +mq.dataset.mq; mqRender(['list', 'detail']); return; }
   const mqa = t.closest('[data-mqact]');
   if (mqa) { mqAction(mqa.dataset.mqact); return; }
   const msr = t.closest('[data-msres]');
@@ -695,6 +765,7 @@ function insertTag(tag) {
 }
 function onInput(e) {
   const t = e.target, c = curCampaign();
+  if (t.id === 'mq-q') { MQ.q = t.value; mqRender(['list', 'detail']); return; }
   if (t.id === 'del-in') { const ok = t.value.trim() === 'DELETE'; const bt = document.querySelector('[data-o="delcampok"]'); if (bt) bt.disabled = !ok; return; }
   if (t.dataset && t.dataset.spf) { updateFallbackHints(); return; }
   if (t.dataset.msave !== undefined && c) {
@@ -723,13 +794,18 @@ function onChange(e) {
   if (t.name === 'stwhen' || t.id === 'st-date' || t.id === 'st-time') { if (t.id === 'st-date' || t.id === 'st-time') A.$('#st-later').checked = true; const later = A.$('#st-later').checked; A.$('#st-o1').classList.toggle('on', !later); A.$('#st-o2').classList.toggle('on', later); A.$('#st-go').textContent = later ? 'Schedule campaign' : 'Start campaign'; return; }
   if (t.id === 'ac-inc') { AC.includeContacted = t.checked; acSummary(); return; }
   if (t.id === 'ms-camp') { MS.campaign = +t.value; MS.loaded = false; loadMessages(); return; }
+  if (t.id === 'mq-camp') { MQ.camp = +t.value || 0; mqRender(['list', 'detail']); return; }
 }
 function onKey(e) {
   if (e.target.id === 'del-in' && e.key === 'Enter') { e.preventDefault(); document.querySelector('[data-o="delcampok"]:not([disabled])')?.click(); return; }
   if (A.currentView() !== 'manual' || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || document.querySelector('.scrim') || e.metaKey || e.ctrlKey) return;
-  if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); MQ.sel = Math.min(MQ.items.length - 1, MQ.sel + 1); A.$('#mq-list').innerHTML = mqList(); A.$('#mq-detail').innerHTML = mqDetail(); document.querySelector('#mq-list .on')?.scrollIntoView({ block: 'nearest' }); }
-  if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); MQ.sel = Math.max(0, MQ.sel - 1); A.$('#mq-list').innerHTML = mqList(); A.$('#mq-detail').innerHTML = mqDetail(); document.querySelector('#mq-list .on')?.scrollIntoView({ block: 'nearest' }); }
-  if (e.key === 's') { e.preventDefault(); mqAction('sent'); }
+  const k = e.key.toLowerCase();
+  if (k === 'j' || e.key === 'ArrowDown') { e.preventDefault(); mqMove(1); }
+  else if (k === 'k' || e.key === 'ArrowUp') { e.preventDefault(); mqMove(-1); }
+  else if (k === 's') { e.preventDefault(); mqAction('sent'); }
+  else if (k === 'r') { e.preventDefault(); mqAction('retry'); }
+  else if (k === 'x') { e.preventDefault(); mqAction('skip'); }
+  else if (k === 'f') { const a = document.querySelector('a.mqopen'); if (a) { e.preventDefault(); window.open(a.href, '_blank', 'noopener'); } }
 }
 
 /* ------------------------------------------------------------------ lead panel: campaign history */

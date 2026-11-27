@@ -43,8 +43,9 @@
     const wrap = el.closest('label'); if (wrap) parts.push(txt(wrap));
     if (el.getAttribute('aria-label')) parts.push(el.getAttribute('aria-label'));
     const lb = el.getAttribute('aria-labelledby'); if (lb) lb.split(/\s+/).forEach(id => { const n = document.getElementById(id); if (n) parts.push(txt(n)); });
-    if (!parts.length) {
-      for (let w = el.parentElement, i = 0; w && i < 3 && !parts.length; w = w.parentElement, i++) {
+    if (!parts.length && !el.getAttribute('placeholder') && !el.name) {
+      const stop = el.closest('form') || document.body;
+      for (let w = el.parentElement, i = 0; w && i < 3 && !parts.length && w !== stop.parentElement; w = w.parentElement, i++) {
         const c = [...w.querySelectorAll('label,legend,span,p,div,strong,b')].filter(n => !n.contains(el) && (n.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) && /[a-z]/i.test(txt(n)) && txt(n).length < 80 && !n.querySelector('input,select,textarea'));
         if (c.length) parts.push(txt(c[c.length - 1]));
       }
@@ -103,6 +104,7 @@
   const digits = s => String(s || '').replace(/\D/g, '');
   function phoneFor(el, phone) {
     let d = digits(phone); if (d.length === 11 && d[0] === '1') d = d.slice(1);
+    if (el.type === 'number') return d;   // number fields only take digits
     if (d.length !== 10) return phone;
     const a = d.slice(0, 3), b = d.slice(3, 6), c = d.slice(6);
     const opts = [`(${a}) ${b}-${c}`, `${a}-${b}-${c}`, d, `${a}.${b}.${c}`, `+1${d}`, `+1 ${a} ${b} ${c}`];
@@ -130,6 +132,7 @@
       case 'number': case 'range': { const min = el.min !== '' ? +el.min : null, max = el.max !== '' ? +el.max : null; let v = min !== null ? Math.max(min, 1) : 1; if (max !== null) v = Math.min(v, max); return String(v); }
       default: {
         const l = `${labelOf(el)} ${el.placeholder || ''}`.toLowerCase();
+        if (/ready to start|timeline|time ?frame|how soon|when (would|do|are|can) you/.test(l)) return 'As soon as possible';
         if (/date|when/.test(l)) { const d = nextBizDay(); return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`; }
         if (/how many|number of|quantity/.test(l)) return '1';
         return fit('N/A');
@@ -155,7 +158,33 @@
     setter.call(el, v);
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
+    if (el.tagName !== 'SELECT' && !stuck(el, v)) typeInto(el, v);
     el.dispatchEvent(new Event('blur', { bubbles: true }));
+    return el.tagName === 'SELECT' || stuck(el, v);
+  }
+  // Masked fields (phone, dates) ignore values set directly: type it like a person instead.
+  const stuck = (el, v) => { const a = String(el.value || ''); if (!a) return false; const dv = digits(v); return dv.length >= 6 ? digits(a).includes(dv.slice(-7)) : a.length > 0; };
+  function typeInto(el, v) {
+    for (const attempt of [v, digits(v).length >= 7 ? digits(v).replace(/^1(?=\d{10}$)/, '') : null]) {
+      if (!attempt) continue;
+      el.focus(); try { el.select(); } catch { /* not selectable */ }
+      document.execCommand('delete');
+      document.execCommand('insertText', false, attempt);
+      if (stuck(el, attempt)) return true;
+      // Character by character, like a keyboard: works with masks that only listen to typing events.
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(el, ''); el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'deleteContentBackward', bubbles: true, cancelable: true })); el.dispatchEvent(new Event('input', { bubbles: true }));
+      for (const ch of attempt) {
+        el.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true, cancelable: true }));
+        el.dispatchEvent(new KeyboardEvent('keypress', { key: ch, charCode: ch.charCodeAt(0), bubbles: true, cancelable: true }));
+        const bi = new InputEvent('beforeinput', { data: ch, inputType: 'insertText', bubbles: true, cancelable: true });
+        if (el.dispatchEvent(bi)) setter.call(el, el.value + ch);   // the site's mask didn't handle it: insert it ourselves
+        el.dispatchEvent(new InputEvent('input', { data: ch, inputType: 'insertText', bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true }));
+      }
+      if (stuck(el, attempt)) return true;
+    }
+    return false;
   }
   function check(el) { if (!el.checked) { el.click(); if (!el.checked) { el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); } } }
   const mark = (el) => { const t = el.type === 'checkbox' || el.type === 'radio' ? (el.closest('label') || el) : el; t.style.outline = '2px solid #1C8F58'; t.style.outlineOffset = '1px'; if (t === el && el.type !== 'file') t.style.backgroundColor = 'rgba(28,143,88,.07)'; };
@@ -196,7 +225,8 @@
     for (const el of fieldsIn(root)) {
       if (el.disabled || el.readOnly || !shown(el)) continue;
       const f = { label: labelOf(el), name: el.name || '', id: el.id || '', ph: el.getAttribute('placeholder') || '', ac: el.getAttribute('autocomplete') || '' };
-      if (/honey|hpot|^hp[_-]|leave.*(blank|empty)|do not fill/i.test(f.name + ' ' + f.label)) continue;
+      // Spam traps: honeypot names, or inputs hidden from screen readers and skipped by Tab. Filling one gets the message thrown away.
+      if (/honey|hpot|^hp[_-]|leave.*(blank|empty)|do not fill/i.test(f.name + ' ' + f.label) || (el.getAttribute('aria-hidden') === 'true' && el.tabIndex === -1)) continue;
       const cls = classify(el, f);
       const req = el.required || el.getAttribute('aria-required') === 'true' || /\*/.test(f.label);
       try {
@@ -208,11 +238,11 @@
         }
         if (cls === 'radio') { if (el.name) { (groups[el.name] ||= []).push(el); radios.add(el.name); } continue; }
         if (cls === 'checkbox' || cls === 'consent') { if (cls === 'consent' || req) { check(el); mark(el); count++; } else if (el.name) (groups['cb:' + el.name] ||= []).push(el); continue; }
-        if (el.tagName === 'SELECT') { if (el.value && !PLACEHOLDER.test(el.options[el.selectedIndex]?.text || '')) continue; const o = pickOption(el, cls, P); if (o) { setValue(el, o.value); mark(el); count++; } continue; }
-        if (el.value && el.value.trim()) continue; // leave anything already typed
+        if (el.tagName === 'SELECT') { if (el.value && !PLACEHOLDER.test(el.options[el.selectedIndex]?.text || '')) { mark(el); count++; continue; } const o = pickOption(el, cls, P); if (o) { setValue(el, o.value); mark(el); count++; } continue; }
+        if (el.value && el.value.trim()) { mark(el); count++; continue; } // already filled (by us earlier, or by you): keep it
         const v = valueFor(el, cls, P);
         if (!v || /undefined/.test(v)) { skipped.push(f.label || f.name); continue; }
-        setValue(el, v); mark(el); count++;
+        if (setValue(el, v)) { mark(el); count++; } else skipped.push(f.label || f.name || cls);
       } catch { skipped.push(f.label || f.name); }
     }
     for (const name of radios) {
@@ -273,20 +303,27 @@
     }, 1000);
     setTimeout(() => clearInterval(iv), 10 * 60e3);
   }
+  // A challenge you must solve (checkbox, puzzle) vs an invisible check that only shows a small badge.
+  function captchaKind() {
+    const big = (el) => { const r = el.getBoundingClientRect(); return r.width >= 150 && r.height >= 50 && vis(el); };
+    for (const el of document.querySelectorAll('iframe[src*="recaptcha"],iframe[src*="hcaptcha"],iframe[src*="challenges.cloudflare.com"],.cf-turnstile,.h-captcha,.g-recaptcha'))
+      if (!el.closest('.grecaptcha-badge') && !/size=invisible/.test(el.src || '') && el.getAttribute('data-size') !== 'invisible' && big(el)) return 'visible';
+    return document.querySelector(CAPTCHA) || [...document.scripts].some(x => /recaptcha|hcaptcha|turnstile/.test(x.src)) ? 'invisible' : null;
+  }
   function run(P, again) {
     CUR = P;
     const r = fill(P);
-    const cap = !!document.querySelector(CAPTCHA);
+    const cap = captchaKind();
     if (!TOP) return;
     if (!r.root && !again) {
       showPanel(`<p>No contact form on this page yet. Open the contact page, then press Fill.</p><div class="r"><button class="b pr" data-a="refill">Fill</button><button class="b" data-a="sent">I sent it</button></div>`);
       return;
     }
-    showPanel(`<p><b>${r.count} field${r.count === 1 ? '' : 's'} filled</b> (outlined in green). ${cap ? 'Solve the CAPTCHA, then press the form’s send button.' : 'Check them, then press the form’s send button.'}</p>
+    showPanel(`<p><b>${r.count} field${r.count === 1 ? '' : 's'} filled</b> (outlined in green). ${cap === 'visible' ? 'Solve the CAPTCHA, then press the form’s send button.' : cap === 'invisible' ? 'This form only has an invisible CAPTCHA check, so there’s nothing to solve: just press the form’s send button.' : 'Check them, then press the form’s send button.'}</p>
       ${r.skipped.length ? `<p class="bad">Fill yourself: ${[...new Set(r.skipped)].join(', ')}.</p>` : ''}
       <p>It’s marked sent here automatically when the site confirms.</p>
-      <div class="r">${cap ? '<button class="b pr" data-a="captcha">Go to CAPTCHA</button>' : ''}<button class="b" data-a="refill">Fill again</button><button class="b" data-a="sent">I sent it</button></div>`);
-    if (!again) { watchForSuccess(P); if (cap) setTimeout(actions.captcha, 400); }
+      <div class="r">${cap === 'visible' ? '<button class="b pr" data-a="captcha">Go to CAPTCHA</button>' : ''}<button class="b" data-a="refill">Fill again</button><button class="b" data-a="sent">I sent it</button></div>`);
+    if (!again) { watchForSuccess(P); if (cap === 'visible') setTimeout(actions.captcha, 400); }
   }
 
   /* ---------------------------------------------------------- start */

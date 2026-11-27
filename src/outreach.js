@@ -296,6 +296,15 @@ export async function leadOutreach(env, id) {
   return json({ items: r.results });
 }
 
+/** The same actions for many manual-queue items at once (max 100 per request). */
+export async function bulkItems(env, b) {
+  const ids = [...new Set((b.ids || []).map(Number).filter(Number.isInteger))].slice(0, 100);
+  if (!ids.length || !['sent', 'skip', 'retry', 'dnc'].includes(b.action)) throw new HttpError(400, 'Select items and an action.');
+  let done = 0, failed = 0;
+  for (const id of ids) { try { await itemAction(env, id, { action: b.action }); done++; } catch { failed++; } }
+  return json({ ok: true, done, failed });
+}
+
 /* ------------------------------------------------------------------ runs */
 async function activeJob(env, cid) {
   return env.DB.prepare("SELECT id, status FROM searches WHERE kind = 'outreach' AND campaign_id = ? AND status IN ('queued','running') ORDER BY id DESC LIMIT 1").bind(cid).first();

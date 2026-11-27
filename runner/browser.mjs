@@ -2,6 +2,7 @@
 // Playwright is installed on demand the first time it is needed, so plain searches stay fast.
 import { execSync } from 'node:child_process';
 import { FORM } from './check.mjs';
+import { captchaInPage, usableFrames, evalIn } from './forms/captcha-probe.mjs';
 
 let browserPromise = null;
 
@@ -44,8 +45,8 @@ export async function browserFormCheck(url) {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
     await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
     // Look in the page and in every frame (embedded form builders render inside iframes).
-    for (const frame of page.frames()) {
-      const found = await frame.evaluate(() => {
+    for (const frame of usableFrames(page)) {
+      const found = await evalIn(frame, () => {
         const forms = [...document.querySelectorAll('form')];
         const ok = forms.some(f => f.querySelector('textarea') && f.querySelector('input[type=email], input[name*=mail i], input[type=tel], input[name*=phone i]'));
         if (ok) return true;
@@ -56,20 +57,10 @@ export async function browserFormCheck(url) {
         // Some sites only load their CAPTCHA once you start typing.
         await frame.evaluate(() => { const el = document.querySelector('form textarea, textarea, form input[type=email]'); if (el) { el.focus(); el.dispatchEvent(new Event('focusin', { bubbles: true })); el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'a' })); } }).catch(() => {});
         await page.waitForTimeout(1500);
-        let cap = null;
-        for (const fr of page.frames()) { cap = await fr.$(CAPTCHA_SEL).catch(() => null); if (cap) break; }
-        let captcha = null;
-        if (cap) {
-          const html = await cap.evaluate(el => el.outerHTML);
-          captcha = /hcaptcha/i.test(html) ? 'hCaptcha' : /cloudflare|turnstile/i.test(html) ? 'Turnstile' : 'reCAPTCHA';
-        } else {
-          let scripts = '';
-          for (const fr of page.frames()) scripts += ' ' + await fr.$$eval('script[src]', s => s.map(x => x.src).join(' ')).catch(() => '');
-          if (/recaptcha/i.test(scripts)) captcha = 'reCAPTCHA';
-          else if (/hcaptcha/i.test(scripts)) captcha = 'hCaptcha';
-          else if (/turnstile/i.test(scripts)) captcha = 'Turnstile';
-        }
-        return { form: captcha ? FORM.CAPTCHA : FORM.OPEN, captcha, form_url: page.url() };
+        // Visible challenge → CAPTCHA (manual). Invisible score check → open form (a person is never asked anything).
+        let probe = { kind: null, type: null };
+        for (const fr of [frame, page.mainFrame()]) { const p = await evalIn(fr, captchaInPage).catch(() => null); if (p && p.kind === 'visible') { probe = p; break; } if (p && p.kind) probe = p; }
+        return { form: probe.kind === 'visible' ? FORM.CAPTCHA : FORM.OPEN, captcha: probe.type, form_url: page.url() };
       }
     }
     return { form: FORM.NONE, captcha: null, form_url: null };

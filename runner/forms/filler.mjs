@@ -1,6 +1,7 @@
 // LeadsHunter form engine: find the contact form, give every field a valid value, submit, and prove the result.
 // Works on a Playwright Page. Never bypasses CAPTCHAs: those are reported as manual.
 import { brandedFile } from './files.mjs';
+import { captchaInPage, usableFrames, evalIn } from './captcha-probe.mjs';
 import { personalize, cleanCompanyName } from './personalize.mjs';
 
 const SUCCESS = /(thank\s?(you|s)\b|message (has been |was )?(sent|received|delivered)|we('ll| will) (be in touch|get back|contact you|respond|reach out)|successfully (sent|submitted)|submission (received|successful)|request (has been |was )?(received|sent|submitted)|we (have|'ve) received|form (has been |was )?submitted|thanks for (reaching|contacting|getting)|your (message|inquiry|enquiry|request) (has been|was) )/i;
@@ -30,10 +31,11 @@ function scanInPage(prevMax) {
     const wrap = el.closest('label'); if (wrap) parts.push(txt(wrap));
     if (el.getAttribute('aria-label')) parts.push(el.getAttribute('aria-label'));
     const lb = el.getAttribute('aria-labelledby'); if (lb) lb.split(/\s+/).forEach(id => { const n = document.getElementById(id); if (n) parts.push(txt(n)); });
-    if (!parts.length) {
-      // nearest preceding text inside the field's wrapper (fieldset legend, div label, p)
+    if (!parts.length && !el.getAttribute('placeholder')) {
+      // nearest preceding text inside the field's wrapper (fieldset legend, div label, p), never outside the form
+      const stop = el.closest('form');
       let w = el.parentElement, hops = 0;
-      while (w && hops < 3 && !parts.length) {
+      while (w && hops < 3 && !parts.length && w !== (stop && stop.parentElement)) {
         const cand = [...w.querySelectorAll('label,legend,.label,span,p,div,strong,b')].filter(n => !n.contains(el) && n.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING && /[a-z]/i.test(txt(n)) && txt(n).length < 80 && !n.querySelector('input,select,textarea'));
         if (cand.length) { let c = cand[cand.length - 1]; while (c.parentElement && cand.includes(c.parentElement)) c = c.parentElement; parts.push(txt(c)); }
         w = w.parentElement; hops++;
@@ -88,10 +90,9 @@ function scanInPage(prevMax) {
   best.setAttribute('data-lh-root', '1');
   window.__lhDoc = window.__lhDoc || Math.random(); // marks this document, so a reloaded page is never mistaken for a closed form
   const page = document.body.innerText || '';
-  const capEl = best.querySelector(window.__LH_CAPTCHA) || document.querySelector(window.__LH_CAPTCHA);
-  const srcs = [...document.scripts].map(s => s.src).join(' ') + ' ' + (capEl ? capEl.outerHTML.slice(0, 400) : '');
-  const captchaType = /hcaptcha/i.test(srcs) ? 'hCaptcha' : /turnstile|challenges\.cloudflare/i.test(srcs) ? 'Turnstile' : /recaptcha|grecaptcha/i.test(srcs) || capEl ? 'reCAPTCHA' : /friendlycaptcha|frc-captcha/i.test(srcs) ? 'Friendly Captcha' : null;
-  const captcha = !!(capEl || captchaType);
+  // Only a challenge a person must solve counts; invisible score checks (badge only) are sent normally.
+  const probe = window.__lhProbe ? window.__lhProbe() : { kind: null, type: null };
+  const captcha = probe.kind === 'visible', captchaType = probe.type;
   let n = prevMax;
   const fields = [];
   for (const el of fieldsIn(best)) {
@@ -100,7 +101,8 @@ function scanInPage(prevMax) {
     const label = labelOf(el);
     const visible = vis(el) || (isChoice && el.closest('label') && vis(el.closest('label'))) || (isChoice && el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`) && vis(document.querySelector(`label[for="${CSS.escape(el.id)}"]`))) || (type === 'file' && el.closest('label,div') && vis(el.closest('label,div')));
     const nm = (el.name || el.id || '');
-    const trap = /honey|hpot|^hp[_-]?|ohnohoney|leave.*(blank|empty)|do not fill|bot.?check|^url2$|^website2$|^fax_only$|^confirm_url$/i.test(nm + ' ' + label) || (el.tabIndex === -1 && !isChoice && el.getAttribute('autocomplete') === 'off' && !vis(el));
+    // Spam traps: honeypot names, or inputs hidden from screen readers and skipped by Tab (WPForms, Gravity Forms…). Filling one gets the message thrown away.
+    const trap = /honey|hpot|^hp[_-]?|ohnohoney|leave.*(blank|empty)|do not fill|bot.?check|^url2$|^website2$|^fax_only$|^confirm_url$/i.test(nm + ' ' + label) || (el.tabIndex === -1 && !isChoice && el.getAttribute('autocomplete') === 'off' && !vis(el)) || (!isChoice && el.getAttribute('aria-hidden') === 'true' && el.tabIndex === -1) || !!el.closest('[aria-hidden="true"][tabindex="-1"]');
     if (!el.hasAttribute('data-lh')) el.setAttribute('data-lh', String(++n));
     const req = el.required || el.getAttribute('aria-required') === 'true' || /\*\s*$|\*\s|required/i.test(label) || /required/i.test(el.className || '');
     const opts = el.tagName === 'SELECT' ? [...el.options].map(o => ({ value: o.value, text: o.text.trim(), disabled: o.disabled })) : [];
@@ -217,7 +219,7 @@ export function valueFor(f, cls, profile) {
     case 'website': return fit(f.type === 'url' || /http/i.test(f.placeholder) || !profile.website || profile.website === 'N/A' ? urlOf(profile) : profile.website);
     case 'subject': return fit(profile.subject);
     case 'message': return fit(profile.message);
-    case 'phone': { const v = phoneVariants(profile.phone); const byPh = /\(\d{3}\)/.test(f.placeholder) ? v[0] : /^\d{3}-\d{3}/.test(f.placeholder) ? v[1] : /^\d{10}$/.test(f.placeholder.replace(/\D/g, '')) && !/\D/.test(f.placeholder) ? v[2] : null; const pv = fitPattern(f.pattern, v); const pick1 = f.pattern ? pv : byPh || (f.maxLength && f.maxLength <= 10 ? v[2] : v[0]); return fit(pick1 ?? v[2]); }
+    case 'phone': { if (f.type === 'number') { const d = digitsOf(profile.phone); return d.length === 11 && d[0] === '1' ? d.slice(1) : d; } const v = phoneVariants(profile.phone); const byPh = /\(\d{3}\)/.test(f.placeholder) ? v[0] : /^\d{3}-\d{3}/.test(f.placeholder) ? v[1] : /^\d{10}$/.test(f.placeholder.replace(/\D/g, '')) && !/\D/.test(f.placeholder) ? v[2] : null; const pv = fitPattern(f.pattern, v); const pick1 = f.pattern ? pv : byPh || (f.maxLength && f.maxLength <= 10 ? v[2] : v[0]); return fit(pick1 ?? v[2]); }
     case 'zip': { const z = profile.zip || '78701'; return fit(fitPattern(f.pattern, [z, z.slice(0, 5), z.replace(/\s/g, '')]) ?? z); }
     case 'city': return fit(profile.city || 'Austin');
     case 'address': return fit(profile.address || '100 Main St');
@@ -236,6 +238,7 @@ export function valueFor(f, cls, profile) {
     default: {
       const cands = ['N/A', 'None', 'Other', '1', 'Yes', profile.company || 'Info', profile.city || 'Austin'];
       const lbl = `${f.label} ${f.placeholder}`.toLowerCase();
+      if (/ready to start|timeline|time ?frame|how soon|start date|when (would|do|are|can) you/.test(lbl) && !f.pattern) return fit('As soon as possible');
       if (/date|when/.test(lbl)) return valueFor({ ...f, type: 'text' }, 'date', profile);
       if (/how many|number of|\bqty\b|quantity|square f|sq\.? ?ft/.test(lbl)) return fit(fitPattern(f.pattern, ['1', '10', '100']) ?? '1');
       if (f.pattern) return fit(fitPattern(f.pattern, cands) ?? genFromPattern(f.pattern) ?? 'N/A');
@@ -258,10 +261,11 @@ export async function submitForm(page, url, profile, opts = {}) {
   // Find the best contact container across the page and its frames.
   let frame = null, scan = null, maxId = 0, login = false;
   const rescan = async () => {
-    for (const fr of [page.mainFrame(), ...page.frames().filter(f => f !== page.mainFrame())]) {
+    for (const fr of usableFrames(page)) {
       try {
-        await fr.evaluate((sel) => { window.__LH_CAPTCHA = sel; }, CAPTCHA_SEL);
-        const s = await fr.evaluate(scanInPage, maxId);
+        await evalIn(fr, (sel) => { window.__LH_CAPTCHA = sel; }, CAPTCHA_SEL);
+        await evalIn(fr, `window.__lhProbe = ${captchaInPage.toString()}`);
+        const s = await evalIn(fr, scanInPage, maxId, 6000);
         if (s.found && (!scan || s.score > scan.score || fr === frame)) { scan = s; frame = fr; }
         if (!s.found && s.login) login = true;
       } catch { /* cross-origin or detached frame */ }
@@ -319,6 +323,10 @@ export async function submitForm(page, url, profile, opts = {}) {
       if (f.contentEditable) { await el.click(); await el.fill(override ?? valueFor(f, cls, profile)); filled.set(f.id, 'text'); return; }
       const v = override ?? valueFor(f, cls, profile);
       await el.fill(String(v));
+      // Masked fields (phone, dates) ignore values set directly: type it key by key instead.
+      const dv = String(v).replace(/\D/g, '');
+      const ok = async () => { const cur = await el.inputValue().catch(() => ''); return dv.length >= 6 ? cur.replace(/\D/g, '').includes(dv.slice(-7)) : !!cur; };
+      if (!(await ok())) { await el.fill(''); await el.pressSequentially(String(v), { delay: 15 }); if (!(await ok()) && dv.length >= 7) { await el.fill(''); await el.pressSequentially(dv.replace(/^1(?=\d{10}$)/, ''), { delay: 15 }); } }
       await el.dispatchEvent('blur').catch(() => {});
       filled.set(f.id, v); if (!PROFILE_CLS.has(cls)) answers.set(String(f.label || f.placeholder || f.name || cls).replace(/\s*\*\s*/g, ' ').trim().slice(0, 60), String(v).slice(0, 80)); note(`${(f.label || f.name || cls).slice(0, 40)} [${cls}] → ${String(v).slice(0, 40)}`);
     } catch (e) { note(`could not fill ${f.label || f.name}: ${e.message.split('\n')[0]}`); if (e.message === 'unsupported-file-type') throw e; }
@@ -436,9 +444,8 @@ export async function submitForm(page, url, profile, opts = {}) {
   // Some sites only load their CAPTCHA once you start typing: look again before pressing send.
   const captchaNow = async () => {
     for (const fr of [frame, page.mainFrame()]) {
-      const t = await fr.evaluate((sel) => { const el = document.querySelector(sel); const src = [...document.scripts].map(x => x.src).join(' ') + (el ? el.outerHTML.slice(0, 300) : '');
-        return el || /recaptcha|hcaptcha|turnstile/i.test(src) ? (/hcaptcha/i.test(src) ? 'hCaptcha' : /turnstile|challenges\.cloudflare/i.test(src) ? 'Turnstile' : 'reCAPTCHA') : null; }, CAPTCHA_SEL).catch(() => null);
-      if (t) { captchaNow.type = t; return true; }
+      const p = await evalIn(fr, captchaInPage).catch(() => null);
+      if (p && p.kind === 'visible') { captchaNow.type = p.type; return true; }
     }
     return false;
   };

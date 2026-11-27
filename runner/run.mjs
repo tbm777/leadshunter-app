@@ -155,10 +155,11 @@ async function checkOne([id, website]) {
   try {
     const r = await checkSite(website, checkOpts);
     // Forms built by JavaScript need a browser. Forms that look open get a second look too: many sites load their CAPTCHA with JavaScript.
-    if (checkOpts.form && (r.form === FORM.NEEDS_BROWSER || r.form === FORM.OPEN)) {
+    // The browser sees the page as a person does, so when it finds the form its verdict wins (CAPTCHA or not, in both directions).
+    if (checkOpts.form && [FORM.NEEDS_BROWSER, FORM.OPEN, FORM.CAPTCHA].includes(r.form)) {
       try {
         const b = await withBrowserSlot(() => browserFormCheck(r.form_url || website));
-        if (r.form === FORM.NEEDS_BROWSER || b.form === FORM.CAPTCHA) Object.assign(r, b.form === FORM.NEEDS_BROWSER && r.form === FORM.OPEN ? {} : b);
+        if (b.form === FORM.OPEN || b.form === FORM.CAPTCHA || r.form === FORM.NEEDS_BROWSER) Object.assign(r, b);
       } catch (e) { log('browser check failed', e.message); }
     }
     checkResults.push({ id, ...r });
