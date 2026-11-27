@@ -125,7 +125,7 @@ function emptyCampaigns() {
     <div class="row" style="justify-content:center;padding:0 0 28px">${OS.senders.length ? `<button class="btn primary" data-o="newcamp">${A.ic('plus')}New campaign</button>` : `<button class="btn primary" data-o="newsender">${A.ic('plus')}Create sender profile</button>`}</div></div>`;
 }
 function modeOpts(cur, name) {
-  return `<div class="modeopts">${[['auto', 'Automatic', 'The robot fills and sends each form. CAPTCHAs come to your Manual queue.'], ['manual', 'Manual', 'Every form goes to your Manual queue. You send each one with Fill form.']].map(([v, t, d]) => `<label class="opt sm ${cur === v ? 'on' : ''}"><input type="radio" name="${name}" value="${v}" ${cur === v ? 'checked' : ''}><div><b>${t}</b><span>${d}</span></div></label>`).join('')}</div>`;
+  return `<div class="modeopts">${[['auto', 'Automatic', 'The robot sends each form. CAPTCHAs come to you.'], ['manual', 'Manual', 'You send each one from the Manual queue.']].map(([v, t, d]) => `<label class="opt sm ${cur === v ? 'on' : ''}"><input type="radio" name="${name}" value="${v}" ${cur === v ? 'checked' : ''}><div><b>${t}</b><span>${d}</span></div></label>`).join('')}</div>`;
 }
 function newCampaignModal(then) {
   A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="New campaign">
@@ -283,8 +283,8 @@ async function loadItems(id, append = false) {
 
 /** Spam-risk advice for a subject and message (shown under the editor; never blocks sending). */
 function checkHTML(subject, message) {
-  const r = checkMessage({ subject, message });
-  if (!r.length) return message && message.trim().length >= 40 ? `<div class="mcheck ok">${A.ic('check', 14)}<span>No spam signals found in this message.</span></div>` : '';
+  const r = checkMessage({ subject, message }).filter(x => x.level === 'warn');   // only real problems; tips stay out of the way
+  if (!r.length) return '';
   return `<div class="mcheck">${r.map(x => `<div class="mc-row ${x.level}">${A.ic(x.level === 'warn' ? 'alert' : 'messages', 14)}<span>${A.esc(x.text)}</span></div>`).join('')}</div>`;
 }
 /* message tab */
@@ -298,7 +298,6 @@ function messageTab(c) {
           <textarea class="input mbody" id="m-body" data-msave maxlength="5000" placeholder="Hi [Company Name] team,&#10;&#10;…&#10;&#10;Best,&#10;Your name&#10;Your company">${A.esc(c.message)}</textarea></div>
         <div class="tagbar"><span class="help">Insert</span>${MERGE_TAGS.map(t => `<button class="chip" data-tag="[${t}]">[${t}]</button>`).join('')}</div>
         <div id="m-warn">${checkHTML(c.subject, c.message)}</div>
-        <div class="note neutral">${A.ic('alert')}<div>The company name comes from Google, cleaned up: “Summit Roofing Co. - #1 Roofer in Austin” becomes “Summit Roofing Co.”. End with a sign-off on its own lines (Best, / name / company) and the file styles it for you.</div></div>
       </div></div>
     <div class="card pvcard"><div class="card-h"><div class="seg-c"><button class="${P.previewMode === 'text' ? 'on' : ''}" data-pvmode="text">Form text</button><button class="${P.previewMode === 'file' ? 'on' : ''}" data-pvmode="file">File</button></div>
       <div class="row pvnav"><button class="iconbtn sm" data-pvnav="-1" aria-label="Previous lead">${A.ic('back', 14)}</button><span id="pv-who" class="help"></span><button class="iconbtn sm" data-pvnav="1" aria-label="Next lead">${A.ic('arrow', 14)}</button></div></div>
@@ -324,7 +323,6 @@ function renderPreview(c) {
       <div class="mock-2"><div class="mock-f"><span>Email</span><div class="mock-i">${A.esc(snd?.email || '—')}</div></div><div class="mock-f"><span>Phone</span><div class="mock-i">${A.esc(snd?.phone || '—')}</div></div></div>
       <div class="mock-f"><span>Subject</span><div class="mock-i ${s ? '' : 'empty'}">${A.esc(s || 'Subject')}</div></div>
       <div class="mock-f"><span>Message</span><div class="mock-i big pvmsg ${m ? '' : 'empty'}">${A.esc(m || 'Write the message on the left to see it here')}</div></div>
-      <div class="mock-f"><span>Anything else the form asks</span><div class="mock-i" style="background:var(--surface-2)">A sensible answer: “General inquiry”, today+2 business days, consent ticked…</div></div>
       <span class="mock-btn">Send</span></div></div>`;
   }
 }
@@ -357,7 +355,7 @@ function seqBar(c) {
   let day = 0;
   return `<div class="card seqbar">${chip(1, 'form', 'Day 0 · first message')}${steps.map(x => { day += x.delay_days; return `<span class="seqwait">${A.ic('arrow', 13)}<small>wait ${x.delay_days} business day${x.delay_days === 1 ? '' : 's'}</small></span>${chip(x.step, x.channel, `Day ${day} · follow-up`)}`; }).join('')}
     ${steps.length < 2 ? `<button class="seqadd" data-o="addstep">${A.ic('plus', 14)}Add follow-up</button>` : ''}
-    <span class="seqnote">${steps.length ? 'Stops for a lead when you mark them Replied or Do not contact.' : 'Add a follow-up or a call. Sequences stop when a lead replies.'}</span></div>`;
+    <span class="seqnote">${steps.length ? 'Stops when a lead replies.' : 'Add a follow-up or a call. Sequences stop when a lead replies.'}</span></div>`;
 }
 function sequenceTab(c) {
   const P = cp(c.id); P.step ||= 1;
@@ -367,13 +365,13 @@ function sequenceTab(c) {
 function stepEditor(c, st) {
   const isCall = st.channel === 'call';
   return `<div class="msgrid">
-    <div class="card"><div class="card-h"><div><h3>Step ${st.step}: ${isCall ? 'Call' : 'Follow-up message'}</h3><p>${isCall ? 'Shows up in your Manual queue with their phone number and this script.' : c.mode === 'manual' ? 'Goes to your Manual queue to send with Fill form.' : 'The robot sends it through the same contact form.'}</p></div><div class="st-head-r"><span class="help" id="st-save"></span><button class="btn ghost sm" data-o="rmstep" style="color:var(--bad)">${A.ic('trash', 13)}Remove step</button></div></div>
+    <div class="card"><div class="card-h st-head"><h3>Step ${st.step} · ${isCall ? 'Call' : 'Follow-up'}</h3><div class="st-head-r"><span class="help" id="st-save"></span><button class="iconbtn sm st-rm" data-o="rmstep" title="Remove this step" aria-label="Remove this step">${A.ic('trash', 14)}</button></div></div>
       <div class="card-b" style="display:flex;flex-direction:column;gap:14px">
         <div class="st-row">
           <div class="field"><span class="flabel">Type</span><div class="seg-c"><button class="${!isCall ? 'on' : ''}" data-stch="form">${A.ic('messages', 13)}Contact form</button><button class="${isCall ? 'on' : ''}" data-stch="call">${A.ic('phone', 13)}Call</button></div></div>
-          <div class="field"><label class="flabel" for="st-delay">Send after</label><div class="sset-suffix"><input class="input" id="st-delay" type="number" min="1" max="30" value="${st.delay_days}"><span>business days</span></div></div>
+          <div class="field"><label class="flabel" for="st-delay">Wait</label><div class="sset-suffix"><input class="input" id="st-delay" type="number" min="1" max="30" value="${st.delay_days}"><span>business days</span></div></div>
         </div>
-        ${isCall ? '' : `<div class="field"><label for="st-subj">Subject <span class="opt-tag">empty = same as step 1</span></label><input class="input big" id="st-subj" value="${A.esc(st.subject)}" maxlength="200" placeholder="${A.esc(c.subject)}"></div>`}
+        ${isCall ? '' : `<div class="field"><label for="st-subj">Subject</label><input class="input big" id="st-subj" value="${A.esc(st.subject)}" maxlength="200" placeholder="Same as step 1"></div>`}
         <div class="field"><div class="row" style="justify-content:space-between"><label for="st-body">${isCall ? 'Call script' : 'Message'}</label><button class="linkbtn muted" data-o="frombook">${A.ic('playbook', 13)} Use from Playbook</button></div>
           <textarea class="input mbody" id="st-body" maxlength="5000" placeholder="${isCall ? 'Hi, this is Alfred from The Bat Marketing. I sent a note through your website about…' : 'Hi [Company Name] team,&#10;&#10;Just following up on my note from last week…&#10;&#10;Best,&#10;Alfred'}">${A.esc(st.message)}</textarea></div>
         <div class="tagbar"><span class="help">Insert</span>${MERGE_TAGS.map(t => `<button class="chip" data-tag="[${t}]">[${t}]</button>`).join('')}</div>
@@ -410,19 +408,19 @@ function settingsTab(c) {
   const sec = (title, desc, body, cls = '') => `<section class="sset-row ${cls}"><div class="sset-l"><h4>${title}</h4><p>${desc}</p></div><div class="sset-r">${body}</div></section>`;
   return `<div class="card sset">
     <div class="sset-top"><span class="help">Changes save automatically</span><span class="help" id="s-save"></span></div>
-    ${sec('Basics', 'The campaign name is just for you. The sender profile is what forms receive.', `
+    ${sec('Basics', 'Name and who it\'s sent from.', `
       <div class="field"><label for="s-name">Campaign name</label><input class="input" id="s-name" data-ssave="name" value="${A.esc(c.name)}" maxlength="80"></div>
       <div class="field"><label for="s-sender">Send as</label><div class="sset-inline"><select class="input" id="s-sender" data-ssave="sender_id"><option value="">Choose a sender profile</option>${OS.senders.map(s => `<option value="${s.id}" ${s.id === c.sender_id ? 'selected' : ''}>${A.esc(s.label)} · ${A.esc(s.email)}</option>`).join('')}</select><button class="btn" data-o="newsender">${A.ic('plus', 13)}New</button></div></div>`)}
-    ${sec('How it sends', 'Switching moves leads that are waiting: to your Manual queue, or back to the robot.', modeOpts(c.mode || 'auto', 'smode'))}
-    ${c.mode === 'manual' ? '' : sec('Schedule', 'When the robot sends, in Los Angeles time. The daily limit is spread evenly across the sending hours, within the tool-wide limit and the sender profile\'s warm-up.', `
+    ${sec('How it sends', 'The robot, or you from the Manual queue.', modeOpts(c.mode || 'auto', 'smode'))}
+    ${c.mode === 'manual' ? '' : sec('Schedule', 'Pacific time. Sends are spread across these hours.', `
       <div class="sset-sched">
         <div class="field"><label for="s-limit">Daily limit</label><div class="sset-suffix"><input class="input" id="s-limit" type="number" min="1" max="2000" data-ssave="daily_limit" value="${c.daily_limit}"><span>forms a day</span></div></div>
         <div class="field"><label>Sending hours</label><div class="sset-inline"><select class="input" data-ssave="window_start" aria-label="From">${hours(c.window_start, 0, 23)}</select><span class="help">to</span><select class="input" data-ssave="window_end" aria-label="Until">${hours(c.window_end, 1, 24)}</select></div></div>
       </div>
       <div class="field"><label>Sending days</label><div class="days" role="group">${[1, 2, 3, 4, 5, 6, 0].map(d => `<button class="${c.weekdays.includes(String(d)) ? 'on' : ''}" data-day="${d}" aria-pressed="${c.weekdays.includes(String(d))}">${DAYS[d]}</button>`).join('')}</div></div>`)}
-    ${sec('Attachment', 'Only used when a form requires a file upload.', `
-      <div class="sfile"><div class="sfile-ic">${A.ic('copy', 18)}</div><div><b>The Bat Marketing</b><span>PDF · page 1 is your subject and message, page 2 your offer. Image-only forms get page 1 as an image.</span></div><button class="btn sm" data-o="previewfile">Preview</button></div>`)}
-    ${sec('Delete campaign', 'Removes the campaign and its results. Contacted leads stay marked Contacted.', `<div><button class="btn danger-out" data-o="delcamp">${A.ic('trash', 14)}Delete campaign</button></div>`, 'sset-danger')}
+    ${sec('Attachment', 'Only for forms that require a file.', `
+      <div class="sfile"><div class="sfile-ic">${A.ic('copy', 18)}</div><div><b>The Bat Marketing</b><span>PDF with your message and offer</span></div><button class="btn sm" data-o="previewfile">Preview</button></div>`)}
+    ${sec('Delete campaign', 'Removes the campaign and its results.', `<div><button class="btn danger-out" data-o="delcamp">${A.ic('trash', 14)}Delete campaign</button></div>`, 'sset-danger')}
   </div>`;
 }
 async function saveSetting(c, patch) {

@@ -1588,3 +1588,9 @@ input[type=checkbox]:disabled,input[type=radio]:disabled{opacity:.55;cursor:defa
 .st-row{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap}
 .st-row .field{margin:0}
 .mock-i.empty{background:var(--surface-2);color:var(--faint);border:1px dashed var(--line);font-style:normal;text-align:left}
+/* step editor, simpler */
+.st-head{align-items:center}
+.st-head h3{margin:0}
+.st-rm{color:var(--faint)}
+.st-rm:hover{color:var(--bad)}
+.sset-l p{font-size:12.5px}
