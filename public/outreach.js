@@ -357,7 +357,7 @@ function seqBar(c) {
   let day = 0;
   return `<div class="card seqbar"><div class="seqtrack">${chip(1, 'form', 0)}${steps.map(x => { day += x.delay_days; return `<span class="seqlink"><em>+${x.delay_days} day${x.delay_days === 1 ? '' : 's'}</em></span>${chip(x.step, x.channel, day)}`; }).join('')}
     ${steps.length < 2 ? `<span class="seqlink ghost"></span><button class="seqadd" data-o="addstep">${A.ic('plus', 14)}Add step</button>` : ''}</div>
-    <span class="seqnote">${A.ic('check', 13)}${steps.length ? 'Stops when a lead replies' : 'Follow-ups stop when a lead replies'}</span></div>`;
+    <span class="seqnote" title="Replies arrive in your inbox. Mark the lead Replied (lead details, the lead's ⋯ menu, or They replied in the Manual queue) and its remaining steps stop.">${A.ic('check', 13)}${steps.length ? 'Stops when you mark a lead Replied' : 'Follow-ups stop when you mark a lead Replied'}</span></div>`;
 }
 function sequenceTab(c) {
   const P = cp(c.id); P.step ||= 1;
