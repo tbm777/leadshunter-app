@@ -1,4 +1,5 @@
 // Outreach: sender profiles, campaigns, the send queue, the manual queue and the runner endpoints for form sending.
+import { isSocialHost } from '../public/shared/normalize.js';
 import { json, HttpError, reserveSeq, dispatch, ptMidnight, chunk, inList, LEAD_COLS } from './worker.js';
 
 const now = () => Date.now();
@@ -157,7 +158,7 @@ export async function addLeads(env, id, b) {
     else if (l.status === 3) out.skipped.dnc++;
     else if (!b.includeContacted && (l.status === 2 || contacted.has(l.id))) out.skipped.contacted++;
     else if (!l.website) out.skipped.noWebsite++;
-    else if (l.site_status === 7) out.skipped.profile++;
+    else if (l.site_status === 7 || (() => { try { return isSocialHost(new URL(l.website).hostname); } catch { return false; } })()) out.skipped.profile++;
     else if (l.form_status === 2) out.skipped.noForm++;
     else if (l.form_status === 1) out.manual.push(l);   // CAPTCHA known from the website check: straight to the manual queue
     else out.add.push(l);
