@@ -929,7 +929,7 @@ function startProblem() {
   if (!curInd()) return 'Pick an industry';
   if (!terms.length) return 'Pick at least one search term';
   if (!FS.locs.length) return 'Add a location';
-  if (n > 6000) return `Too big: ${fmt(n)} map searches (max 6,000). Use a smaller area`;
+  if (n > 6000 && !FS.limit) return `Too big: ${fmt(n)} map searches (max 6,000). Set a lead limit or use a smaller area`;
   if (FS.maxRev != null && FS.maxRev < (FS.minRev || 0)) return 'Max reviews is below min';
   return '';
 }
@@ -942,7 +942,7 @@ function sumHTML() {
   const name = FS.nameEdited ? FS.name : autoName();
   const nameHTML = FS.editName ? `<input id="fs-name" class="input fx-nameinput" value="${esc(name)}" maxlength="80" aria-label="Search name">` : `<button class="fx-name" data-fsx="name" title="Rename this search">${esc(name)} ${ic('edit', 12)}</button>`;
   const p = startProblem();
-  return `${nameHTML}<span class="fx-dot">·</span>${p ? `<span class="fx-warn">${esc(p)}</span>` : `<span>up to <b class="num">${fmt(est)}</b> ${FS.depth === 2 && FS.form !== 'any' ? { form: 'with a form', open: 'with an open form', captcha: 'with a CAPTCHA form' }[FS.form] : 'leads'}</span><span class="fx-dot">·</span><span>about <b class="num">${dur(maps + site + 45)}</b></span>`}`;
+  return `${nameHTML}<span class="fx-dot">·</span>${p ? `<span class="fx-warn">${esc(p)}</span>` : `${n > 6000 ? '<span class="fx-note" title="The area is larger than one search can cover, so it searches the biggest cities first and stops at your lead limit.">largest cities first</span><span class="fx-dot">·</span>' : ''}<span>up to <b class="num">${fmt(est)}</b> ${FS.depth === 2 && FS.form !== 'any' ? { form: 'with a form', open: 'with an open form', captcha: 'with a CAPTCHA form' }[FS.form] : 'leads'}</span><span class="fx-dot">·</span><span>about <b class="num">${dur(maps + site + 45)}</b></span>`}`;
 }
 function updateStart() { const b = $('#fs-go'); if (!b) return; const p = startProblem(); b.disabled = !!p || FS.busy; b.title = p; b.innerHTML = FS.busy ? '<span class="spin"></span>Starting…' : ic('find') + 'Start search'; }
 function refreshFind(parts) {

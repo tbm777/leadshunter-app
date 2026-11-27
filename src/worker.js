@@ -274,8 +274,10 @@ async function createSearch(env, b) {
     .map(c => ({ lat: +c.lat, lon: +c.lon, r: Math.min(130, Math.max(1, +c.r)), country: countryCode(c.country, 'US') }))
     .filter(c => Number.isFinite(c.lat) && Number.isFinite(c.lon) && Math.abs(c.lat) <= 90 && Math.abs(c.lon) <= 180);
   if (!circles.length) throw new HttpError(400, 'Add at least one location.');
-  const cells = buildCells(circles, terms.length);
-  if (cells.length > MAX_TASKS) throw new HttpError(400, `This search needs ${cells.length.toLocaleString('en-US')} map searches, more than the ${MAX_TASKS.toLocaleString('en-US')} allowed in one go. Use fewer locations, a smaller area or fewer search terms.`);
+  let cells = buildCells(circles, terms.length);
+  // With a lead limit the search stops early anyway: keep the first map searches (the largest cities) instead of refusing.
+  if (cells.length > MAX_TASKS && +b.limit > 0) cells = cells.slice(0, MAX_TASKS);
+  if (cells.length > MAX_TASKS) throw new HttpError(400, `This search needs ${cells.length.toLocaleString('en-US')} map searches, more than the ${MAX_TASKS.toLocaleString('en-US')} allowed in one go. Set a lead limit, or use fewer locations, a smaller area or fewer search terms.`);
   // Keeping only businesses with a (certain kind of) contact form needs a website and the form check.
   const form = ['form', 'open', 'captcha'].includes(b.form) ? b.form : 'any';
   if (form !== 'any') { b.website = 'yes'; b.depth = 2; }

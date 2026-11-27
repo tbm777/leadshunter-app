@@ -1618,3 +1618,4 @@ input[type=checkbox]:disabled,input[type=radio]:disabled{opacity:.55;cursor:defa
 .sticky{filter:none;transform:none;box-shadow:0 2px 3px rgba(0,0,0,.08),0 16px 32px -8px rgba(0,0,0,.28);-webkit-font-smoothing:antialiased}
 .st-task{display:flex;align-items:center;gap:6px;margin:-4px 0 0}
 .seqlink{flex:0 0 104px}.seqlink.ghost{flex-basis:32px}.seqlink em{padding:2px 9px}
+.fx-note{font-size:12.5px;color:var(--muted)}

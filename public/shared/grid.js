@@ -47,10 +47,10 @@ export function buildCells(circles, termCount) {
     }
   }
   const cells = [];
-  for (let t = 0; t < termCount; t++) {
-    for (const [lat, lon, S, cc] of pts) {
-      cells.push([+lat.toFixed(5), +lon.toFixed(5), Math.round(S * 750), zoomFor(S), t, cc]);
-    }
+  // Place by place (largest cities come first), every term at each place: a search that stops at its lead limit
+  // has then covered the biggest areas with all terms.
+  for (const [lat, lon, S, cc] of pts) {
+    for (let t = 0; t < termCount; t++) cells.push([+lat.toFixed(5), +lon.toFixed(5), Math.round(S * 750), zoomFor(S), t, cc]);
   }
   return cells;
 }
