@@ -521,51 +521,66 @@ const NOTE_TAGS = [['idea', 'Idea', 'var(--info)'], ['draft', 'Draft', 'var(--wa
 const tagOf = k => NOTE_TAGS.find(t => t[0] === k) || NOTE_TAGS[0];
 async function loadNotes() { try { NT.notes = (await A.api('GET', '/api/notes')).notes; NT.loaded = true; if (NT.sel == null && NT.notes[0]) NT.sel = NT.notes[0].id; if (A.currentView() === 'messages') A.render(); } catch (e) { A.toast(e.message, 'alert'); } }
 const ntFiltered = () => { const q = NT.q.trim().toLowerCase(); return NT.notes.filter(n => (NT.tag === 'all' || n.tag === NT.tag) && (!q || `${n.title} ${n.subject} ${n.body}`.toLowerCase().includes(q))); };
+// A slight, stable tilt per note so the board looks like real paper.
+const tilt = id => (((id * 37) % 7) - 3) * 0.55;
 function messagesView() {
   if (!NT.loaded) { loadNotes(); return loading(); }
-  return `<div class="head"><div><div class="eyebrow">Outreach</div><h1>Messages</h1><p>A scratchpad for outreach ideas: angles, drafts, follow-up flows. When one is ready, send it to a campaign in one click.</p></div>
+  const list = ntFiltered();
+  return `<div class="head"><div><div class="eyebrow">Outreach</div><h1>Messages</h1><p>Your writing desk for outreach: angles, drafts and follow-up flows. When one's ready, send it to a campaign in one click.</p></div>
     <div class="row"><button class="btn primary" data-o="newnote">${A.ic('plus')}New note</button></div></div>
-  ${NT.notes.length ? `<div class="ntgrid"><div class="card ntside">
-      <div class="ntside-h"><div class="lsearch">${A.ic('find', 15)}<input id="nt-q" placeholder="Search notes" value="${A.esc(NT.q)}" autocomplete="off"></div>
-        <div class="tabs nttags"><button class="${NT.tag === 'all' ? 'on' : ''}" data-nttag="all">All</button>${NOTE_TAGS.map(([k, l]) => `<button class="${NT.tag === k ? 'on' : ''}" data-nttag="${k}">${l}</button>`).join('')}</div></div>
-      <div id="nt-list">${ntList()}</div></div>
-    <div class="card ntedit" id="nt-edit">${ntEditor()}</div></div>`
-  : `<div class="card"><div class="empty ntempty"><b>Start your first note</b>Jot down an angle, draft a message, or map out a follow-up flow. Merge tags like [Company Name] work here too.
-      <div class="ntstarters">${[['Missed calls angle', 'idea'], ['Website refresh pitch', 'draft'], ['3-touch follow-up flow', 'flow']].map(([t, g]) => `<button class="chip" data-o="newnote" data-title="${t}" data-ntype="${g}">${A.ic('plus', 12)} ${t}</button>`).join('')}</div></div></div>`}`;
+  ${NT.notes.length ? `<div class="desk-bar"><div class="lsearch">${A.ic('find', 15)}<input id="nt-q" placeholder="Search notes" value="${A.esc(NT.q)}" autocomplete="off"></div>
+      <div class="tabs">${[['all', 'All'], ...NOTE_TAGS].map(([k, l]) => `<button class="${NT.tag === k ? 'on' : ''}" data-nttag="${k}">${l}<span class="n">${k === 'all' ? NT.notes.length : NT.notes.filter(n => n.tag === k).length}</span></button>`).join('')}</div></div>
+    <div class="desk" id="nt-list">${ntList()}</div>`
+  : `<div class="desk desk-empty">
+      <button class="paper paper-new" data-o="newnote" style="--tilt:-1.5deg"><span class="tape" style="--tape:var(--accent)"></span><b class="hand">A blank page</b><span>Start from scratch</span></button>
+      ${[['Missed calls angle', 'idea', 'When a homeowner calls and nobody picks up, they call the next contractor…'], ['Website refresh pitch', 'draft', 'I spotted a few quick wins on your website that could bring you more calls…'], ['3-touch follow-up flow', 'flow', 'Day 1: contact form, website angle\nDay 4: follow-up\nDay 9: last touch']].map(([t, g, b], i) => `<button class="paper" data-o="newnote" data-title="${t}" data-ntype="${g}" data-body="${A.esc(b)}" style="--tilt:${[1.2, -0.8, 1.6][i]}deg"><span class="tape" style="--tape:${tagOf(g)[2]}"></span><b class="hand">${t}</b><p>${A.esc(b)}</p><span class="stamp" style="--c:${tagOf(g)[2]}">${tagOf(g)[1]}</span></button>`).join('')}
+    </div><p class="help" style="text-align:center;margin-top:-6px">Pick a starter or a blank page. Merge tags like [Company Name] work here too.</p>`}`;
 }
 function ntList() {
   const list = ntFiltered();
-  if (!list.length) return `<div class="empty"><b>No notes match</b></div>`;
-  return list.map(n => { const [, l, c] = tagOf(n.tag);
-    return `<button class="ntrow ${n.id === NT.sel ? 'on' : ''}" data-note="${n.id}"><div><b>${n.pinned ? '📌 ' : ''}${A.esc(n.title || 'Untitled')}</b><span>${A.esc((n.subject || n.body || 'Empty note').replace(/\s+/g, ' ').slice(0, 80))}</span></div>
-      <div class="ntrow-r"><span class="pill" style="--c:${c}">${l}</span><small>${A.esc(A.whenPT(n.updated_at).replace(' PT', ''))}</small></div></button>`; }).join('');
+  if (!list.length) return `<div class="empty" style="grid-column:1/-1"><b>No notes match</b>Try another word or stage.</div>`;
+  return `<button class="paper paper-new" data-o="newnote" style="--tilt:0deg"><span class="plus">${A.ic('plus', 22)}</span><b class="hand">New note</b></button>` + list.map(n => { const [, l, c] = tagOf(n.tag);
+    return `<button class="paper ${n.pinned ? 'pinned' : ''}" data-note="${n.id}" style="--tilt:${tilt(n.id)}deg">${n.pinned ? '<span class="pin"></span>' : `<span class="tape" style="--tape:${c}"></span>`}
+      <b class="hand">${A.esc(n.title || 'Untitled')}</b>
+      ${n.subject ? `<i class="psubj">${A.esc(n.subject)}</i>` : ''}
+      <p>${A.esc((n.body || '').slice(0, 260)) || '<span class="faint">Empty page</span>'}</p>
+      ${n.memo ? `<span class="pmemo">${A.esc(n.memo.slice(0, 70))}</span>` : ''}
+      <span class="pfoot"><span class="stamp" style="--c:${c}">${l}</span><small>${A.esc(A.whenPT(n.updated_at).replace(' PT', '').replace(/^Today, /, ''))}</small></span></button>`; }).join('');
 }
 function ntEditor() {
-  const n = NT.notes.find(x => x.id === NT.sel); if (!n) return `<div class="empty">Pick a note on the left.</div>`;
+  const n = NT.notes.find(x => x.id === NT.sel); if (!n) return '';
   const warn = unknownTags(n.subject + ' ' + n.body);
-  return `<div class="nte-h"><input class="nte-title" id="nt-title" value="${A.esc(n.title)}" placeholder="Untitled note" maxlength="120">
-      <div class="row" style="gap:6px;flex-wrap:nowrap"><span class="help" id="nt-save"></span><button class="iconbtn sm" data-o="pinnote" title="${n.pinned ? 'Unpin' : 'Pin to top'}" aria-label="Pin">${n.pinned ? '📌' : '📍'}</button><button class="iconbtn sm" data-o="delnote" title="Delete note" aria-label="Delete note">${A.ic('trash', 14)}</button></div></div>
-    <div class="nte-b">
-      <div class="seg-c nttagpick">${NOTE_TAGS.map(([k, l]) => `<button class="${n.tag === k ? 'on' : ''}" data-notetag="${k}">${l}</button>`).join('')}</div>
-      <div class="field"><label for="nt-subj">Subject line <span class="opt-tag">optional</span></label><input class="input" id="nt-subj" value="${A.esc(n.subject)}" placeholder="Quick question about [Company Name]" maxlength="200"></div>
-      <div class="field"><label for="nt-body">Notes or message</label><textarea class="input ntbody" id="nt-body" placeholder="Write freely: an angle, a full message, or a flow like&#10;Day 1: contact form, website angle&#10;Day 4: follow-up, missed-calls angle">${A.esc(n.body)}</textarea></div>
-      <div class="tagbar"><span class="help">Insert</span>${MERGE_TAGS.map(t => `<button class="chip" data-ntag="[${t}]">[${t}]</button>`).join('')}<span class="help num" id="nt-count" style="margin-left:auto">${n.body.length} characters</span></div>
-      ${warn.length ? `<div class="note">${A.ic('alert')}<div>${warn.map(w => `<b>${A.esc(w)}</b>`).join(', ')} ${warn.length === 1 ? "isn't a merge tag" : "aren't merge tags"} and would be sent exactly as written.</div></div>` : ''}
+  return `<div class="scrim modal-scrim sheet-scrim" data-act="close"><div class="sheet-wrap" data-stop role="dialog" aria-label="${A.esc(n.title || 'Note')}">
+    <div class="sheet" style="--tilt:${tilt(n.id) / 3}deg">
+      <span class="tape tape-l" style="--tape:${tagOf(n.tag)[2]}"></span><span class="tape tape-r" style="--tape:${tagOf(n.tag)[2]}"></span>
+      <div class="sheet-top"><input class="hand sheet-title" id="nt-title" value="${A.esc(n.title)}" placeholder="Untitled note" maxlength="120" aria-label="Title">
+        <div class="row" style="gap:6px;flex-wrap:nowrap"><span class="help" id="nt-save"></span><button class="iconbtn sm" data-act="close" aria-label="Close">${A.ic('x', 14)}</button></div></div>
+      <label class="sheet-lbl" for="nt-subj">Subject</label>
+      <input class="sheet-subj" id="nt-subj" value="${A.esc(n.subject)}" placeholder="Quick question about [Company Name]" maxlength="200">
+      <label class="sheet-lbl" for="nt-body">Message</label>
+      <textarea class="sheet-body" id="nt-body" placeholder="Hi [Company Name] team,&#10;&#10;…">${A.esc(n.body)}</textarea>
+      <div class="sheet-tags">${MERGE_TAGS.map(t => `<button class="chip" data-ntag="[${t}]">[${t}]</button>`).join('')}<span class="help num" id="nt-count">${n.body.length} characters</span></div>
+      ${warn.length ? `<div class="note" style="margin-top:8px">${A.ic('alert')}<div>${warn.map(w => `<b>${A.esc(w)}</b>`).join(', ')} ${warn.length === 1 ? "isn't a merge tag" : "aren't merge tags"} and would be sent exactly as written.</div></div>` : ''}
     </div>
-    <div class="nte-f"><span class="help">Saved automatically</span><button class="btn" data-o="notecopy">${A.ic('copy', 14)}Copy text</button><button class="btn primary" data-o="notetocamp" ${n.body.trim() ? '' : 'disabled'}>${A.ic('campaigns', 14)}Use in a campaign</button></div>`;
+    <div class="sticky" style="--tilt:${tilt(n.id + 3) + 2}deg"><span class="sticky-h hand">Notes</span><textarea id="nt-memo" class="hand" placeholder="The angle, who it's for, what worked…">${A.esc(n.memo || '')}</textarea></div>
+    <div class="sheet-bar">
+      <div class="stamps">${NOTE_TAGS.map(([k, l, c]) => `<button class="stamp ${n.tag === k ? 'on' : ''}" style="--c:${c}" data-notetag="${k}">${l}</button>`).join('')}</div>
+      <div class="row" style="gap:6px"><button class="iconbtn" data-o="pinnote" title="${n.pinned ? 'Unpin' : 'Pin to the top'}" aria-label="Pin">${n.pinned ? '📌' : '📍'}</button><button class="iconbtn" data-o="delnote" title="Delete" aria-label="Delete note">${A.ic('trash', 15)}</button><button class="btn" data-o="notecopy">${A.ic('copy', 14)}Copy</button><button class="btn primary" data-o="notetocamp" ${n.body.trim() ? '' : 'disabled'}>${A.ic('campaigns', 14)}Use in a campaign</button></div>
+    </div></div></div>`;
 }
+function openNote(id) { NT.sel = id; A.$('#overlay').innerHTML = ntEditor(); setTimeout(() => A.$('#nt-body')?.focus(), 0); }
 let ntT = 0, ntPending = null, ntLast = 'nt-body';
 function ntQueueSave() {
   const n = NT.notes.find(x => x.id === NT.sel); if (!n) return;
-  n.title = A.$('#nt-title').value; n.subject = A.$('#nt-subj').value; n.body = A.$('#nt-body').value;
-  ntPending = { id: n.id, title: n.title, subject: n.subject, body: n.body };
+  n.title = A.$('#nt-title').value; n.subject = A.$('#nt-subj').value; n.body = A.$('#nt-body').value; n.memo = A.$('#nt-memo').value;
+  ntPending = { id: n.id, title: n.title, subject: n.subject, body: n.body, memo: n.memo };
   A.$('#nt-save').textContent = 'Saving…'; A.$('#nt-count').textContent = `${n.body.length} characters`;
   clearTimeout(ntT); ntT = setTimeout(ntFlush, 600);
 }
 async function ntFlush(extra) {
   clearTimeout(ntT);
   const ps = ntPending || (extra ? { id: NT.sel } : null); ntPending = null; if (!ps) return;
-  try { const r = await A.api('PUT', `/api/notes/${ps.id}`, { ...ps, ...(extra || {}) }); const i = NT.notes.findIndex(x => x.id === r.note.id); if (i >= 0) NT.notes[i] = r.note; const sv = A.$('#nt-save'); if (sv) sv.innerHTML = `<span class="okline">${A.ic('check', 12)}Saved</span>`; const l = A.$('#nt-list'); if (l) l.innerHTML = ntList(); }
+  try { const r = await A.api('PUT', `/api/notes/${ps.id}`, { ...ps, ...(extra || {}) }); const i = NT.notes.findIndex(x => x.id === r.note.id); if (i >= 0) NT.notes[i] = r.note; NT.notes.sort((a, z) => (z.pinned - a.pinned) || (z.updated_at - a.updated_at)); const sv = A.$('#nt-save'); if (sv) sv.innerHTML = `<span class="okline">${A.ic('check', 12)}Saved</span>`; const l = A.$('#nt-list'); if (l) l.innerHTML = ntList(); }
   catch (e) { A.toast(e.message, 'alert'); }
 }
 function noteToCampaignModal(n) {
@@ -659,11 +674,11 @@ async function onClick(e) {
   const mqa = t.closest('[data-mqact]');
   if (mqa) { mqAction(mqa.dataset.mqact); return; }
   const nrow = t.closest('[data-note]');
-  if (nrow) { await ntFlush(); NT.sel = +nrow.dataset.note; A.$('#nt-list').innerHTML = ntList(); A.$('#nt-edit').innerHTML = ntEditor(); return; }
+  if (nrow) { await ntFlush(); openNote(+nrow.dataset.note); return; }
   const ntg = t.closest('[data-nttag]');
   if (ntg) { NT.tag = ntg.dataset.nttag; A.render(); return; }
   const ntt = t.closest('[data-notetag]');
-  if (ntt) { await ntFlush({ tag: ntt.dataset.notetag }); document.querySelectorAll('[data-notetag]').forEach(x => x.classList.toggle('on', x === ntt)); return; }
+  if (ntt) { await ntFlush({ tag: ntt.dataset.notetag }); const n = NT.notes.find(x => x.id === NT.sel); if (n) n.tag = ntt.dataset.notetag; document.querySelectorAll('[data-notetag]').forEach(x => x.classList.toggle('on', x === ntt)); document.querySelectorAll('.sheet .tape').forEach(t => t.style.setProperty('--tape', tagOf(ntt.dataset.notetag)[2])); A.$('#nt-list') && (A.$('#nt-list').innerHTML = ntList()); return; }
   const nmt = t.closest('[data-ntag]');
   if (nmt) { const el = A.$(ntLast === 'nt-subj' ? '#nt-subj' : '#nt-body'); const s0 = el.selectionStart ?? el.value.length, e0 = el.selectionEnd ?? s0; el.value = el.value.slice(0, s0) + nmt.dataset.ntag + el.value.slice(e0); el.focus(); el.setSelectionRange(s0 + nmt.dataset.ntag.length, s0 + nmt.dataset.ntag.length); ntQueueSave(); return; }
   const row = t.closest('.oi-click');
@@ -737,11 +752,11 @@ async function onClick(e) {
     case 'extguide': extGuide(); break;
     case 'reviewnoconf': { const P = cp(c.id); P.tab = 'leads'; P.filter = 'noconf'; P.items = null; A.render(); break; }
     case 'newnote': {
-      try { const r = await A.api('POST', '/api/notes', { title: b.dataset.title || '', tag: b.dataset.ntype || 'idea' }); NT.notes.unshift(r.note); NT.sel = r.note.id; NT.tag = 'all'; NT.q = ''; A.render(); setTimeout(() => (b.dataset.title ? A.$('#nt-body') : A.$('#nt-title'))?.focus(), 0); }
+      try { const r = await A.api('POST', '/api/notes', { title: b.dataset.title || '', tag: b.dataset.ntype || 'idea', body: b.dataset.body || '' }); NT.notes.unshift(r.note); NT.tag = 'all'; NT.q = ''; A.render(); openNote(r.note.id); setTimeout(() => (b.dataset.title ? A.$('#nt-body') : A.$('#nt-title'))?.focus(), 0); }
       catch (err) { A.toast(err.message, 'alert'); }
       break;
     }
-    case 'pinnote': { const n = NT.notes.find(x => x.id === NT.sel); await ntFlush({ pinned: !n.pinned }); NT.notes.sort((a, z) => (z.pinned - a.pinned) || (z.updated_at - a.updated_at)); A.$('#nt-edit').innerHTML = ntEditor(); A.$('#nt-list').innerHTML = ntList(); break; }
+    case 'pinnote': { const n = NT.notes.find(x => x.id === NT.sel); await ntFlush({ pinned: !n.pinned }); NT.notes.sort((a, z) => (z.pinned - a.pinned) || (z.updated_at - a.updated_at)); b.textContent = NT.notes.find(x => x.id === NT.sel).pinned ? '📌' : '📍'; A.$('#nt-list').innerHTML = ntList(); break; }
     case 'delnote': {
       const n = NT.notes.find(x => x.id === NT.sel);
       A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Delete note" style="width:min(420px,100%)"><div class="card-h"><div><h2>Delete “${A.esc(n.title || 'Untitled')}”?</h2><p>This can't be undone. Campaigns that used it keep their message.</p></div></div>
@@ -838,7 +853,7 @@ function onInput(e) {
   const t = e.target, c = curCampaign();
   if (t.id === 'mq-q') { MQ.q = t.value; mqRender(['list', 'detail']); return; }
   if (t.id === 'nt-q') { NT.q = t.value; A.$('#nt-list').innerHTML = ntList(); return; }
-  if (['nt-title', 'nt-subj', 'nt-body'].includes(t.id)) { ntLast = t.id === 'nt-title' ? ntLast : t.id; ntQueueSave(); return; }
+  if (['nt-title', 'nt-subj', 'nt-body', 'nt-memo'].includes(t.id)) { ntLast = t.id === 'nt-title' ? ntLast : t.id; ntQueueSave(); return; }
   if (t.id === 'del-in') { const ok = t.value.trim() === 'DELETE'; const bt = document.querySelector('[data-o="delcampok"]'); if (bt) bt.disabled = !ok; return; }
   if (t.dataset && t.dataset.spf) { updateFallbackHints(); return; }
   if (t.dataset.msave !== undefined && c) {
@@ -917,7 +932,7 @@ export function install(ctx) {
     campaign: mountCampaign,
     campaigns: () => { if (!pollT && OS.loaded && OS.campaigns.some(c => jobActive(c.job))) pollT = setInterval(() => loadOutreach().then(() => A.currentView() === 'campaigns' && A.render()), 6000); },
     manual: () => { if (MQ.loaded && !MQ.fresh) { MQ.fresh = true; loadManual().then(() => { MQ.fresh = false; }); } },
-    messages: () => { },
+    messages: () => { if (NT.loaded && !NT.fresh && !document.querySelector('.sheet')) { NT.fresh = true; loadNotes().then(() => { NT.fresh = false; }); } },
   });
   Object.assign(ctx.TITLES, { campaigns: 'Campaigns', campaign: 'Campaign', manual: 'Manual queue', messages: 'Messages', senders: 'Sender profiles' });
   ctx.CRUMBS.campaign = (arg) => { const c = OS.campaigns.find(x => x.id === +arg); return `<a href="#campaigns">Campaigns</a><span>›</span><b>${A.esc(c ? c.name : 'Campaign')}</b>`; };

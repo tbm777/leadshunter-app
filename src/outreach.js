@@ -307,14 +307,14 @@ export async function bulkItems(env, b) {
 
 /* ------------------------------------------------------------------ messages: notes for drafting outreach */
 const TAGS = ['idea', 'draft', 'ready', 'flow'];
-const noteOut = n => ({ id: n.id, title: n.title, subject: n.subject, body: n.body, tag: n.tag, pinned: !!n.pinned, created_at: n.created_at, updated_at: n.updated_at });
+const noteOut = n => ({ id: n.id, title: n.title, subject: n.subject, body: n.body, memo: n.memo || '', tag: n.tag, pinned: !!n.pinned, created_at: n.created_at, updated_at: n.updated_at });
 export async function listNotes(env) { return json({ notes: (await env.DB.prepare('SELECT * FROM notes ORDER BY pinned DESC, updated_at DESC LIMIT 500').all()).results.map(noteOut) }); }
 export async function saveNote(env, b, id) {
   const cur = id ? await env.DB.prepare('SELECT * FROM notes WHERE id = ?').bind(id).first() : null;
   if (id && !cur) throw new HttpError(404, 'Note not found.');
   const v = {
     title: b.title !== undefined ? str(b.title, 120) : cur?.title ?? '', subject: b.subject !== undefined ? str(b.subject, 200) : cur?.subject ?? '',
-    body: b.body !== undefined ? String(b.body ?? '').slice(0, 20000) : cur?.body ?? '', tag: TAGS.includes(b.tag) ? b.tag : cur?.tag ?? 'idea',
+    body: b.body !== undefined ? String(b.body ?? '').slice(0, 20000) : cur?.body ?? '', memo: b.memo !== undefined ? String(b.memo ?? '').slice(0, 10000) : cur?.memo ?? '', tag: TAGS.includes(b.tag) ? b.tag : cur?.tag ?? 'idea',
     pinned: b.pinned !== undefined ? (b.pinned ? 1 : 0) : cur?.pinned ?? 0,
   };
   const t = now(), cols = Object.keys(v);
