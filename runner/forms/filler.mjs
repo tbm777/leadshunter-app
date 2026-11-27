@@ -501,6 +501,9 @@ export async function submitForm(page, url, profile, opts = {}) {
   // Submit, then read the outcome. Fix and resubmit when the site shows errors.
   let responses = [];
   page.on('response', (r) => { const m = r.request().method(); if (m === 'POST' || m === 'PUT') responses.push(r); });
+  // Requests counted as they START: a slow site may not answer before the click times out.
+  let posts = 0;
+  page.on('request', (r) => { const m = r.method(); if (m === 'POST' || m === 'PUT') posts++; });
   for (let attempt = 0; attempt < 4; attempt++) {
     const btn = pickSubmit(scan.buttons);
     if (!btn) return { status: 'failed', reason: 'no-submit-button', log };
@@ -510,7 +513,16 @@ export async function submitForm(page, url, profile, opts = {}) {
     const nav = page.waitForNavigation({ timeout: 8000 }).catch(() => null);
     const errCount = async () => { try { return (await visibleErrors()).length + (await invalidFields()).length; } catch (e) { return 0; } };
     const errBefore = await errCount();
-    await frame.locator(`[data-lh-btn="${btn.id}"]`).click({ timeout: 5000 }).catch(async () => { await frame.locator(`[data-lh-btn="${btn.id}"]`).click({ force: true }); });
+    // Click without waiting for the next page: a slow site can make Playwright give up on a click that already went through.
+    const loc = frame.locator(`[data-lh-btn="${btn.id}"]`), postsBefore = posts, urlBefore = page.url();
+    let clicked = await loc.click({ timeout: 5000, noWaitAfter: true }).then(() => true).catch(() => false);
+    if (!clicked) {
+      await page.waitForTimeout(400);
+      // Something was sent or the page moved on: the click worked. Never click a second time then, or the form could go twice.
+      if (posts > postsBefore || page.url() !== urlBefore) { clicked = true; note('click timed out, but the form was sent'); }
+      else clicked = await loc.click({ force: true, timeout: 5000, noWaitAfter: true }).then(() => true).catch(() => false);
+    }
+    if (!clicked) return { status: 'failed', reason: 'submit-not-clickable', answers: answersText(), log };
     const outcome = await waitOutcome(page, frame, before, startUrl, () => responses, nav, async () => (await errCount()) > errBefore, formCleared);
     if (outcome.success) return { status: 'confirmed', evidence: outcome.evidence, answers: answersText(), filled: [...filled.entries()].filter(([k]) => !String(k).includes(':')).length, log };
     // Errors? Re-sync with the page (it may have been re-rendered by the server), fix, retry.

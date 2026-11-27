@@ -70,6 +70,7 @@ export function startServer(port = 8899) {
         const fx = byId[parts[1]], r = rec(fx.id);
         const { fields, files } = await readBody(req);
         r.posts++; r.data = fields; r.files = Object.values(files).map(f => `${f.filename} (${f.type}, ${f.data.length} B)`);
+        if (fx.delay) await new Promise(ok => setTimeout(ok, fx.delay));   // a slow backend
         const errs = validate(fx, fields, files);
         if (errs.some(e => e.trap)) r.trap = true;
         if (!errs.length) r.valid++; else r.errors.push(errs.map(e => e.message).join('; '));

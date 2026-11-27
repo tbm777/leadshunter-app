@@ -558,6 +558,13 @@ FIXTURES.push(
       else{var e=document.createElement('p');e.setAttribute('role','alert');e.className='error';e.textContent=j.error;b.parentNode.appendChild(e);}});});})();</script>`),
   },
   {
+    id: 'slow-server', industry: 'HVAC', note: 'Classic post to a backend that takes 7 s to answer: must be sent once, never twice', mode: 'redirect', delay: 7000,
+    req: ['name', 'email', 'message'],
+    html: () => layout('Polar Air Heating & Cooling', `<form method="post" action="/submit/slow-server"><!--ERR-->
+      <label for="a">Name *</label><input id="a" name="name" required><label for="b">Email *</label><input id="b" type="email" name="email" required>
+      <label for="m">Message *</label><textarea id="m" name="message" required></textarea><button type="submit">Send request</button></form>`),
+  },
+  {
     id: 'ninja-forms', industry: 'Pest control', note: 'Ninja Forms: generic field names, submit is type=button, success message replaces fields', mode: 'json',
     req: ['nf-field-1', 'nf-field-2', 'nf-field-3'],
     html: () => layout('BugOut Pest Control', `<div class="nf-form-cont"><div class="nf-form-layout"><form id="nf" novalidate><div class="nf-form-content">
