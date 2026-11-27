@@ -583,7 +583,7 @@ async function ingestCell(env, s, params, b) {
       rating: Number.isFinite(+p.rating) && +p.rating > 0 ? Math.round(+p.rating * 10) / 10 : null,
       reviews: Math.max(0, Math.floor(+p.reviews || 0)), maps_url: p.maps_url && /^https:\/\//i.test(String(p.maps_url)) ? String(p.maps_url).slice(0, 500) : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name + (p.address ? ', ' + p.address : ''))}`, closed: p.closed ? 1 : 0,
     };
-    if (!categoryAccepted(accepted, p.category, p.categories)) excluded.push(lead);
+    if (!categoryAccepted(accepted, p.category, p.categories, name, params.terms)) excluded.push(lead);
     else if (lead.reviews < (params.minReviews || 0) || (params.maxReviews != null && lead.reviews > params.maxReviews)) filtered++;
     else if (params.website === 'yes' && !realSite(website)) filtered++;
     else if (params.website === 'no' && realSite(website)) filtered++;

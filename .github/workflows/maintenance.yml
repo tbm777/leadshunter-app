@@ -1,0 +1,27 @@
+name: Delete all leads
+
+# Deletes every lead, like selecting all and pressing Delete leads. Only runs with the exact confirmation text.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type DELETE ALL LEADS to confirm
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  clear:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/clear-leads.mjs
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

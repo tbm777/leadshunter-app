@@ -85,11 +85,27 @@ export function countryCode(v, fallback = null) {
 }
 
 /** Does a Google category match one of the industry's accepted categories? Empty list accepts everything. */
-export function categoryAccepted(accepted, category, categories) {
+// Words in search terms that say nothing about the trade itself.
+const GENERIC = new Set(['service', 'services', 'contractor', 'contractors', 'company', 'companies', 'repair', 'installation', 'install', 'builder', 'builders', 'commercial', 'residential', 'home', 'house', 'local', 'and', 'the', 'for', 'mobile', 'removal', 'designer', 'supplier', 'store', 'shop', 'general', 'expert', 'pro', 'pros']);
+/**
+ * The trade named by an industry's first (best) search term, as a name pattern: "roofing contractor" → /\broof/,
+ * "garage door repair" → /\bgarage\w*\s+door/ (so an auto "garage" doesn't match). Null when the term is too generic.
+ */
+export function tradePattern(terms) {
+  const words = String((terms || [])[0] || '').toLowerCase().split(/[^a-z]+/).filter(w => w.length >= 3 && !GENERIC.has(w));
+  if (!words.length) return null;
+  const stem = w => { const x = w.replace(/(ing|ers|er|ians|ian|s)$/, ''); return x.length >= 4 ? x : w; };
+  if (words.length === 1 && stem(words[0]).length < 4) return null;
+  return new RegExp('\\b' + words.map(stem).join('\\w*\\s+'));
+}
+/** Keep a business whose name clearly says the trade ("ABC Roofing" filed under "Contractor"). */
+export function categoryAccepted(accepted, category, categories, name = '', terms = []) {
   if (!accepted || !accepted.length) return true;
   const want = new Set(accepted.map(c => c.trim().toLowerCase()));
   const have = [category, ...(Array.isArray(categories) ? categories : [])].filter(Boolean).map(c => String(c).trim().toLowerCase());
-  return have.some(c => want.has(c));
+  if (have.some(c => want.has(c))) return true;
+  const re = tradePattern(terms), n = String(name || '').toLowerCase();
+  return !!(re && n && re.test(n));
 }
 
 const COUNTRY_WORDS = /^(united states|usa|us|canada|australia|united arab emirates|uae)$/i;

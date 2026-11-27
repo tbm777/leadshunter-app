@@ -1,0 +1,15 @@
+-- Recall first: real Google categories that were rare in the test cities come back (an unused category never excludes
+-- anyone, and a rare one can keep a legitimate business). Each is merged into the industry's accepted list.
+UPDATE industries SET categories = json_insert(categories, '$[#]', 'Heating contractor') WHERE name = 'HVAC Contractors' AND NOT EXISTS (SELECT 1 FROM json_each(categories) WHERE lower(value) = lower('Heating contractor'));
+UPDATE industries SET categories = json_insert(categories, '$[#]', 'Furnace repair service') WHERE name = 'HVAC Contractors' AND NOT EXISTS (SELECT 1 FROM json_each(categories) WHERE lower(value) = lower('Furnace repair service'));
+UPDATE industries SET categories = json_insert(categories, '$[#]', 'Lighting contractor') WHERE name = 'Electricians' AND NOT EXISTS (SELECT 1 FROM json_each(categories) WHERE lower(value) = lower('Lighting contractor'));
+UPDATE industries SET categories = json_insert(categories, '$[#]', 'Gardener') WHERE name = 'Landscapers' AND NOT EXISTS (SELECT 1 FROM json_each(categories) WHERE lower(value) = lower('Gardener'));
+UPDATE industries SET categories = json_insert(categories, '$[#]', 'Moving company') WHERE name = 'Movers' AND NOT EXISTS (SELECT 1 FROM json_each(categories) WHERE lower(value) = lower('Moving company'));
+UPDATE industries SET categories = json_insert(categories, '$[#]', 'House painter') WHERE name = 'Painters' AND NOT EXISTS (SELECT 1 FROM json_each(categories) WHERE lower(value) = lower('House painter'));
+UPDATE industries SET categories = json_insert(categories, '$[#]', 'Arborist and tree surgeon') WHERE name = 'Tree Service' AND NOT EXISTS (SELECT 1 FROM json_each(categories) WHERE lower(value) = lower('Arborist and tree surgeon'));
+UPDATE industries SET categories = json_insert(categories, '$[#]', 'Gutter cleaning service') WHERE name = 'Pressure Washing' AND NOT EXISTS (SELECT 1 FROM json_each(categories) WHERE lower(value) = lower('Gutter cleaning service'));
+UPDATE industries SET categories = json_insert(categories, '$[#]', 'Window cleaning service') WHERE name = 'Pressure Washing' AND NOT EXISTS (SELECT 1 FROM json_each(categories) WHERE lower(value) = lower('Window cleaning service'));
+UPDATE industries SET categories = json_insert(categories, '$[#]', 'Upholstery cleaning service') WHERE name = 'Floor & Carpet Cleaning' AND NOT EXISTS (SELECT 1 FROM json_each(categories) WHERE lower(value) = lower('Upholstery cleaning service'));
+UPDATE industries SET categories = json_insert(categories, '$[#]', 'Swimming pool repair service') WHERE name = 'Pool Construction' AND NOT EXISTS (SELECT 1 FROM json_each(categories) WHERE lower(value) = lower('Swimming pool repair service'));
+UPDATE industries SET categories = json_insert(categories, '$[#]', 'Contractor') WHERE name = 'Handyman' AND NOT EXISTS (SELECT 1 FROM json_each(categories) WHERE lower(value) = lower('Contractor'));
+UPDATE industries SET categories = json_insert(categories, '$[#]', 'Gutter cleaning service') WHERE name = 'Siding' AND NOT EXISTS (SELECT 1 FROM json_each(categories) WHERE lower(value) = lower('Gutter cleaning service'));
