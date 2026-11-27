@@ -5,9 +5,10 @@ import { submitForm } from './forms/filler.mjs';
 import { engineProfile, localizeProfile } from '../public/shared/fallbacks.js';
 import { isSocialHost } from '../public/shared/normalize.js';
 import { Metrics } from './lib/metrics.mjs';
+import { shouldBlock } from './lib/block.mjs';
 
-const CONCURRENCY = +process.env.OUTREACH_CONCURRENCY || 3;
-const ITEM_TIMEOUT = 150000;
+const CONCURRENCY = +process.env.OUTREACH_CONCURRENCY || 6;   // GitHub's runners have 4 cores; forms spend most of their time waiting on websites
+const ITEM_TIMEOUT = 120000;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 const CONTACT_RE = /contact|get[\s-]?in[\s-]?touch|quote|estimate|appointment|book|request|reach[\s-]?us|consult|schedule/i;
 
@@ -123,7 +124,7 @@ export async function runOutreach({ api, JOB, log, isCancelled }) {
       if (st.stop) { items.unshift(item); stop = true; break; }
       unattempted.delete(item.oid);
       const ctx = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: 'en-US' });
-      await ctx.route('**/*', route => (['media'].includes(route.request().resourceType()) ? route.abort() : route.continue()));
+      await ctx.route('**/*', route => (shouldBlock(route.request().url(), route.request().resourceType()) ? route.abort() : route.continue()));
       let r; const stat = {}, t0 = Date.now();
       // Each lead gets the text for the step it's on (follow-ups have their own message).
       const stepText = (data.campaign.steps || {})[item.step];

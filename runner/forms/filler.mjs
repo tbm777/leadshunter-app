@@ -248,6 +248,22 @@ export function valueFor(f, cls, profile) {
 }
 
 /* ------------------------------------------------------------------ the engine */
+/**
+ * Wait until the page is ready to fill: a contact form (or a form builder's frame) is on the page, plus a short grace
+ * for its scripts, or the network goes quiet, whichever comes first (at most 6 s). Pages with analytics or chat
+ * widgets never go quiet, so waiting for silence alone wasted the full 6 s on them. A CAPTCHA that loads late is still
+ * caught: the engine checks again just before it submits.
+ */
+export async function settle(page, max = 6000) {
+  const formReady = page.waitForFunction(() => {
+    const q = (s) => document.querySelector(s);
+    return !!(q('form textarea') || (q('textarea') && q('input[type=email], input[type=tel], input[name*=mail i]')) ||
+      q('iframe[src*="form" i], iframe[src*="hsforms"], iframe[src*="jotform"], iframe[src*="typeform"], iframe[title*="form" i]'));
+  }, null, { timeout: max, polling: 250 }).then(() => page.waitForTimeout(700)).catch(() => {});
+  const quiet = page.waitForLoadState('networkidle', { timeout: max }).catch(() => {});
+  await Promise.race([formReady, quiet]);
+}
+
 /** Which form tool the page uses (for accuracy stats by tool). Runs in the page. */
 export function detectFormTool() {
   const h = document.documentElement.innerHTML.slice(0, 400000);
@@ -279,8 +295,11 @@ export async function submitForm(page, url, profile, opts = {}) {
   const mk = (k) => { if (opts.marks) opts.marks[k] = Date.now(); };
   mk('start');
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+  const domAt = Date.now();
   mk('dom');
-  await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
+  // Scripts often add a CAPTCHA a moment after the form appears: give them at least 2.5 s before the final check.
+  const dwell = async () => { const left = 2500 - (Date.now() - domAt); if (left > 0) await page.waitForTimeout(left); };
+  await settle(page);
   mk('loaded');
 
   // Find the best contact container across the page and its frames.
@@ -495,6 +514,7 @@ export async function submitForm(page, url, profile, opts = {}) {
     const count = [...filled.keys()].filter(k => !String(k).startsWith('tried:')).length;
     if (!btn) return { status: 'failed', reason: 'no-submit-button', log };
     if (bad.length) return { status: 'failed', reason: 'fields-still-invalid', log };
+    await dwell();
     if (await captchaNow()) return { status: 'manual', reason: 'captcha', captcha: captchaNow.type, answers: answersText(), log };
     return { status: 'ready', evidence: `Filled ${count} field${count === 1 ? '' : 's'}, ready to send with “${btn.text || 'Submit'}”`, answers: answersText(), log };
   }
@@ -507,6 +527,7 @@ export async function submitForm(page, url, profile, opts = {}) {
   for (let attempt = 0; attempt < 4; attempt++) {
     const btn = pickSubmit(scan.buttons);
     if (!btn) return { status: 'failed', reason: 'no-submit-button', log };
+    if (attempt === 0) await dwell();
     if (attempt === 0 && await captchaNow()) return { status: 'manual', reason: 'captcha', captcha: captchaNow.type, answers: answersText(), log };
     responses = [];
     note(`submit (${btn.text || btn.type})${attempt ? ` attempt ${attempt + 1}` : ''}`);

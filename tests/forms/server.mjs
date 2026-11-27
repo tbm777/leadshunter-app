@@ -64,6 +64,7 @@ export function startServer(port = 8899) {
       if (u.pathname === '/__reset') { for (const k of Object.keys(results)) delete results[k]; return send(200, 'ok'); }
       if (parts[0] === 'f' && byId[parts[1]]) return send(200, byId[parts[1]].html().replace('<!--ERR-->', ''));
       if (parts[0] === 'embed' && byId[parts[1]]) return send(200, byId[parts[1]].inner().replace('<!--ERR-->', ''));
+      if (parts[0] === 'beacon') return send(204, '');
       if (parts[0] === 'thanks') return send(200, '<!doctype html><h1>Thank you!</h1><p>We received your request and will contact you within one business day.</p>');
       if (u.pathname === '/newsletter' || u.pathname === '/search') { const ref = (req.headers.referer || '').split('/').pop(); rec(ref).wrongForm++; return send(200, '<p>Thanks for subscribing!</p>'); }
       if (parts[0] === 'submit' && byId[parts[1]] && req.method === 'POST') {

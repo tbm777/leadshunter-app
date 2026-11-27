@@ -1543,3 +1543,11 @@ input[type=checkbox]:disabled,input[type=radio]:disabled{opacity:.55;cursor:defa
 .navdot{width:8px;height:8px;border-radius:50%;margin-left:auto;flex:none}
 .navdot.bad{background:var(--bad)}
 .navdot.warn{background:var(--warn)}
+/* ---------- message checks */
+.mcheck{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
+.mc-row{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;line-height:1.45;color:var(--muted)}
+.mc-row svg{flex:none;margin-top:2px}
+.mc-row.warn svg{color:var(--warn)}
+.mc-row.tip svg{color:var(--info)}
+.mcheck.ok{flex-direction:row;align-items:center;gap:8px;font-size:12.5px;color:var(--muted)}
+.mcheck.ok svg{color:var(--ok)}

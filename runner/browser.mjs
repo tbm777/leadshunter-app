@@ -2,6 +2,7 @@
 // Playwright is installed on demand the first time it is needed, so plain searches stay fast.
 import { execSync } from 'node:child_process';
 import { FORM } from './check.mjs';
+import { shouldBlock } from './lib/block.mjs';
 import { captchaInPage, usableFrames, evalIn } from './forms/captcha-probe.mjs';
 
 let browserPromise = null;
@@ -38,7 +39,7 @@ export async function browserFormCheck(url) {
   const ctx = await browser.newContext({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36', viewport: { width: 1280, height: 900 } });
   await ctx.route('**/*', route => {
     const t = route.request().resourceType();
-    return ['image', 'media', 'font'].includes(t) ? route.abort() : route.continue();
+    return t === 'image' || shouldBlock(route.request().url(), t) ? route.abort() : route.continue();
   });
   const page = await ctx.newPage();
   try {

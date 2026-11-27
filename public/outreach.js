@@ -1,5 +1,6 @@
 // LeadsHunter outreach pages: campaigns, manual queue, messages, sender profiles. Plugs into app.js through install().
 import { personalize, cleanCompanyName, MERGE_TAGS, unknownTags } from './shared/personalize.js';
+import { checkMessage } from './shared/msgcheck.js';
 import { render as renderFile, ASSETS } from './shared/templates/bat-marketing.js';
 import { SENDER_FALLBACKS, OTHER_FIELDS, engineProfile, localizeProfile } from './shared/fallbacks.js';
 
@@ -272,10 +273,15 @@ async function loadItems(id, append = false) {
   } catch (e) { if (tok === P.req) A.toast(e.message, 'alert'); } finally { if (tok === P.req) P.reqDone = tok; }
 }
 
+/** Spam-risk advice for a subject and message (shown under the editor; never blocks sending). */
+function checkHTML(subject, message) {
+  const r = checkMessage({ subject, message });
+  if (!r.length) return message && message.trim().length >= 40 ? `<div class="mcheck ok">${A.ic('check', 14)}<span>No spam signals found in this message.</span></div>` : '';
+  return `<div class="mcheck">${r.map(x => `<div class="mc-row ${x.level}">${A.ic(x.level === 'warn' ? 'alert' : 'messages', 14)}<span>${A.esc(x.text)}</span></div>`).join('')}</div>`;
+}
 /* message tab */
 function messageTab(c) {
   const P = cp(c.id);
-  const warn = unknownTags(c.subject + ' ' + c.message);
   return `<div class="msgrid">
     <div class="card"><div class="card-h"><div><h3>Message</h3><p>Sent through each business's contact form.</p></div><span class="help" id="m-save"></span></div>
       <div class="card-b" style="display:flex;flex-direction:column;gap:14px">
@@ -283,7 +289,7 @@ function messageTab(c) {
         <div class="field"><div class="row" style="justify-content:space-between"><label for="m-body">Message</label><span class="help num" id="m-count">${c.message.length} characters</span></div>
           <textarea class="input mbody" id="m-body" data-msave maxlength="5000" placeholder="Hi [Company Name] team,&#10;&#10;…&#10;&#10;Best,&#10;Your name&#10;Your company">${A.esc(c.message)}</textarea></div>
         <div class="tagbar"><span class="help">Insert</span>${MERGE_TAGS.map(t => `<button class="chip" data-tag="[${t}]">[${t}]</button>`).join('')}</div>
-        <div id="m-warn">${warn.length ? `<div class="note">${A.ic('alert')}<div>${warn.map(w => `<b>${A.esc(w)}</b>`).join(', ')} ${warn.length === 1 ? "isn't a merge tag" : "aren't merge tags"} and will be sent exactly as written.</div></div>` : ''}</div>
+        <div id="m-warn">${checkHTML(c.subject, c.message)}</div>
         <div class="note neutral">${A.ic('alert')}<div>The company name comes from Google, cleaned up: “Summit Roofing Co. - #1 Roofer in Austin” becomes “Summit Roofing Co.”. End with a sign-off on its own lines (Best, / name / company) and the file styles it for you.</div></div>
       </div></div>
     <div class="card pvcard"><div class="card-h"><div class="seg-c"><button class="${P.previewMode === 'text' ? 'on' : ''}" data-pvmode="text">Form text</button><button class="${P.previewMode === 'file' ? 'on' : ''}" data-pvmode="file">File</button></div>
@@ -364,6 +370,7 @@ function stepEditor(c, st) {
         <div class="field"><div class="row" style="justify-content:space-between"><label for="st-body">${isCall ? 'Call script' : 'Message'}</label><button class="linkbtn muted" data-o="frombook">${A.ic('playbook', 13)} Use from Playbook</button></div>
           <textarea class="input mbody" id="st-body" maxlength="5000" placeholder="${isCall ? 'Hi, this is Alfred from The Bat Marketing. I sent a note through your website about…' : 'Hi [Company Name] team,&#10;&#10;Just following up on my note from last week…&#10;&#10;Best,&#10;Alfred'}">${A.esc(st.message)}</textarea></div>
         <div class="tagbar"><span class="help">Insert</span>${MERGE_TAGS.map(t => `<button class="chip" data-tag="[${t}]">[${t}]</button>`).join('')}</div>
+        ${isCall ? '' : `<div id="st-warn">${checkHTML(st.subject || c.subject, st.message)}</div>`}
       </div></div>
     ${isCall ? `<div class="card pvcard"><div class="card-h"><h3>How it looks in your queue</h3></div><div class="card-b"><div class="callprev"><span class="pill" style="--c:var(--info)">Call</span><b>${A.esc(cleanCompanyName(previewLeads(c)[0].name))}</b><a class="callnum">${A.ic('phone', 15)}(512) 555-0142</a><p>${A.esc(personalize(st.message || 'Your script appears here.', previewLeads(c)[0]))}</p><div class="row" style="gap:6px"><span class="btn sm">Talked</span><span class="btn sm">Voicemail</span><span class="btn sm">No answer</span></div></div></div></div>`
       : `<div class="card pvcard"><div class="card-h"><div class="seg-c"><button class="${cp(c.id).previewMode === 'text' ? 'on' : ''}" data-pvmode="text">Form text</button><button class="${cp(c.id).previewMode === 'file' ? 'on' : ''}" data-pvmode="file">File</button></div>
@@ -1081,7 +1088,7 @@ function insertTag(tag) {
 }
 function onInput(e) {
   const t = e.target, c = curCampaign();
-  if (c && ['st-subj', 'st-body', 'st-delay'].includes(t.id)) { lastField = t.id; queueSteps(c); try { renderPreview(c); } catch { /* preview optional */ } return; }
+  if (c && ['st-subj', 'st-body', 'st-delay'].includes(t.id)) { lastField = t.id; const sw = A.$('#st-warn'); if (sw) sw.innerHTML = checkHTML(A.$('#st-subj')?.value || c.subject, A.$('#st-body').value); queueSteps(c); try { renderPreview(c); } catch { /* preview optional */ } return; }
   if (t.id === 'mq-q') { MQ.q = t.value; mqRender(['list', 'detail']); return; }
   if (t.id === 'nt-q') { NT.q = t.value; A.$('#nt-list').innerHTML = ntList(); return; }
   if (['nt-title', 'nt-subj', 'nt-body', 'nt-memo'].includes(t.id)) { ntLast = t.id === 'nt-title' ? ntLast : t.id; ntQueueSave(); return; }
@@ -1090,8 +1097,7 @@ function onInput(e) {
   if (t.dataset.msave !== undefined && c) {
     lastField = t.id;
     if (t.id === 'm-body') A.$('#m-count').textContent = `${t.value.length} characters`;
-    const warn = unknownTags(A.$('#m-subj').value + ' ' + A.$('#m-body').value);
-    A.$('#m-warn').innerHTML = warn.length ? `<div class="note">${A.ic('alert')}<div>${warn.map(w => `<b>${A.esc(w)}</b>`).join(', ')} ${warn.length === 1 ? "isn't a merge tag" : "aren't merge tags"} and will be sent exactly as written.</div></div>` : '';
+    A.$('#m-warn').innerHTML = checkHTML(A.$('#m-subj').value, A.$('#m-body').value);
     queueSave(c);
     try { renderPreview(c); } catch (err) { console.warn('preview', err); }
   }
