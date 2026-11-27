@@ -103,6 +103,13 @@ function rowToLead(row) {
   o.dom = o.website ? o.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '') : '';
   return o;
 }
+/** A search that keeps only businesses with a form saves each one first and checks its website after. Until that check
+ *  passes, the business is a candidate, not a lead: hide it so counts match the search (candidates that fail are deleted). */
+function visibleLeads() {
+  const filtered = new Set(ST.searches.filter(s => s.form && s.form !== 'any').map(s => s.id));
+  const all = [...ST.byId.values()];
+  return filtered.size ? all.filter(l => !(filtered.has(l.search_id) && !l.checked_at)) : all;
+}
 function applyRows(cols, rows) {
   if (cols) ST.cols = cols;
   let changed = 0;
@@ -114,7 +121,7 @@ function applyRows(cols, rows) {
     changed++;
     if (l.seq > ST.seq) ST.seq = l.seq;
   }
-  if (changed) ST.leads = [...ST.byId.values()];
+  if (changed) ST.leads = visibleLeads();
   return changed;
 }
 
@@ -734,7 +741,7 @@ function announce(s) {
   if (s.status === 'done') toast(s.kind === 'check' ? `${s.name}: done` : `${s.name}: ${fmt(s.new)} new lead${s.new === 1 ? '' : 's'}`);
   else if (s.status === 'failed') toast(`${s.name} stopped. Open Find leads for details`, 'alert');
 }
-async function refreshSearches() { try { const r = await api('GET', '/api/searches?limit=60'); ST.searches = r.searches; renderJobs(); if (ST.searches.some(ACTIVE)) startPolling(); } catch { /* keep old list */ } }
+async function refreshSearches() { try { const r = await api('GET', '/api/searches?limit=60'); ST.searches = r.searches; ST.leads = visibleLeads(); renderJobs(); if (ST.searches.some(ACTIVE)) startPolling(); } catch { /* keep old list */ } }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && $('#root .app')) { sync(); if (ST.searches.some(ACTIVE)) startPolling(); } });
 
 /* ================================================================ find leads */
@@ -1582,7 +1589,7 @@ async function saveLead(id, patch, done) {
 async function boot() {
   let data;
   try { data = await api('GET', '/api/bootstrap'); } catch (e) { if (e.status !== 401) $('#root').innerHTML = `<div class="boot"><div class="banner">${ic('alert', 18)}<div><b>LeadsHunter could not load</b>${esc(e.message)} <button class="linkbtn" onclick="location.reload()">Try again</button></div></div></div>`; return; }
-  ST.industries = data.industries; ST.searches = data.searches; ST.hiddenNames = data.hiddenNames || {}; ST.config = data.config; ST.cols = data.cols;
+  ST.industries = data.industries; ST.searches = data.searches; ST.leads = visibleLeads(); ST.hiddenNames = data.hiddenNames || {}; ST.config = data.config; ST.cols = data.cols;
   try { ST.views = (await api('GET', '/api/views')).views; } catch { ST.views = []; }
   shell(); render();
   loadOutreach(); loadLists();
