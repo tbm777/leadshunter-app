@@ -307,8 +307,8 @@ export async function bulkItems(env, b) {
 
 /* ------------------------------------------------------------------ messages: notes for drafting outreach */
 const TAGS = ['idea', 'draft', 'ready', 'flow'];
-const noteOut = n => ({ id: n.id, title: n.title, subject: n.subject, body: n.body, memo: n.memo || '', tag: n.tag, pinned: !!n.pinned, created_at: n.created_at, updated_at: n.updated_at });
-export async function listNotes(env) { return json({ notes: (await env.DB.prepare('SELECT * FROM notes ORDER BY pinned DESC, updated_at DESC LIMIT 500').all()).results.map(noteOut) }); }
+const noteOut = n => ({ id: n.id, title: n.title, subject: n.subject, body: n.body, memo: n.memo || '', tag: n.tag, pinned: !!n.pinned, position: n.position || 0, created_at: n.created_at, updated_at: n.updated_at });
+export async function listNotes(env) { return json({ notes: (await env.DB.prepare('SELECT * FROM notes ORDER BY pinned DESC, position, id DESC LIMIT 500').all()).results.map(noteOut) }); }
 export async function saveNote(env, b, id) {
   const cur = id ? await env.DB.prepare('SELECT * FROM notes WHERE id = ?').bind(id).first() : null;
   if (id && !cur) throw new HttpError(404, 'Note not found.');
@@ -319,8 +319,13 @@ export async function saveNote(env, b, id) {
   };
   const t = now(), cols = Object.keys(v);
   if (id) await env.DB.prepare(`UPDATE notes SET ${cols.map(c => c + ' = ?').join(', ')}, updated_at = ? WHERE id = ?`).bind(...Object.values(v), t, id).run();
-  else id = (await env.DB.prepare(`INSERT INTO notes (${cols.join(', ')}, created_at, updated_at) VALUES (${inList(cols.length)}, ?, ?) RETURNING id`).bind(...Object.values(v), t, t).first()).id;
+  else id = (await env.DB.prepare(`INSERT INTO notes (${cols.join(', ')}, position, created_at, updated_at) VALUES (${inList(cols.length)}, (SELECT COALESCE(MIN(position), 0) - 1 FROM notes), ?, ?) RETURNING id`).bind(...Object.values(v), t, t).first()).id;  // new notes go first
   return json({ note: noteOut(await env.DB.prepare('SELECT * FROM notes WHERE id = ?').bind(id).first()) });
+}
+export async function orderNotes(env, b) {
+  const ids = [...new Set((b.ids || []).map(Number).filter(Number.isInteger))].slice(0, 500);
+  for (const part of chunk(ids.map((id, i) => env.DB.prepare('UPDATE notes SET position = ? WHERE id = ?').bind(i, id)), 100)) await env.DB.batch(part);
+  return json({ ok: true });
 }
 export async function deleteNote(env, id) { await env.DB.prepare('DELETE FROM notes WHERE id = ?').bind(id).run(); return json({ ok: true }); }
 

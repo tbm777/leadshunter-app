@@ -199,7 +199,7 @@ function shell() {
     <aside class="rail">
       <div class="brand"><div class="brand-mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></div><div><b>LeadsHunter</b><small>Outreach workspace</small></div></div>
       <nav class="nav" id="nav"></nav>
-      <div class="usage" style="gap:8px"><h4>This browser</h4><p id="railcount">—</p><button class="btn ghost sm" data-act="logout" style="justify-content:flex-start;color:var(--rail-ink);padding-left:0">${ic('logout', 14)}Sign out</button></div>
+      <div class="usage" style="gap:8px"><h4>This browser</h4><p id="railcount">—</p><button class="railbtn" data-act="logout">${ic('logout', 15)}<span>Sign out</span></button></div>
       <div class="attrib">Place data © <a href="https://www.geonames.org" target="_blank" rel="noopener">GeoNames</a> (CC BY 4.0)</div>
     </aside>
     <div class="main">

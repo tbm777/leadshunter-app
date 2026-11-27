@@ -518,6 +518,7 @@ async function mqBulk(act) {
 /* ------------------------------------------------------------------ messages: notes for drafting outreach */
 const NT = { notes: [], loaded: false, sel: null, q: '', tag: 'all' };
 const NOTE_TAGS = [['idea', 'Idea', 'var(--info)'], ['draft', 'Draft', 'var(--warn)'], ['ready', 'Ready', 'var(--ok)'], ['flow', 'Flow', 'var(--manual)']];
+const byOrder = (a, z) => (z.pinned - a.pinned) || (a.position - z.position) || (z.id - a.id);
 const tagOf = k => NOTE_TAGS.find(t => t[0] === k) || NOTE_TAGS[0];
 async function loadNotes() { try { NT.notes = (await A.api('GET', '/api/notes')).notes; NT.loaded = true; if (NT.sel == null && NT.notes[0]) NT.sel = NT.notes[0].id; if (A.currentView() === 'messages') A.render(); } catch (e) { A.toast(e.message, 'alert'); } }
 const ntFiltered = () => { const q = NT.q.trim().toLowerCase(); return NT.notes.filter(n => (NT.tag === 'all' || n.tag === NT.tag) && (!q || `${n.title} ${n.subject} ${n.body}`.toLowerCase().includes(q))); };
@@ -540,7 +541,7 @@ function ntList() {
   const list = ntFiltered();
   if (!list.length) return `<div class="empty" style="grid-column:1/-1"><b>No notes match</b>Try another word or stage.</div>`;
   return `<button class="paper paper-new" data-o="newnote" style="--tilt:0deg"><span class="plus">${A.ic('plus', 22)}</span><b class="hand">New note</b></button>` + list.map(n => { const [, l, c] = tagOf(n.tag);
-    return `<button class="paper ${n.pinned ? 'pinned' : ''}" data-note="${n.id}" style="--tilt:${tilt(n.id)}deg">${n.pinned ? '<span class="pin"></span>' : `<span class="tape" style="--tape:${c}"></span>`}
+    return `<button class="paper ${n.pinned ? 'pinned' : ''}" data-note="${n.id}" title="Click to open · drag to reorder" style="--tilt:${tilt(n.id)}deg">${n.pinned ? '<span class="pin"></span>' : `<span class="tape" style="--tape:${c}"></span>`}
       <b class="hand">${A.esc(n.title || 'Untitled')}</b>
       ${n.subject ? `<i class="psubj">${A.esc(n.subject)}</i>` : ''}
       <p>${A.esc((n.body || '').slice(0, 260)) || '<span class="faint">Empty page</span>'}</p>
@@ -580,7 +581,7 @@ function ntQueueSave() {
 async function ntFlush(extra) {
   clearTimeout(ntT);
   const ps = ntPending || (extra ? { id: NT.sel } : null); ntPending = null; if (!ps) return;
-  try { const r = await A.api('PUT', `/api/notes/${ps.id}`, { ...ps, ...(extra || {}) }); const i = NT.notes.findIndex(x => x.id === r.note.id); if (i >= 0) NT.notes[i] = r.note; NT.notes.sort((a, z) => (z.pinned - a.pinned) || (z.updated_at - a.updated_at)); const sv = A.$('#nt-save'); if (sv) sv.innerHTML = `<span class="okline">${A.ic('check', 12)}Saved</span>`; const l = A.$('#nt-list'); if (l) l.innerHTML = ntList(); }
+  try { const r = await A.api('PUT', `/api/notes/${ps.id}`, { ...ps, ...(extra || {}) }); const i = NT.notes.findIndex(x => x.id === r.note.id); if (i >= 0) NT.notes[i] = r.note; NT.notes.sort(byOrder); const sv = A.$('#nt-save'); if (sv) sv.innerHTML = `<span class="okline">${A.ic('check', 12)}Saved</span>`; const l = A.$('#nt-list'); if (l) l.innerHTML = ntList(); }
   catch (e) { A.toast(e.message, 'alert'); }
 }
 function noteToCampaignModal(n) {
@@ -593,6 +594,48 @@ function noteToCampaignModal(n) {
       ${n.subject ? '' : `<div class="note neutral">${A.ic('alert')}<div>This note has no subject line, so the campaign keeps its current subject.</div></div>`}
       <div class="help" id="ntc-err" style="color:var(--bad)"></div></div>
     <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-o="notetocampok">Use this message</button></div></div></div>`;
+}
+
+/* drag to reorder notes (mouse and touch) */
+const ntDrag = { justDropped: false };
+function ntPointerDown(e) {
+  const card = e.target.closest('.desk .paper[data-note]');
+  if (!card || e.button > 0 || NT.q || NT.tag !== 'all') return;   // reorder the full board only
+  Object.assign(ntDrag, { card, x: e.clientX, y: e.clientY, started: false, touch: e.pointerType === 'touch', armed: e.pointerType !== 'touch' });
+  if (ntDrag.touch) ntDrag.timer = setTimeout(() => { ntDrag.armed = true; card.classList.add('paper-lift'); }, 280);   // long-press on phones, so the page still scrolls
+}
+function ntStart(e) {
+  const r = ntDrag.card.getBoundingClientRect();
+  const g = ntDrag.card.cloneNode(true); g.classList.add('paper-ghost'); g.style.width = r.width + 'px'; g.style.height = r.height + 'px';
+  document.body.appendChild(g);
+  Object.assign(ntDrag, { started: true, ghost: g, offX: e.clientX - r.left, offY: e.clientY - r.top });
+  ntDrag.card.classList.add('paper-placeholder'); ntDrag.card.classList.remove('paper-lift'); document.body.classList.add('dragging-notes');
+}
+function ntPointerMove(e) {
+  if (!ntDrag.card) return;
+  if (!ntDrag.started) {
+    const d = Math.hypot(e.clientX - ntDrag.x, e.clientY - ntDrag.y);
+    if (!ntDrag.armed) { if (d > 8) { clearTimeout(ntDrag.timer); ntDrag.card = null; } return; }
+    if (d < 6) return;
+    ntStart(e);
+  }
+  ntDrag.ghost.style.transform = `translate(${e.clientX - ntDrag.offX}px, ${e.clientY - ntDrag.offY}px) rotate(2.5deg) scale(1.04)`;
+  const over = document.elementFromPoint(e.clientX, e.clientY)?.closest('.desk .paper[data-note]');
+  if (over && over !== ntDrag.card) { const r = over.getBoundingClientRect(); over.parentNode.insertBefore(ntDrag.card, e.clientX > r.left + r.width / 2 ? over.nextSibling : over); }
+  const edge = 70; if (e.clientY < edge) scrollBy(0, -12); else if (e.clientY > innerHeight - edge) scrollBy(0, 12);
+}
+async function ntPointerUp() {
+  clearTimeout(ntDrag.timer);
+  const d = ntDrag; if (!d.card) return;
+  d.card.classList.remove('paper-lift');
+  if (!d.started) { d.card = null; return; }
+  d.ghost.remove(); d.card.classList.remove('paper-placeholder'); document.body.classList.remove('dragging-notes');
+  ntDrag.justDropped = true; setTimeout(() => { ntDrag.justDropped = false; }, 60);
+  const ids = [...document.querySelectorAll('.desk .paper[data-note]')].map(x => +x.dataset.note);
+  ids.forEach((id, i) => { const n = NT.notes.find(x => x.id === id); if (n) n.position = i; });
+  NT.notes.sort(byOrder); d.card = null;
+  A.$('#nt-list').innerHTML = ntList();   // pinned notes stay first
+  try { await A.api('PUT', '/api/notes/order', { ids: NT.notes.map(n => n.id) }); } catch (e) { A.toast(e.message, 'alert'); }
 }
 
 /* ------------------------------------------------------------------ sender profiles */
@@ -674,7 +717,7 @@ async function onClick(e) {
   const mqa = t.closest('[data-mqact]');
   if (mqa) { mqAction(mqa.dataset.mqact); return; }
   const nrow = t.closest('[data-note]');
-  if (nrow) { await ntFlush(); openNote(+nrow.dataset.note); return; }
+  if (nrow) { if (ntDrag.justDropped) return; await ntFlush(); openNote(+nrow.dataset.note); return; }
   const ntg = t.closest('[data-nttag]');
   if (ntg) { NT.tag = ntg.dataset.nttag; A.render(); return; }
   const ntt = t.closest('[data-notetag]');
@@ -752,11 +795,11 @@ async function onClick(e) {
     case 'extguide': extGuide(); break;
     case 'reviewnoconf': { const P = cp(c.id); P.tab = 'leads'; P.filter = 'noconf'; P.items = null; A.render(); break; }
     case 'newnote': {
-      try { const r = await A.api('POST', '/api/notes', { title: b.dataset.title || '', tag: b.dataset.ntype || 'idea', body: b.dataset.body || '' }); NT.notes.unshift(r.note); NT.tag = 'all'; NT.q = ''; A.render(); openNote(r.note.id); setTimeout(() => (b.dataset.title ? A.$('#nt-body') : A.$('#nt-title'))?.focus(), 0); }
+      try { const r = await A.api('POST', '/api/notes', { title: b.dataset.title || '', tag: b.dataset.ntype || 'idea', body: b.dataset.body || '' }); NT.notes.unshift(r.note); NT.notes.sort(byOrder); NT.tag = 'all'; NT.q = ''; A.render(); openNote(r.note.id); setTimeout(() => (b.dataset.title ? A.$('#nt-body') : A.$('#nt-title'))?.focus(), 0); }
       catch (err) { A.toast(err.message, 'alert'); }
       break;
     }
-    case 'pinnote': { const n = NT.notes.find(x => x.id === NT.sel); await ntFlush({ pinned: !n.pinned }); NT.notes.sort((a, z) => (z.pinned - a.pinned) || (z.updated_at - a.updated_at)); b.textContent = NT.notes.find(x => x.id === NT.sel).pinned ? '📌' : '📍'; A.$('#nt-list').innerHTML = ntList(); break; }
+    case 'pinnote': { const n = NT.notes.find(x => x.id === NT.sel); await ntFlush({ pinned: !n.pinned }); NT.notes.sort(byOrder); b.textContent = NT.notes.find(x => x.id === NT.sel).pinned ? '📌' : '📍'; A.$('#nt-list').innerHTML = ntList(); break; }
     case 'delnote': {
       const n = NT.notes.find(x => x.id === NT.sel);
       A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Delete note" style="width:min(420px,100%)"><div class="card-h"><div><h2>Delete “${A.esc(n.title || 'Untitled')}”?</h2><p>This can't be undone. Campaigns that used it keep their message.</p></div></div>
@@ -942,6 +985,11 @@ export function install(ctx) {
   document.addEventListener('focusin', onFocus);
   document.addEventListener('change', onChange);
   document.addEventListener('keydown', onKey);
+  document.addEventListener('pointerdown', ntPointerDown);
+  document.addEventListener('pointermove', ntPointerMove);
+  document.addEventListener('pointerup', ntPointerUp);
+  document.addEventListener('pointercancel', ntPointerUp);
+  document.addEventListener('touchmove', (e) => { if (ntDrag.started || ntDrag.armed && ntDrag.card) e.preventDefault(); }, { passive: false });
   window.addEventListener('hashchange', () => { stopPoll(); flushSave(); ntFlush(); });
   document.addEventListener('lh-ext-ready', () => { if (A.currentView() === 'manual' && MQ.loaded) A.render(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && A.currentView() === 'manual' && MQ.loaded && !MQ.fresh) { MQ.fresh = true; loadManual().then(() => { MQ.fresh = false; }); loadOutreach(); } });
