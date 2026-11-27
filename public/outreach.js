@@ -7,7 +7,6 @@ let A;                       // helpers from app.js
 const OS = { loaded: false, senders: [], campaigns: [], manual: 0 };
 const CP = {};               // campaign page state, per open campaign
 const MQ = { items: [], sel: 0, loading: false };
-const MS = { items: [], campaign: 0, result: 'all', more: false, loading: false };
 let pollT = 0;
 const stopPoll = () => { clearInterval(pollT); pollT = 0; };
 
@@ -136,7 +135,7 @@ function actionsHTML(c) {
 }
 function statsHTML(c) {
   const n = c.counts;
-  return `<div><span>Queued</span><b class="num">${A.fmt(n.queued + n.sending)}</b></div><div><span>Sent</span><b class="num" style="color:var(--ok)">${A.fmt(contacted(c))}</b></div>
+  return `<div><span>Queued</span><b class="num">${A.fmt(n.queued + n.sending)}</b></div><div><span>Sent</span><b class="num" style="color:var(--ok)">${A.fmt(contacted(c))}</b>${n.submitted ? `<button class="linkbtn muted" data-o="reviewnoconf" style="font-size:11.5px;text-align:left">${A.fmt(n.submitted)} without confirmation · Review</button>` : ''}</div>
     <div><span>Needs you</span><b class="num" style="color:${n.manual ? 'var(--manual)' : 'inherit'}">${A.fmt(n.manual)}</b></div><div><span>Failed or skipped</span><b class="num">${A.fmt(n.failed + n.skipped)}</b></div>
     <div><span>Today</span><b class="num">${A.fmt(c.today)} <small>/ ${c.daily_limit}</small></b></div>`;
 }
@@ -171,13 +170,13 @@ function tabHTML(c) {
 }
 
 /* leads tab */
-const FILTERS = [['all', 'All', null], ['queued', 'Queued', 'queued,sending'], ['sent', 'Sent', 'sent,submitted,sent_manual'], ['manual', 'Needs you', 'manual'], ['failed', 'Failed', 'failed'], ['skipped', 'Skipped', 'skipped']];
+const FILTERS = [['all', 'All', null], ['queued', 'Queued', 'queued,sending'], ['sent', 'Sent', 'sent,submitted,sent_manual'], ['noconf', 'No confirmation', 'submitted'], ['manual', 'Needs you', 'manual'], ['failed', 'Failed', 'failed'], ['skipped', 'Skipped', 'skipped']];
 function leadsTab(c) {
   const P = cp(c.id), n = c.counts;
-  const cnt = { all: n.total, queued: n.queued + n.sending, sent: contacted(c), manual: n.manual, failed: n.failed, skipped: n.skipped };
+  const cnt = { all: n.total, queued: n.queued + n.sending, sent: contacted(c), noconf: n.submitted, manual: n.manual, failed: n.failed, skipped: n.skipped };
   if (!n.total) return `<div class="card"><div class="empty"><b>No leads in this campaign yet</b>Go to Leads, select the businesses you want, then choose “Add to campaign”.<div style="margin-top:14px"><button class="btn primary" data-o="addleads">${A.ic('leads', 14)}Pick leads</button></div></div></div>`;
   return `<div class="card">
-    <div class="card-h ofilters"><div class="tabs">${FILTERS.map(([k, l]) => `<button class="${P.filter === k ? 'on' : ''}" data-ofilter="${k}">${l}<span class="n">${A.fmt(cnt[k])}</span></button>`).join('')}</div><button class="btn ghost sm" data-o="addleads">${A.ic('plus', 13)}Add leads</button></div>
+    <div class="card-h ofilters"><div class="tabs">${FILTERS.filter(([k]) => k !== 'noconf' || cnt.noconf).map(([k, l]) => `<button class="${P.filter === k ? 'on' : ''}" data-ofilter="${k}">${l}<span class="n">${A.fmt(cnt[k])}</span></button>`).join('')}</div><button class="btn ghost sm" data-o="addleads">${A.ic('plus', 13)}Add leads</button></div>
     <div id="c-items">${itemsHTML(c)}</div></div>`;
 }
 function itemsHTML(c) {
@@ -312,7 +311,7 @@ function refreshCampaignChrome(c) {
   const h = document.querySelector('.chead h1'); if (h) h.textContent = c.name;
   document.querySelectorAll('.ctabs [data-ctab="leads"] .n').forEach(n => { n.textContent = A.fmt(c.counts.total); });
   const fl = document.querySelector('.ofilters .tabs');
-  if (fl) { const n = c.counts, cnt = { all: n.total, queued: n.queued + n.sending, sent: contacted(c), manual: n.manual, failed: n.failed, skipped: n.skipped }; fl.querySelectorAll('[data-ofilter]').forEach(b => { b.querySelector('.n').textContent = A.fmt(cnt[b.dataset.ofilter]); }); }
+  if (fl) { const n = c.counts, cnt = { all: n.total, queued: n.queued + n.sending, sent: contacted(c), noconf: n.submitted, manual: n.manual, failed: n.failed, skipped: n.skipped }; fl.querySelectorAll('[data-ofilter]').forEach(b => { b.querySelector('.n').textContent = A.fmt(cnt[b.dataset.ofilter]); }); }
 }
 
 /* polling while a run is active */
@@ -516,28 +515,69 @@ async function mqBulk(act) {
   await loadManual(); A.sync();
 }
 
-/* ------------------------------------------------------------------ messages log */
-const RESULTS = [['all', 'All sent', 'sent,submitted,sent_manual'], ['sent', 'Confirmed', 'sent'], ['submitted', 'No confirmation', 'submitted'], ['sent_manual', 'Sent by you', 'sent_manual']];
+/* ------------------------------------------------------------------ messages: notes for drafting outreach */
+const NT = { notes: [], loaded: false, sel: null, q: '', tag: 'all' };
+const NOTE_TAGS = [['idea', 'Idea', 'var(--info)'], ['draft', 'Draft', 'var(--warn)'], ['ready', 'Ready', 'var(--ok)'], ['flow', 'Flow', 'var(--manual)']];
+const tagOf = k => NOTE_TAGS.find(t => t[0] === k) || NOTE_TAGS[0];
+async function loadNotes() { try { NT.notes = (await A.api('GET', '/api/notes')).notes; NT.loaded = true; if (NT.sel == null && NT.notes[0]) NT.sel = NT.notes[0].id; if (A.currentView() === 'messages') A.render(); } catch (e) { A.toast(e.message, 'alert'); } }
+const ntFiltered = () => { const q = NT.q.trim().toLowerCase(); return NT.notes.filter(n => (NT.tag === 'all' || n.tag === NT.tag) && (!q || `${n.title} ${n.subject} ${n.body}`.toLowerCase().includes(q))); };
 function messagesView() {
-  if (!MS.loaded) { loadMessages(); return loading(); }
-  return `<div class="head"><div><div class="eyebrow">Outreach</div><h1>Messages</h1><p>Every form that went out, newest first. “Confirmed” means the site showed a thank-you message or redirected to a thank-you page.</p></div></div>
-  <div class="card"><div class="card-h ofilters"><div class="tabs">${RESULTS.map(([k, l]) => `<button class="${MS.result === k ? 'on' : ''}" data-msres="${k}">${l}</button>`).join('')}</div>
-    <select class="input" id="ms-camp" style="width:auto"><option value="0">All campaigns</option>${OS.campaigns.map(c => `<option value="${c.id}" ${MS.campaign === c.id ? 'selected' : ''}>${A.esc(c.name)}</option>`).join('')}</select></div>
-    ${MS.items.length ? `<div class="oitems msg">${MS.items.map(it => `<div class="oi"><div class="oi-b"><b>${A.esc(it.name)}</b><span>${A.esc(domain(it.website))} · ${A.esc(it.campaign)}</span></div>
-      <div class="oi-r">${it.status === 'sent' ? '<span class="pill" style="--c:var(--ok)">Confirmed</span>' : it.status === 'submitted' ? '<span class="pill" style="--c:var(--info)">No confirmation</span>' : '<span class="pill" style="--c:var(--ok)">Sent by you</span>'}${it.evidence ? `<small title="${A.esc(it.evidence)}">${A.esc(it.evidence)}</small>` : ''}</div>
-      <div class="oi-w num">${A.esc(A.whenPT(it.sent_at))}</div><div class="oi-a">${it.form_url ? `<a class="iconbtn sm" href="${A.esc(it.form_url)}" target="_blank" rel="noopener" aria-label="Open the form">${A.ic('ext', 14)}</a>` : ''}</div></div>`).join('')}</div>
-      ${MS.more ? `<div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:center"><button class="btn ghost sm" data-o="moremsgs">Load more</button></div>` : ''}`
-    : `<div class="empty"><b>No messages yet</b>Sent forms show up here with the site's confirmation.</div>`}</div>`;
+  if (!NT.loaded) { loadNotes(); return loading(); }
+  return `<div class="head"><div><div class="eyebrow">Outreach</div><h1>Messages</h1><p>A scratchpad for outreach ideas: angles, drafts, follow-up flows. When one is ready, send it to a campaign in one click.</p></div>
+    <div class="row"><button class="btn primary" data-o="newnote">${A.ic('plus')}New note</button></div></div>
+  ${NT.notes.length ? `<div class="ntgrid"><div class="card ntside">
+      <div class="ntside-h"><div class="lsearch">${A.ic('find', 15)}<input id="nt-q" placeholder="Search notes" value="${A.esc(NT.q)}" autocomplete="off"></div>
+        <div class="tabs nttags"><button class="${NT.tag === 'all' ? 'on' : ''}" data-nttag="all">All</button>${NOTE_TAGS.map(([k, l]) => `<button class="${NT.tag === k ? 'on' : ''}" data-nttag="${k}">${l}</button>`).join('')}</div></div>
+      <div id="nt-list">${ntList()}</div></div>
+    <div class="card ntedit" id="nt-edit">${ntEditor()}</div></div>`
+  : `<div class="card"><div class="empty ntempty"><b>Start your first note</b>Jot down an angle, draft a message, or map out a follow-up flow. Merge tags like [Company Name] work here too.
+      <div class="ntstarters">${[['Missed calls angle', 'idea'], ['Website refresh pitch', 'draft'], ['3-touch follow-up flow', 'flow']].map(([t, g]) => `<button class="chip" data-o="newnote" data-title="${t}" data-ntype="${g}">${A.ic('plus', 12)} ${t}</button>`).join('')}</div></div></div>`}`;
 }
-async function loadMessages(append = false) {
-  if (MS.loading) return; MS.loading = true;
-  try {
-    if (!OS.loaded) await loadOutreach();
-    const st = RESULTS.find(r => r[0] === MS.result)[2];
-    const r = await A.api('GET', `/api/outreach/items?status=${st}&order=sent&limit=200&offset=${append ? MS.items.length : 0}${MS.campaign ? '&campaign=' + MS.campaign : ''}`);
-    MS.items = append ? [...MS.items, ...r.items] : r.items; MS.more = r.more; MS.loaded = true;
-    if (A.currentView() === 'messages') A.render();
-  } catch (e) { A.toast(e.message, 'alert'); } finally { MS.loading = false; }
+function ntList() {
+  const list = ntFiltered();
+  if (!list.length) return `<div class="empty"><b>No notes match</b></div>`;
+  return list.map(n => { const [, l, c] = tagOf(n.tag);
+    return `<button class="ntrow ${n.id === NT.sel ? 'on' : ''}" data-note="${n.id}"><div><b>${n.pinned ? '📌 ' : ''}${A.esc(n.title || 'Untitled')}</b><span>${A.esc((n.subject || n.body || 'Empty note').replace(/\s+/g, ' ').slice(0, 80))}</span></div>
+      <div class="ntrow-r"><span class="pill" style="--c:${c}">${l}</span><small>${A.esc(A.whenPT(n.updated_at).replace(' PT', ''))}</small></div></button>`; }).join('');
+}
+function ntEditor() {
+  const n = NT.notes.find(x => x.id === NT.sel); if (!n) return `<div class="empty">Pick a note on the left.</div>`;
+  const warn = unknownTags(n.subject + ' ' + n.body);
+  return `<div class="nte-h"><input class="nte-title" id="nt-title" value="${A.esc(n.title)}" placeholder="Untitled note" maxlength="120">
+      <div class="row" style="gap:6px;flex-wrap:nowrap"><span class="help" id="nt-save"></span><button class="iconbtn sm" data-o="pinnote" title="${n.pinned ? 'Unpin' : 'Pin to top'}" aria-label="Pin">${n.pinned ? '📌' : '📍'}</button><button class="iconbtn sm" data-o="delnote" title="Delete note" aria-label="Delete note">${A.ic('trash', 14)}</button></div></div>
+    <div class="nte-b">
+      <div class="seg-c nttagpick">${NOTE_TAGS.map(([k, l]) => `<button class="${n.tag === k ? 'on' : ''}" data-notetag="${k}">${l}</button>`).join('')}</div>
+      <div class="field"><label for="nt-subj">Subject line <span class="opt-tag">optional</span></label><input class="input" id="nt-subj" value="${A.esc(n.subject)}" placeholder="Quick question about [Company Name]" maxlength="200"></div>
+      <div class="field"><label for="nt-body">Notes or message</label><textarea class="input ntbody" id="nt-body" placeholder="Write freely: an angle, a full message, or a flow like&#10;Day 1: contact form, website angle&#10;Day 4: follow-up, missed-calls angle">${A.esc(n.body)}</textarea></div>
+      <div class="tagbar"><span class="help">Insert</span>${MERGE_TAGS.map(t => `<button class="chip" data-ntag="[${t}]">[${t}]</button>`).join('')}<span class="help num" id="nt-count" style="margin-left:auto">${n.body.length} characters</span></div>
+      ${warn.length ? `<div class="note">${A.ic('alert')}<div>${warn.map(w => `<b>${A.esc(w)}</b>`).join(', ')} ${warn.length === 1 ? "isn't a merge tag" : "aren't merge tags"} and would be sent exactly as written.</div></div>` : ''}
+    </div>
+    <div class="nte-f"><span class="help">Saved automatically</span><button class="btn" data-o="notecopy">${A.ic('copy', 14)}Copy text</button><button class="btn primary" data-o="notetocamp" ${n.body.trim() ? '' : 'disabled'}>${A.ic('campaigns', 14)}Use in a campaign</button></div>`;
+}
+let ntT = 0, ntPending = null, ntLast = 'nt-body';
+function ntQueueSave() {
+  const n = NT.notes.find(x => x.id === NT.sel); if (!n) return;
+  n.title = A.$('#nt-title').value; n.subject = A.$('#nt-subj').value; n.body = A.$('#nt-body').value;
+  ntPending = { id: n.id, title: n.title, subject: n.subject, body: n.body };
+  A.$('#nt-save').textContent = 'Saving…'; A.$('#nt-count').textContent = `${n.body.length} characters`;
+  clearTimeout(ntT); ntT = setTimeout(ntFlush, 600);
+}
+async function ntFlush(extra) {
+  clearTimeout(ntT);
+  const ps = ntPending || (extra ? { id: NT.sel } : null); ntPending = null; if (!ps) return;
+  try { const r = await A.api('PUT', `/api/notes/${ps.id}`, { ...ps, ...(extra || {}) }); const i = NT.notes.findIndex(x => x.id === r.note.id); if (i >= 0) NT.notes[i] = r.note; const sv = A.$('#nt-save'); if (sv) sv.innerHTML = `<span class="okline">${A.ic('check', 12)}Saved</span>`; const l = A.$('#nt-list'); if (l) l.innerHTML = ntList(); }
+  catch (e) { A.toast(e.message, 'alert'); }
+}
+function noteToCampaignModal(n) {
+  const live = OS.campaigns.filter(c => c.status !== 'archived');
+  A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Use in a campaign">
+    <div class="card-h"><div><h2>Use “${A.esc(n.title || 'this note')}” in a campaign</h2><p>Replaces the campaign's subject and message. Sends already made keep the version they used.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
+    <div class="card-b" style="display:flex;flex-direction:column;gap:8px">
+      ${live.map((c, i) => `<label class="opt sm ${i === 0 ? 'on' : ''}"><input type="radio" name="ntcamp" value="${c.id}" ${i === 0 ? 'checked' : ''}><div><b>${A.esc(c.name)}</b><span>${CSTATUS[c.status][0]} · subject now: ${A.esc((c.subject || '—').slice(0, 60))}</span></div></label>`).join('')}
+      <label class="opt sm ${live.length ? '' : 'on'}"><input type="radio" name="ntcamp" value="new" ${live.length ? '' : 'checked'}><div><b>New campaign</b><span>Creates a draft campaign with this message</span></div></label>
+      ${n.subject ? '' : `<div class="note neutral">${A.ic('alert')}<div>This note has no subject line, so the campaign keeps its current subject.</div></div>`}
+      <div class="help" id="ntc-err" style="color:var(--bad)"></div></div>
+    <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-o="notetocampok">Use this message</button></div></div></div>`;
 }
 
 /* ------------------------------------------------------------------ sender profiles */
@@ -618,8 +658,14 @@ async function onClick(e) {
   if (mq) { MQ.sel = +mq.dataset.mq; mqRender(['list', 'detail']); return; }
   const mqa = t.closest('[data-mqact]');
   if (mqa) { mqAction(mqa.dataset.mqact); return; }
-  const msr = t.closest('[data-msres]');
-  if (msr) { MS.result = msr.dataset.msres; MS.loaded = false; loadMessages(); return; }
+  const nrow = t.closest('[data-note]');
+  if (nrow) { await ntFlush(); NT.sel = +nrow.dataset.note; A.$('#nt-list').innerHTML = ntList(); A.$('#nt-edit').innerHTML = ntEditor(); return; }
+  const ntg = t.closest('[data-nttag]');
+  if (ntg) { NT.tag = ntg.dataset.nttag; A.render(); return; }
+  const ntt = t.closest('[data-notetag]');
+  if (ntt) { await ntFlush({ tag: ntt.dataset.notetag }); document.querySelectorAll('[data-notetag]').forEach(x => x.classList.toggle('on', x === ntt)); return; }
+  const nmt = t.closest('[data-ntag]');
+  if (nmt) { const el = A.$(ntLast === 'nt-subj' ? '#nt-subj' : '#nt-body'); const s0 = el.selectionStart ?? el.value.length, e0 = el.selectionEnd ?? s0; el.value = el.value.slice(0, s0) + nmt.dataset.ntag + el.value.slice(e0); el.focus(); el.setSelectionRange(s0 + nmt.dataset.ntag.length, s0 + nmt.dataset.ntag.length); ntQueueSave(); return; }
   const row = t.closest('.oi-click');
   if (row && !t.closest('a,button,.menu')) { openFor = +row.dataset.camp; A.openLead(+row.dataset.olead); return; }
   const oact = t.closest('[data-oact]');
@@ -689,7 +735,32 @@ async function onClick(e) {
     case 'dismissbanner': A.$('#c-banner').innerHTML = ''; break;
     case 'moreitems': loadItems(c.id, true); break;
     case 'extguide': extGuide(); break;
-    case 'moremsgs': loadMessages(true); break;
+    case 'reviewnoconf': { const P = cp(c.id); P.tab = 'leads'; P.filter = 'noconf'; P.items = null; A.render(); break; }
+    case 'newnote': {
+      try { const r = await A.api('POST', '/api/notes', { title: b.dataset.title || '', tag: b.dataset.ntype || 'idea' }); NT.notes.unshift(r.note); NT.sel = r.note.id; NT.tag = 'all'; NT.q = ''; A.render(); setTimeout(() => (b.dataset.title ? A.$('#nt-body') : A.$('#nt-title'))?.focus(), 0); }
+      catch (err) { A.toast(err.message, 'alert'); }
+      break;
+    }
+    case 'pinnote': { const n = NT.notes.find(x => x.id === NT.sel); await ntFlush({ pinned: !n.pinned }); NT.notes.sort((a, z) => (z.pinned - a.pinned) || (z.updated_at - a.updated_at)); A.$('#nt-edit').innerHTML = ntEditor(); A.$('#nt-list').innerHTML = ntList(); break; }
+    case 'delnote': {
+      const n = NT.notes.find(x => x.id === NT.sel);
+      A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Delete note" style="width:min(420px,100%)"><div class="card-h"><div><h2>Delete “${A.esc(n.title || 'Untitled')}”?</h2><p>This can't be undone. Campaigns that used it keep their message.</p></div></div>
+        <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary danger-btn" data-o="delnoteok">${A.ic('trash', 14)}Delete</button></div></div></div>`;
+      break;
+    }
+    case 'delnoteok': { ntPending = null; await A.api('DELETE', `/api/notes/${NT.sel}`).catch(() => {}); NT.notes = NT.notes.filter(x => x.id !== NT.sel); NT.sel = NT.notes[0]?.id ?? null; A.closeOverlay(); A.render(); A.toast('Note deleted'); break; }
+    case 'notecopy': { const n = NT.notes.find(x => x.id === NT.sel); try { await navigator.clipboard.writeText((n.subject ? n.subject + '\n\n' : '') + n.body); A.toast('Copied'); } catch { A.toast('Copy failed. Select the text instead.', 'alert'); } break; }
+    case 'notetocamp': { await ntFlush(); if (!OS.loaded) await loadOutreach(); noteToCampaignModal(NT.notes.find(x => x.id === NT.sel)); break; }
+    case 'notetocampok': {
+      const n = NT.notes.find(x => x.id === NT.sel), v = document.querySelector('[name="ntcamp"]:checked')?.value; b.disabled = true;
+      try {
+        let cid;
+        if (v === 'new') { const r = await A.api('POST', '/api/campaigns', { name: n.title || 'New campaign', sender_id: OS.senders[0]?.id || null, subject: n.subject || DEFAULT_SUBJECT, message: n.body }); cid = r.campaign.id; upsertCampaign(r.campaign); }
+        else { cid = +v; const r = await A.api('PUT', `/api/campaigns/${cid}`, { ...(n.subject ? { subject: n.subject } : {}), message: n.body }); upsertCampaign(r.campaign); }
+        A.closeOverlay(); cp(cid).tab = 'message'; location.hash = `#campaign/${cid}`; A.toast('Message added to the campaign');
+      } catch (err) { A.$('#ntc-err').textContent = err.message; b.disabled = false; }
+      break;
+    }
     case 'kebab': {
       const k = b.closest('.kebab'), open = k.querySelector('.menu');
       document.querySelectorAll('.oi .menu').forEach(m => m.remove());
@@ -766,6 +837,8 @@ function insertTag(tag) {
 function onInput(e) {
   const t = e.target, c = curCampaign();
   if (t.id === 'mq-q') { MQ.q = t.value; mqRender(['list', 'detail']); return; }
+  if (t.id === 'nt-q') { NT.q = t.value; A.$('#nt-list').innerHTML = ntList(); return; }
+  if (['nt-title', 'nt-subj', 'nt-body'].includes(t.id)) { ntLast = t.id === 'nt-title' ? ntLast : t.id; ntQueueSave(); return; }
   if (t.id === 'del-in') { const ok = t.value.trim() === 'DELETE'; const bt = document.querySelector('[data-o="delcampok"]'); if (bt) bt.disabled = !ok; return; }
   if (t.dataset && t.dataset.spf) { updateFallbackHints(); return; }
   if (t.dataset.msave !== undefined && c) {
@@ -793,7 +866,6 @@ function onChange(e) {
   if (t.name === 'accamp') { AC.cid = +t.value; acSummary(); return; }
   if (t.name === 'stwhen' || t.id === 'st-date' || t.id === 'st-time') { if (t.id === 'st-date' || t.id === 'st-time') A.$('#st-later').checked = true; const later = A.$('#st-later').checked; A.$('#st-o1').classList.toggle('on', !later); A.$('#st-o2').classList.toggle('on', later); A.$('#st-go').textContent = later ? 'Schedule campaign' : 'Start campaign'; return; }
   if (t.id === 'ac-inc') { AC.includeContacted = t.checked; acSummary(); return; }
-  if (t.id === 'ms-camp') { MS.campaign = +t.value; MS.loaded = false; loadMessages(); return; }
   if (t.id === 'mq-camp') { MQ.camp = +t.value || 0; mqRender(['list', 'detail']); return; }
 }
 function onKey(e) {
@@ -845,7 +917,7 @@ export function install(ctx) {
     campaign: mountCampaign,
     campaigns: () => { if (!pollT && OS.loaded && OS.campaigns.some(c => jobActive(c.job))) pollT = setInterval(() => loadOutreach().then(() => A.currentView() === 'campaigns' && A.render()), 6000); },
     manual: () => { if (MQ.loaded && !MQ.fresh) { MQ.fresh = true; loadManual().then(() => { MQ.fresh = false; }); } },
-    messages: () => { if (MS.loaded && !MS.fresh) { MS.fresh = true; loadMessages().then(() => { MS.fresh = false; }); } },
+    messages: () => { },
   });
   Object.assign(ctx.TITLES, { campaigns: 'Campaigns', campaign: 'Campaign', manual: 'Manual queue', messages: 'Messages', senders: 'Sender profiles' });
   ctx.CRUMBS.campaign = (arg) => { const c = OS.campaigns.find(x => x.id === +arg); return `<a href="#campaigns">Campaigns</a><span>›</span><b>${A.esc(c ? c.name : 'Campaign')}</b>`; };
@@ -855,7 +927,7 @@ export function install(ctx) {
   document.addEventListener('focusin', onFocus);
   document.addEventListener('change', onChange);
   document.addEventListener('keydown', onKey);
-  window.addEventListener('hashchange', () => { stopPoll(); flushSave(); });
+  window.addEventListener('hashchange', () => { stopPoll(); flushSave(); ntFlush(); });
   document.addEventListener('lh-ext-ready', () => { if (A.currentView() === 'manual' && MQ.loaded) A.render(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && A.currentView() === 'manual' && MQ.loaded && !MQ.fresh) { MQ.fresh = true; loadManual().then(() => { MQ.fresh = false; }); loadOutreach(); } });
   window.addEventListener('beforeunload', () => { if (pendingSave) navigator.sendBeacon && flushSave(); });

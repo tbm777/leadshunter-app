@@ -305,6 +305,25 @@ export async function bulkItems(env, b) {
   return json({ ok: true, done, failed });
 }
 
+/* ------------------------------------------------------------------ messages: notes for drafting outreach */
+const TAGS = ['idea', 'draft', 'ready', 'flow'];
+const noteOut = n => ({ id: n.id, title: n.title, subject: n.subject, body: n.body, tag: n.tag, pinned: !!n.pinned, created_at: n.created_at, updated_at: n.updated_at });
+export async function listNotes(env) { return json({ notes: (await env.DB.prepare('SELECT * FROM notes ORDER BY pinned DESC, updated_at DESC LIMIT 500').all()).results.map(noteOut) }); }
+export async function saveNote(env, b, id) {
+  const cur = id ? await env.DB.prepare('SELECT * FROM notes WHERE id = ?').bind(id).first() : null;
+  if (id && !cur) throw new HttpError(404, 'Note not found.');
+  const v = {
+    title: b.title !== undefined ? str(b.title, 120) : cur?.title ?? '', subject: b.subject !== undefined ? str(b.subject, 200) : cur?.subject ?? '',
+    body: b.body !== undefined ? String(b.body ?? '').slice(0, 20000) : cur?.body ?? '', tag: TAGS.includes(b.tag) ? b.tag : cur?.tag ?? 'idea',
+    pinned: b.pinned !== undefined ? (b.pinned ? 1 : 0) : cur?.pinned ?? 0,
+  };
+  const t = now(), cols = Object.keys(v);
+  if (id) await env.DB.prepare(`UPDATE notes SET ${cols.map(c => c + ' = ?').join(', ')}, updated_at = ? WHERE id = ?`).bind(...Object.values(v), t, id).run();
+  else id = (await env.DB.prepare(`INSERT INTO notes (${cols.join(', ')}, created_at, updated_at) VALUES (${inList(cols.length)}, ?, ?) RETURNING id`).bind(...Object.values(v), t, t).first()).id;
+  return json({ note: noteOut(await env.DB.prepare('SELECT * FROM notes WHERE id = ?').bind(id).first()) });
+}
+export async function deleteNote(env, id) { await env.DB.prepare('DELETE FROM notes WHERE id = ?').bind(id).run(); return json({ ok: true }); }
+
 /* ------------------------------------------------------------------ runs */
 async function activeJob(env, cid) {
   return env.DB.prepare("SELECT id, status FROM searches WHERE kind = 'outreach' AND campaign_id = ? AND status IN ('queued','running') ORDER BY id DESC LIMIT 1").bind(cid).first();

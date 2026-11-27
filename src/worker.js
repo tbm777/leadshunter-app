@@ -63,6 +63,9 @@ async function route(req, env, url, ctx) {
   if (p === '/api/outreach' && m === 'GET') return O.outreachOverview(env);
   if (p === '/api/outreach/items' && m === 'GET') return O.listItems(env, url);
   if (p === '/api/outreach/bulk' && m === 'POST') return O.bulkItems(env, await body(req));
+  if (p === '/api/notes' && m === 'GET') return O.listNotes(env);
+  if (p === '/api/notes' && m === 'POST') return O.saveNote(env, await body(req));
+  if ((mm = p.match(/^\/api\/notes\/(\d+)$/))) { if (m === 'PUT') return O.saveNote(env, await body(req), +mm[1]); if (m === 'DELETE') return O.deleteNote(env, +mm[1]); }
   if ((mm = p.match(/^\/api\/outreach\/(\d+)$/)) && m === 'POST') return O.itemAction(env, +mm[1], await body(req));
   if (p === '/api/senders' && m === 'POST') return O.saveSender(env, await body(req));
   if ((mm = p.match(/^\/api\/senders\/(\d+)$/))) { if (m === 'PUT') return O.saveSender(env, await body(req), +mm[1]); if (m === 'DELETE') return O.archiveSender(env, +mm[1]); }

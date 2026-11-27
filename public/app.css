@@ -1141,3 +1141,27 @@ select.fx-mini{min-width:120px;cursor:pointer}
 .mqbar select.input.mqcamp{width:auto;flex:0 1 220px;min-width:150px}
 .mqbar .mqsearch{flex:1 1 220px;width:auto;min-width:180px;max-width:none}
 @media (max-width:640px){.mqbar select.input.mqcamp,.mqbar .mqsearch{flex:1 1 100%}}
+/* messages: notes */
+.ntgrid{display:grid;grid-template-columns:minmax(260px,330px) minmax(0,1fr);gap:16px;align-items:start}
+.ntside{position:sticky;top:76px;max-height:calc(100vh - 100px);display:flex;flex-direction:column}
+.ntside-h{padding:12px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.nttags{align-self:flex-start}
+#nt-list{overflow-y:auto}
+.ntrow{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:none;padding:11px 14px;font:inherit;color:inherit;cursor:pointer}
+.ntrow:hover{background:var(--surface-2)}
+.ntrow.on{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.ntrow>div:first-child{min-width:0;display:flex;flex-direction:column;gap:2px}
+.ntrow b{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ntrow span:not(.pill){font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ntrow-r{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:none}.ntrow-r small{font-size:11px;color:var(--faint)}
+.ntedit{display:flex;flex-direction:column}
+.nte-h{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.nte-title{flex:1;border:0;background:none;font:inherit;font-size:19px;font-weight:650;letter-spacing:-.01em;outline:0;color:var(--ink);min-width:0}
+.nte-b{padding:16px;display:flex;flex-direction:column;gap:14px}
+.ntbody{min-height:360px;resize:vertical;line-height:1.6}
+.nttagpick button{padding:6px 12px}
+.nte-f{display:flex;gap:8px;align-items:center;justify-content:flex-end;padding:12px 16px;border-top:1px solid var(--line)}
+.nte-f .help{margin-right:auto}
+.ntempty{padding:48px 20px}
+.ntstarters{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:16px}
+@media (max-width:900px){.ntgrid{grid-template-columns:1fr}.ntside{position:static;max-height:340px}}
