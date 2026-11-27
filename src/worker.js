@@ -409,6 +409,9 @@ async function bulkLeads(env, b) {
 async function runnerRoute(req, env, url) {
   const p = url.pathname, m = req.method;
   let mm;
+  // Blacklist check (opt-in): the sender profiles to look up, and the result for each. A listed sender pauses its campaigns.
+  if (p === '/api/runner/senders' && m === 'GET') return json({ senders: (await env.DB.prepare('SELECT id, email FROM senders WHERE archived = 0').all()).results });
+  if (p === '/api/runner/blacklist' && m === 'POST') return O.blacklistResult(env, await body(req));
   if (p === '/api/runner/scorecard' && m === 'GET') return json(await scorecard(env, Math.min(90, Math.max(1, +url.searchParams.get('days') || 7))));
   // Results of the accuracy and delivery tests: a percentage and a sample size, nothing else.
   if (p === '/api/runner/score' && m === 'POST') {
@@ -433,7 +436,7 @@ async function runnerRoute(req, env, url) {
   if (!(mm = p.match(/^\/api\/runner\/jobs\/(\d+)(\/[a-z-]+)?$/))) throw new HttpError(404, 'Not found.');
   const id = +mm[1], action = mm[2] || '';
   const wantCells = action === '' && m === 'GET';
-  const s = await env.DB.prepare(`SELECT id, kind, industry_id, params, done_bits, status, limit_n, new_count, qualified, created_at${wantCells ? ', cells' : ''} FROM searches WHERE id = ?`).bind(id).first();
+  const s = await env.DB.prepare(`SELECT id, kind, industry_id, params, done_bits, status, limit_n, new_count, qualified, created_at, started_at, campaign_id${wantCells ? ', cells' : ''} FROM searches WHERE id = ?`).bind(id).first();
   if (!s) throw new HttpError(404, 'Job not found.');
   const params = parse(s.params, {});
 
@@ -482,7 +485,7 @@ async function runnerRoute(req, env, url) {
         for (const part of chunk(left.map(r => env.DB.prepare('UPDATE leads SET deleted = 1, seq = ?, updated_at = ? WHERE id = ?').bind(sq++, t, r.id)), 400)) await env.DB.batch(part);
       }
     }
-    if (s.kind === 'outreach') await O.runnerFinishOutreach(env, s);
+    if (s.kind === 'outreach') await O.runnerFinishOutreach(env, s, b);
     const status = s.status === 'cancelled' ? 'cancelled' : b.error ? 'failed' : 'done';
     await saveMetrics(env, s, params, b.metrics, status);
     await env.DB.prepare(`UPDATE searches SET status = ?, error = ?, finished_at = ?, heartbeat_at = ?${status === 'done' ? ", cells = '[]', done_bits = ''" : ''} WHERE id = ?`).bind(status, b.error ? String(b.error).slice(0, 500) : null, now(), now(), id).run();

@@ -581,6 +581,13 @@ FIXTURES.push(
       <script>setTimeout(function(){var d=document.createElement('div');d.className='g-recaptcha';d.setAttribute('data-sitekey','x');d.style.cssText='width:304px;height:78px;border:1px solid #ccc';var f=document.createElement('iframe');f.title='reCAPTCHA';f.src='about:blank';f.style.cssText='width:304px;height:78px;border:0';d.appendChild(f);document.getElementById('cap').appendChild(d);},1800);</script>`),
   },
   {
+    id: 'no-solicitation', industry: 'Law firm', note: 'The page says "No solicitations, please." above the form: must be skipped, never sent', mode: 'html', expect: 'skipped',
+    req: ['name', 'email', 'message'],
+    html: () => layout('Hart & Lowe Attorneys', `<p><strong>No solicitations, please.</strong> This form is for prospective clients only.</p><form method="post" action="/submit/no-solicitation"><!--ERR-->
+      <label for="a">Name *</label><input id="a" name="name" required><label for="b">Email *</label><input id="b" type="email" name="email" required>
+      <label for="m">How can we help? *</label><textarea id="m" name="message" required></textarea><button type="submit">Send</button></form>`),
+  },
+  {
     id: 'ninja-forms', industry: 'Pest control', note: 'Ninja Forms: generic field names, submit is type=button, success message replaces fields', mode: 'json',
     req: ['nf-field-1', 'nf-field-2', 'nf-field-3'],
     html: () => layout('BugOut Pest Control', `<div class="nf-form-cont"><div class="nf-form-layout"><form id="nf" novalidate><div class="nf-form-content">

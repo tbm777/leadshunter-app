@@ -264,6 +264,13 @@ export async function settle(page, max = 6000) {
   await Promise.race([formReady, quiet]);
 }
 
+/** Wording that asks salespeople or vendors not to use the contact form. Runs in the page; returns the phrase found. */
+export function noSolicitation() {
+  const t = (document.body ? document.body.innerText : '').slice(0, 60000).replace(/\s+/g, ' ');
+  const m = t.match(/\b(no solicit(ation|ations|ing|ors)( please)?|solicitations? (are|is|will) not( be)? (accepted|welcome|answered|responded to)|we do not accept solicitations?|not accepting (solicitations?|sales (inquiries|calls|pitches))|(sales|vendor|marketing|seo) (inquiries|pitches|solicitations?|offers) (are )?not (accepted|welcome|answered)|no (sales|vendor|marketing|seo) (calls|inquiries|pitches|solicitations?)|(please )?do not use this form (for|to) (sales|solicit|market|sell|pitch|advertis)\w*|this form is not for (sales|solicit|vendor|marketing)\w*)/i);
+  return m ? m[0].slice(0, 80) : null;
+}
+
 /** Which form tool the page uses (for accuracy stats by tool). Runs in the page. */
 export function detectFormTool() {
   const h = document.documentElement.innerHTML.slice(0, 400000);
@@ -320,6 +327,9 @@ export async function submitForm(page, url, profile, opts = {}) {
   if (opts.marks) opts.marks.tool = await page.evaluate(detectFormTool).catch(() => null);
   if (!scan) return login ? { status: 'manual', reason: 'login-required', log } : { status: 'failed', reason: 'no-form', log };
   if (scan.captcha) return { status: 'manual', reason: 'captcha', captcha: scan.captchaType || 'reCAPTCHA', log };
+  // The business asks not to be pitched through this form: respect it (and avoid the spam reports it would bring).
+  const noPitch = await evalIn(frame, noSolicitation).catch(() => null) || (frame !== page.mainFrame() ? await page.evaluate(noSolicitation).catch(() => null) : null);
+  if (noPitch) { note(`skipped: the page says “${noPitch}”`); return { status: 'skipped', reason: 'no-solicitation', evidence: `The page says “${noPitch}”`, log }; }
   maxId = scan.maxId;
 
   const filled = new Map();      // field id -> value we set

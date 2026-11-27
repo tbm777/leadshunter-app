@@ -15,7 +15,7 @@ const stopPoll = () => { clearInterval(pollT); pollT = 0; };
 const ST_LABEL = { queued: 'Queued', sending: 'Sending', sent: 'Sent', submitted: 'Sent', sent_manual: 'Sent by you', manual: 'Needs you', failed: 'Failed', skipped: 'Skipped' };
 const ST_COLOR = { queued: 'var(--idle)', sending: 'var(--warn)', sent: 'var(--ok)', submitted: 'var(--ok)', sent_manual: 'var(--ok)', manual: 'var(--manual)', failed: 'var(--bad)', skipped: 'var(--idle)' };
 const REASON = {
-  captcha: 'The form has a CAPTCHA', 'login-required': 'The form needs a login', interrupted: 'The run stopped mid-send. Check whether it went through.',
+  captcha: 'The form has a CAPTCHA', 'login-required': 'The form needs a login', 'no-solicitation': 'The business asks not to be pitched through its form', interrupted: 'The run stopped mid-send. Check whether it went through.',
   'no-form': 'No contact form found on the site', 'site-too-slow': 'The site was too slow to load', 'site-unreachable': 'The site could not be reached',
   'page-error': 'The page broke while filling the form', 'no-submit-button': 'The form has no send button', 'fields-still-invalid': 'The form kept rejecting a field',
   'gave-up-after-retries': 'The site kept rejecting the form', 'sent-no-confirmation': 'Sent, but the site showed no confirmation', 'no-response': 'The site did not respond to the send',

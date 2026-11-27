@@ -200,6 +200,7 @@ export async function setCampaignStatus(env, id, b) {
   let startAt = null;
   if (status === 'active' && b.start_at) { startAt = Math.floor(+b.start_at); if (!(startAt > now() - 60e3) || startAt > now() + 366 * 864e5) throw new HttpError(400, 'Pick a start time in the future.'); }
   await env.DB.prepare('UPDATE campaigns SET status = ?, start_at = ?, updated_at = ? WHERE id = ?').bind(status, status === 'active' ? startAt : c.start_at, now(), id).run();
+  if (status !== 'paused') await env.DB.prepare('DELETE FROM meta WHERE k = ?').bind('autopause:' + id).run();
   c.start_at = startAt;
   if (status !== 'active') await env.DB.prepare("UPDATE searches SET status = 'cancelled', finished_at = ? WHERE kind = 'outreach' AND campaign_id = ? AND status IN ('queued','running')").bind(now(), id).run();
   if (status === 'active') { const e = await tickCampaign(env, { ...c, status }, { ignoreWindow: false }); if (e) throw new HttpError(502, e); }
@@ -604,7 +605,7 @@ export async function runnerItems(env, s, params) {
     sender: senderOut(sender), items: r.results.map(x => ({ oid: x.oid, step: params.mode === 'test' ? 1 : x.step || 1, lead: { name: x.name, city: x.city, state: x.region, zip: x.postal, country: x.country, website: x.website, form_url: x.form_url, category: x.category, industry: x.industry } })),
   });
 }
-const RESULT = { confirmed: 'sent', submitted: 'submitted', manual: 'manual', failed: 'failed', ready: 'ready' };
+const RESULT = { confirmed: 'sent', submitted: 'submitted', manual: 'manual', failed: 'failed', ready: 'ready', skipped: 'skipped' };
 export async function runnerResult(env, s, params, b) {
   const oid = +b.oid, t = now();
   const st = RESULT[b.status] || 'failed';
@@ -653,7 +654,31 @@ export async function runnerResult(env, s, params, b) {
   const cur = await env.DB.prepare('SELECT status FROM searches WHERE id = ?').bind(s.id).first();
   return json({ ok: true, stop: cur.status === 'cancelled' });
 }
-export async function runnerFinishOutreach(env, s) {
+// A filled form that still didn't go through: a sign the message or the engine has a problem (not just a site without a form).
+const FILLED_FAIL = ['validation-error', 'fields-still-invalid', 'no-response', 'no-confirmation', 'gave-up-after-retries', 'submit-not-clickable', 'no-submit-button'];
+async function autoPause(env, cid, why) {
+  await env.DB.batch([
+    env.DB.prepare("UPDATE campaigns SET status = 'paused', updated_at = ? WHERE id = ? AND status = 'active'").bind(now(), cid),
+    env.DB.prepare('INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)').bind('autopause:' + cid, JSON.stringify({ why, at: now() })),
+  ]);
+}
+/** After a send run: pause the campaign if most filled forms failed to go through, or if two runs in a row failed. */
+async function checkRun(env, s, b) {
+  let params = {}; try { params = JSON.parse(s.params || '{}'); } catch { /* none */ }
+  if (params.mode === 'test' || !s.campaign_id) return;
+  const c = await env.DB.prepare('SELECT id, status FROM campaigns WHERE id = ?').bind(s.campaign_id).first();
+  if (!c || c.status !== 'active') return;
+  const out = b.metrics?.counts?.outcome || {}, reasons = b.metrics?.counts?.reason || {};
+  const ok = (out.confirmed || 0) + (out.submitted || 0), bad = FILLED_FAIL.reduce((a, k) => a + (reasons[k] || 0), 0);
+  if (ok + bad >= 6 && ok / (ok + bad) < 0.4)
+    return autoPause(env, c.id, `in the last run only ${ok} of ${ok + bad} filled forms went through. The forms may be rejecting something in the message or sender profile. Check the failed results, then resume.`);
+  if (b.error) {
+    const prev = await env.DB.prepare("SELECT status FROM searches WHERE kind = 'outreach' AND campaign_id = ? AND id < ? ORDER BY id DESC LIMIT 1").bind(c.id, s.id).first();
+    if (prev && prev.status === 'failed') return autoPause(env, c.id, 'two sending runs in a row stopped early. Check the last error, then resume.');
+  }
+}
+export async function runnerFinishOutreach(env, s, b = {}) {
+  await checkRun(env, s, b).catch(e => console.error('auto-pause check', e));
   await env.DB.batch([
     env.DB.prepare("UPDATE outreach SET status = CASE WHEN step > 1 THEN COALESCE(prev_status, 'sent') ELSE 'queued' END, next_at = CASE WHEN step > 1 THEN ? ELSE next_at END, job_id = NULL WHERE job_id = ? AND status = 'sending' AND attempt_at IS NULL").bind(now(), s.id),
     env.DB.prepare("UPDATE outreach SET status = 'manual', reason = 'interrupted', updated_at = ? WHERE job_id = ? AND status = 'sending'").bind(now(), s.id),
@@ -728,4 +753,14 @@ export async function healthAlerts(env) {
   const paused = (await env.DB.prepare("SELECT id, name, v FROM campaigns c JOIN meta m ON m.k = 'autopause:' || c.id WHERE c.status = 'paused'").all()).results;
   for (const p of paused) { let why = ''; try { why = JSON.parse(p.v).why; } catch { /* plain */ } out.push({ level: 'bad', key: 'autopause-' + p.id, text: `“${p.name}” was paused automatically: ${why}`, href: `#campaign/${p.id}` }); }
   return out;
+}
+
+/** Blacklist check result for one sender profile: when listed, pause every active campaign that sends as it. */
+export async function blacklistResult(env, b) {
+  const id = +b.sender_id; if (!id) throw new HttpError(400, 'sender_id is required.');
+  await env.DB.prepare('INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)').bind('blacklist:' + id, JSON.stringify({ listed: !!b.listed, source: String(b.source || '').slice(0, 40), at: now() })).run();
+  if (!b.listed) return json({ ok: true, paused: 0 });
+  const cs = (await env.DB.prepare("SELECT id FROM campaigns WHERE sender_id = ? AND status = 'active'").bind(id).all()).results;
+  for (const c of cs) await autoPause(env, c.id, `its sender profile's email appears on a public spam blacklist (${String(b.source || 'StopForumSpam').slice(0, 40)}). Sending more would likely land in spam. Use another sender profile or check the listing, then resume.`);
+  return json({ ok: true, paused: cs.length });
 }

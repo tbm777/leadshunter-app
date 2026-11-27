@@ -60,4 +60,21 @@ if (TOKEN && ACCOUNT) {
   } catch (e) { say(''); say(`Cloudflare usage not available: ${String(e.message).slice(0, 160)}`); }
 }
 
+// Blacklist check (off unless the repository variable BLACKLIST_CHECK is "on"): looks up each sender profile's email on
+// StopForumSpam, a public spam database many form anti-spam plugins use. Emails are never printed; a listed sender pauses its campaigns.
+if (process.env.BLACKLIST_CHECK === 'on' && process.env.RUNNER_SECRET) {
+  const auth = { authorization: `Bearer ${process.env.RUNNER_SECRET}`, 'content-type': 'application/json' };
+  const { senders } = await (await fetch(`${API}/api/runner/senders`, { headers: auth })).json();
+  let listed = 0;
+  for (const sd of senders) {
+    try {
+      const j = await (await fetch(`https://api.stopforumspam.org/api?json&email=${encodeURIComponent(sd.email)}`)).json();
+      const hit = !!(j.success && j.email && j.email.appears);
+      if (hit) listed++;
+      await fetch(`${API}/api/runner/blacklist`, { method: 'POST', headers: auth, body: JSON.stringify({ sender_id: sd.id, listed: hit, source: 'StopForumSpam' }) });
+    } catch (e) { say(`Blacklist lookup failed for sender profile ${sd.id}.`); }
+  }
+  say(''); say(`Blacklist check: ${senders.length} sender profile(s), ${listed} listed${listed ? ' (their campaigns were paused)' : ''}.`);
+}
+
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, out.join('\n') + '\n');

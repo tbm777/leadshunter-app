@@ -41,7 +41,7 @@ await Promise.all(Array.from({ length: 4 }, async () => {
     const filesOk = !(fx.files || []).length || (r.files || []).some(f => /^the-bat-marketing-for-[a-z0-9-]+\.(pdf|png|jpg)/.test(f));
     if (tagsLeft) out.reason = 'merge tag left unfilled';
     if (!filesOk) out.reason = 'upload missing or not branded';
-    const pass = expect === 'noform' ? out.status === 'failed' && out.reason === 'no-form' && r.posts === 0 : expect === 'manual' ? out.status === 'manual' && r.posts === 0 : out.status === 'confirmed' && r.valid === 1 && !r.trap && !r.wrongForm && !tagsLeft && filesOk;
+    const pass = expect === 'skipped' ? out.status === 'skipped' && r.posts === 0 : expect === 'noform' ? out.status === 'failed' && out.reason === 'no-form' && r.posts === 0 : expect === 'manual' ? out.status === 'manual' && r.posts === 0 : out.status === 'confirmed' && r.valid === 1 && !r.trap && !r.wrongForm && !tagsLeft && filesOk;
     rows.push({ fx, out, r, pass, ms: Date.now() - s });
   }
 }));
@@ -58,6 +58,6 @@ console.log(`\n${passed}/${rows.length} passed in ${((Date.now() - t0) / 1000).t
 // False "Sent": the engine said sent, but no valid submission reached the server (the worst error).
 const saidSent = rows.filter(r => ['confirmed', 'submitted'].includes(r.out.status));
 const falseSent = saidSent.filter(r => !r.r.valid).length;
-const wrongSend = rows.filter(r => (r.fx.expect === 'manual' || r.fx.expect === 'noform') && r.r.posts > 0).length;
+const wrongSend = rows.filter(r => ['manual', 'noform', 'skipped'].includes(r.fx.expect) && r.r.posts > 0).length;
 console.log('SUMMARY ' + JSON.stringify({ total: rows.length, passed, said_sent: saidSent.length, false_sent: falseSent, sent_when_it_should_not: wrongSend }));
 process.exit(passed === rows.length ? 0 : 1);
