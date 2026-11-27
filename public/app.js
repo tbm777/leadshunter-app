@@ -419,7 +419,7 @@ function dd(key, label, allText) {
   return `<div class="field dd"><span class="flabel">${label}</span><button class="dd-btn ${chosen.length ? 'set' : ''}" data-dd="${key}" aria-expanded="${open}"><span>${esc(txt)}</span>${chosen.length ? `<b class="dd-n">${chosen.length}</b>` : ''}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button>
     ${open ? `<div class="dd-pop">${opts.length > 6 ? `<input class="input" id="ddq-${key}" placeholder="Search ${label.toLowerCase()}" value="${esc(L$.ddq)}" autocomplete="off">` : ''}
       <div class="dd-list">${list.map(o => `<div class="dd-opt ${o.n ? '' : 'zero'}" data-ddopt="${key}:${o.v}" role="checkbox" aria-checked="${sel.has(o.v)}" tabindex="0"><span class="cb ${sel.has(o.v) ? 'on' : ''}"></span><span class="dd-l">${esc(o.l)}${o.sub ? `<small>${esc(o.sub)}</small>` : ''}</span><span class="cnt">${fmt(o.n)}</span><button class="only" data-ddonly="${key}:${o.v}">Only</button></div>`).join('') || '<div class="empty" style="padding:14px">Nothing here yet</div>'}</div>
-      <div class="dd-foot"><button class="btn ghost sm" data-ddclear="${key}">Clear</button><button class="btn sm" data-dd="${key}">Done</button></div></div>` : ''}</div>`;
+      <div class="dd-foot">${key === 'src' ? `<button class="btn ghost sm" data-act="managelists" style="margin-right:auto">${ic('edit', 13)}Manage lists</button>` : ''}<button class="btn ghost sm" data-ddclear="${key}">Clear</button><button class="btn sm" data-dd="${key}">Done</button></div></div>` : ''}</div>`;
 }
 function segF(key, label, opts, counts) {
   return `<div class="field"><span class="flabel">${label}</span><div class="seg-c fseg" role="radiogroup" aria-label="${label}">${opts.map(([v, l, ci]) => `<button type="button" role="radio" aria-checked="${String(L$.F[key]) === String(v)}" class="${String(L$.F[key]) === String(v) ? 'on' : ''}" data-fseg="${key}:${v}">${l}${counts && ci != null ? `<span class="fseg-n">${fmt(counts[ci])}</span>` : ''}</button>`).join('')}</div></div>`;
@@ -490,8 +490,10 @@ function renderSel() {
   for (const id of [...L$.sel]) if (!ST.byId.has(id)) L$.sel.delete(id);
   const n = L$.sel.size, m = L$.res.length, allIn = m && n >= m && L$.res.every(l => L$.sel.has(l.id));
   const cb = $('#cb-all'); if (cb) cb.className = 'cb ' + (allIn ? 'on' : n ? 'part' : '');
-  $('#lf-selbar').innerHTML = n ? `<div class="selbar"><b class="num">${fmt(n)} selected</b>${!allIn && m > n ? `<button class="linkbtn" data-act="selall">Select all ${fmt(m)} matching</button>` : ''}<button class="linkbtn" data-act="clearsel">Clear selection</button>
-    <div class="selacts"><button class="btn sm" data-act="addcamp">${ic('campaigns', 14)}Add to campaign</button><button class="btn sm ghost" data-act="addlist">${ic('leads', 14)}Add to list</button>${L$.F.src.size === 1 && String([...L$.F.src][0])[0] === 'l' ? `<button class="btn sm ghost" data-act="rmlist">${ic('x', 14)}Remove from list</button>` : ''}<button class="btn sm ghost" data-act="export">${ic('download', 14)}Export</button><button class="btn sm ghost" data-act="checkmodal">${ic('globe', 14)}Check websites</button><button class="btn sm ghost" data-act="bdnc">${ic('shield', 14)}Do not contact</button></div></div>` : '';
+  const inMyList = L$.F.src.size === 1 && String([...L$.F.src][0])[0] === 'l';
+  $('#lf-selbar').innerHTML = n ? `<div class="selbar"><b class="num">${fmt(n)} selected</b>${!allIn && m > n ? `<button class="linkbtn" data-act="selall">Select all ${fmt(m)}</button>` : ''}<button class="linkbtn muted" data-act="clearsel">Clear</button>
+    <div class="selacts"><button class="btn sm" data-act="addcamp">${ic('campaigns', 14)}Add to campaign</button><button class="btn sm" data-act="addlist">${ic('leads', 14)}Add to list</button>${inMyList ? `<button class="btn sm ghost" data-act="rmlist">${ic('x', 14)}Remove from list</button>` : ''}
+      <div class="kebab selmore"><button class="iconbtn sm" data-act="selmore" aria-label="More actions" aria-haspopup="menu" title="More">⋯</button>${L$.selMore ? `<div class="menu" role="menu"><button role="menuitem" data-act="export">${ic('download', 14)}Export</button><button role="menuitem" data-act="checkmodal">${ic('globe', 14)}Check websites</button><button role="menuitem" class="danger" data-act="bdnc">${ic('shield', 14)}Do not contact</button></div>` : ''}</div></div></div>` : '';
 }
 function renderRows() {
   const vt = $('#vt'), body = $('#vt-body'); if (!vt || !body) return;
@@ -1193,6 +1195,8 @@ function usageHTML() {
 
 /* ================================================================ events */
 document.addEventListener('click', async (e) => {
+  const lp = e.target.closest('[data-pick]'); if (lp) { lmPick(+lp.dataset.pick); return; }
+  if (L$.selMore && !e.target.closest('.selmore')) { L$.selMore = false; renderSel(); }
   const t = e.target, ds = k => t.closest(`[data-${k}]`)?.dataset[k];
   let v;
   if (t.closest('[data-act="close"]') && (!t.closest('[data-stop]') || t.closest('button[data-act="close"]'))) { closeOverlay(); return; }
@@ -1332,16 +1336,23 @@ document.addEventListener('click', async (e) => {
     case 'checkmodal': checkModal([...L$.sel]); break;
     case 'addcamp': addToCampaign([...L$.sel]); break;
     case 'addlist': listModal([...L$.sel]); break;
+    case 'selmore': L$.selMore = !L$.selMore; renderSel(); break;
+    case 'managelists': L$.openDD = null; renderPanel(); listModal([]); break;
+    case 'listedit': { LM.editing = +t.closest('[data-lid]').dataset.lid; listModal(LM.ids); setTimeout(() => { const i = $('#lm-edit'); if (i) { i.focus(); i.select(); } }, 0); break; }
+    case 'listeditcancel': LM.editing = null; listModal(LM.ids); break;
+    case 'listeditsave': listRename(); break;
+    case 'listdelask': LM.deleting = +t.closest('[data-lid]').dataset.lid; listModal(LM.ids); break;
+    case 'listdelno': LM.deleting = null; listModal(LM.ids); break;
     case 'rmlist': {
       const lid = +String([...L$.F.src][0]).slice(1), ids = [...L$.sel];
       try { await api('POST', `/api/lists/${lid}/leads`, { ids, remove: true }); ids.forEach(id => ST.leadLists.get(id)?.delete(lid)); L$.sel.clear(); toast(`Removed ${fmt(ids.length)} from “${listName('l' + lid)}”`); loadLists(); } catch (err) { toast(err.message, 'alert'); }
       break;
     }
     case 'listgo': listSave(); break;
+    case 'listcreate': { const name = $('#lm-name').value.trim(); if (!name) { $('#lm-err').textContent = 'Give the list a name.'; break; } try { await api('POST', '/api/lists', { name }); await loadLists(); listModal([]); toast(`Created “${name}”`); } catch (err) { $('#lm-err').textContent = err.message; } break; }
     case 'listdel': {
       const lid = +t.closest('[data-lid]').dataset.lid, l = ST.lists.find(x => x.id === lid);
-      if (!t.closest('[data-confirm]')) { t.closest('button').dataset.confirm = '1'; t.closest('button').innerHTML = 'Delete?'; return; }
-      try { await api('DELETE', `/api/lists/${lid}`); L$.F.src.delete('l' + lid); toast(`Deleted “${l.name}”. Its leads are still in Leads.`); await loadLists(); listModal(LM.ids); } catch (err) { toast(err.message, 'alert'); }
+      try { await api('DELETE', `/api/lists/${lid}`); L$.F.src.delete('l' + lid); LM.deleting = null; toast(`Deleted “${l.name}”. Its leads are still in Leads.`); await loadLists(); listModal(LM.ids); } catch (err) { toast(err.message, 'alert'); }
       break;
     }
     case 'checkone': checkModal([+t.closest('[data-id]').dataset.id]); break;
@@ -1369,17 +1380,35 @@ document.addEventListener('click', async (e) => {
   }
 });
 /* Add to list */
-const LM = { ids: [], pick: null };
+const LM = { ids: [], pick: null, editing: null, deleting: null };
 function listModal(ids) {
-  LM.ids = ids; if (LM.pick !== 'new' && !ST.lists.some(l => l.id === LM.pick)) LM.pick = ST.lists[0]?.id ?? 'new';
-  $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Add to list">
-    <div class="card-h"><div><h2>Add ${fmt(ids.length)} lead${ids.length === 1 ? '' : 's'} to a list</h2><p>Lists are yours to organise. Every search is also a list automatically.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
-    <div class="card-b" style="display:flex;flex-direction:column;gap:8px">
-      ${ST.lists.map(l => `<label class="opt sm lmrow ${LM.pick === l.id ? 'on' : ''}" data-lid="${l.id}"><input type="radio" name="lmpick" value="${l.id}" ${LM.pick === l.id ? 'checked' : ''}><div style="flex:1"><b>${esc(l.name)}</b><span>${fmt(l.count)} lead${l.count === 1 ? '' : 's'}</span></div><button type="button" class="btn ghost sm lmdel" data-act="listdel" title="Delete list">${ic('trash', 13)}</button></label>`).join('')}
-      <label class="opt sm ${LM.pick === 'new' ? 'on' : ''}"><input type="radio" name="lmpick" value="new" ${LM.pick === 'new' ? 'checked' : ''}><div style="flex:1"><b>New list</b><input class="input" id="lm-name" placeholder="e.g. Orange County decks, call first" style="margin-top:6px" autocomplete="off"></div></label>
+  LM.ids = ids; const manage = !ids.length;
+  if (LM.pick !== 'new' && !ST.lists.some(l => l.id === LM.pick)) LM.pick = ST.lists[0]?.id ?? 'new';
+  const row = l => {
+    if (LM.editing === l.id) return `<div class="lmrow editing" data-lid="${l.id}"><input class="input" id="lm-edit" value="${esc(l.name)}" maxlength="80" aria-label="List name"><button class="btn sm primary" data-act="listeditsave">Save</button><button class="btn sm ghost" data-act="listeditcancel">Cancel</button></div>`;
+    if (LM.deleting === l.id) return `<div class="lmrow deleting" data-lid="${l.id}"><span>Delete <b>${esc(l.name)}</b>? Its ${fmt(l.count)} lead${l.count === 1 ? '' : 's'} stay in Leads.</span><button class="btn sm danger-solid" data-act="listdel" data-confirm="1">Delete</button><button class="btn sm ghost" data-act="listdelno">Keep</button></div>`;
+    return `<div class="lmrow ${!manage && LM.pick === l.id ? 'on' : ''}" data-lid="${l.id}">${manage ? `<span class="lmdot"></span>` : `<input type="radio" name="lmpick" value="${l.id}" ${LM.pick === l.id ? 'checked' : ''} aria-label="${esc(l.name)}">`}
+      <label class="lmname" ${manage ? '' : `data-pick="${l.id}"`}><b>${esc(l.name)}</b><span>${fmt(l.count)} lead${l.count === 1 ? '' : 's'}</span></label>
+      <button class="iconbtn sm" data-act="listedit" title="Rename" aria-label="Rename ${esc(l.name)}">${ic('edit', 13)}</button><button class="iconbtn sm lmtrash" data-act="listdelask" title="Delete" aria-label="Delete ${esc(l.name)}">${ic('trash', 13)}</button></div>`;
+  };
+  $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal lmodal" data-stop role="dialog" aria-label="${manage ? 'Your lists' : 'Add to list'}">
+    <div class="card-h"><div><h2>${manage ? 'Your lists' : `Add ${fmt(ids.length)} lead${ids.length === 1 ? '' : 's'} to a list`}</h2><p>${manage ? 'Rename or delete lists. Deleting a list never deletes its leads.' : 'Pick a list or start a new one. Every search is also a list automatically.'}</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
+    <div class="card-b lmbody">
+      ${ST.lists.length ? `<div class="lmlist">${ST.lists.map(row).join('')}</div>` : `<p class="help" style="margin:0">No lists yet.</p>`}
+      <div class="lmnew ${!manage && LM.pick === 'new' ? 'on' : ''}">${manage ? '' : `<input type="radio" name="lmpick" value="new" ${LM.pick === 'new' ? 'checked' : ''} aria-label="New list">`}<input class="input" id="lm-name" placeholder="${manage ? 'New list name' : 'Or create a new list…'}" autocomplete="off" maxlength="80">${manage ? `<button class="btn sm" data-act="listcreate">${ic('plus', 13)}Create</button>` : ''}</div>
       <div class="help" id="lm-err" style="color:var(--bad)"></div></div>
-    <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="listgo">${ic('plus', 14)}Add to list</button></div></div></div>`;
-  if (LM.pick === 'new') setTimeout(() => $('#lm-name')?.focus(), 0);
+    <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end">${manage ? `<button class="btn" data-act="close">Done</button>` : `<button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="listgo">${ic('plus', 14)}Add to list</button>`}</div></div></div>`;
+}
+function lmPick(v, focus = true) {
+  LM.pick = v;
+  document.querySelectorAll('[name="lmpick"]').forEach(r => { r.checked = r.value === String(v); });
+  document.querySelectorAll('.lmrow').forEach(r => r.classList.toggle('on', +r.dataset.lid === v));
+  document.querySelector('.lmnew')?.classList.toggle('on', v === 'new');
+  if (v === 'new' && focus) $('#lm-name')?.focus();
+}
+async function listRename() {
+  const name = $('#lm-edit').value.trim(); if (!name) return;
+  try { await api('PUT', `/api/lists/${LM.editing}`, { name }); LM.editing = null; await loadLists(); listModal(LM.ids); toast('List renamed'); } catch (e) { $('#lm-err').textContent = e.message; }
 }
 async function listSave() {
   const btn = document.querySelector('[data-act="listgo"]'); btn.disabled = true;
@@ -1407,6 +1436,8 @@ function applyView(id) {
 }
 document.addEventListener('keydown', (e) => {
   const t = e.target;
+  if (t.id === 'lm-edit' && (e.key === 'Enter' || e.key === 'Escape')) { e.preventDefault(); e.stopPropagation(); if (e.key === 'Enter') listRename(); else { LM.editing = null; listModal(LM.ids); } return; }
+  if (t.id === 'lm-name' && e.key === 'Enter') { e.preventDefault(); document.querySelector(LM.ids.length ? '[data-act="listgo"]' : '[data-act="listcreate"]')?.click(); return; }
   if (t.dataset && t.dataset.tok && (e.key === 'Enter' || e.key === ',')) { e.preventDefault(); const v = t.value.trim(); if (!v) return; EDIT.name = $('#ind-name').value; EDIT[t.dataset.tok].push(v); const k = t.dataset.tok; indModal(); setTimeout(() => $('#tok-' + k)?.focus(), 0); return; }
   if (t.dataset && t.dataset.tok && e.key === 'Backspace' && !t.value && EDIT[t.dataset.tok].length) { EDIT.name = $('#ind-name').value; EDIT[t.dataset.tok].pop(); const k = t.dataset.tok; indModal(); setTimeout(() => $('#tok-' + k)?.focus(), 0); return; }
   if (t.classList && (t.classList.contains('dd-opt') || t.classList.contains('termrow')) && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); t.click(); return; }
@@ -1435,7 +1466,7 @@ let noteTimer = 0;
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.id === 'lq') { L$.F.q = t.value; changed(); return; }
-  if (t.id === 'lm-name' && LM.pick !== 'new') { LM.pick = 'new'; document.querySelectorAll('[name="lmpick"]').forEach(r => { r.checked = r.value === 'new'; r.closest('.opt').classList.toggle('on', r.checked); }); return; }
+  if (t.id === 'lm-name' && LM.ids.length && LM.pick !== 'new') { lmPick('new', false); return; }
   if (t.id === 'ind-q') { IP.q = t.value; rerenderInd(); return; }
   if (t.id === 'ind-name' && $('.inddrawer h2')) { $('.inddrawer h2').textContent = t.value || 'Untitled'; }
   if (t.id && t.id.startsWith('ddq-')) { L$.ddq = t.value; renderPanel(); return; }
@@ -1474,7 +1505,7 @@ document.addEventListener('change', async (e) => {
   if (t.dataset.xopt) { XP[t.dataset.xopt] = t.checked; XP.file = $('#x-file').value; exportModal(); return; }
   if (t.dataset.xcol) { t.checked ? XP.cols.add(t.dataset.xcol) : XP.cols.delete(t.dataset.xcol); XP.preset = Object.entries(XPRESETS).find(([, a]) => a.length === XP.cols.size && a.every(c => XP.cols.has(c)))?.[0] || 'custom'; exportModal(); return; }
   if (t.id === 'x-pfmt') { XP.pfmt = t.value; XP.file = $('#x-file').value; exportModal(); return; }
-  if (t.name === 'lmpick') { LM.pick = t.value === 'new' ? 'new' : +t.value; document.querySelectorAll('[name="lmpick"]').forEach(r => r.closest('.opt').classList.toggle('on', r.checked)); if (LM.pick === 'new') $('#lm-name')?.focus(); return; }
+  if (t.name === 'lmpick') { lmPick(t.value === 'new' ? 'new' : +t.value); return; }
   if (t.dataset.ck) { CK[t.dataset.ck] = t.checked; t.closest('.opt').classList.toggle('on', t.checked); return; }
   if (t.id === 'fs-ind') { FS.ind = +t.value; FS.terms = new Set(curInd().terms.map((_, i) => i)); FS.extra = []; refreshFind(['what']); return; }
   if (t.dataset.depth != null) { FS.depth = +t.dataset.depth; if (FS.depth === 0) FS.emails = false; $('#fs-collect').innerHTML = collectHTML(); refreshFind([]); return; }

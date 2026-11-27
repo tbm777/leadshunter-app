@@ -1292,3 +1292,53 @@ body.dragging-notes,body.dragging-notes *{user-select:none;cursor:grabbing!impor
 .cmenu .menu button svg{margin-top:2px;color:var(--muted);flex:none}
 .cmenu .menu span{display:flex;flex-direction:column;gap:1px}.cmenu .menu b{font-weight:600;font-size:13px}.cmenu .menu small{font-size:12px;color:var(--muted)}
 .chead .row{align-items:center}
+/* campaign settings */
+.sset{padding:0}
+.sset-top{display:flex;justify-content:flex-end;gap:10px;padding:10px 20px;border-bottom:1px solid var(--line);background:var(--surface-2);border-radius:14px 14px 0 0}
+.sset-row{display:grid;grid-template-columns:minmax(180px,260px) minmax(0,1fr);gap:28px;padding:22px 20px;border-bottom:1px solid var(--line)}
+.sset-row:last-child{border-bottom:0}
+.sset-l h4{margin:0 0 4px;font-size:14px;font-weight:650}
+.sset-l p{margin:0;font-size:12.5px;color:var(--muted);line-height:1.5}
+.sset-r{display:flex;flex-direction:column;gap:16px;min-width:0}
+.sset-inline{display:flex;gap:8px;align-items:center}
+.sset-inline .ns-btn,.sset-inline select{flex:1}
+.sset-sched{display:grid;grid-template-columns:minmax(0,220px) minmax(0,1fr);gap:16px}
+.sset-suffix{display:flex;align-items:center;border:1px solid var(--line);border-radius:8px;background:var(--surface);overflow:hidden}
+.sset-suffix:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+.sset-suffix .input{border:0;box-shadow:none!important;width:90px;-moz-appearance:textfield}
+.sset-suffix .input::-webkit-outer-spin-button,.sset-suffix .input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.sset-suffix span{padding:0 12px;font-size:13px;color:var(--muted);white-space:nowrap}
+.sfile{display:flex;align-items:center;gap:14px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}
+.sfile-ic{width:40px;height:48px;border-radius:6px;background:#FAF9F6;border:1px solid var(--line);display:grid;place-items:center;color:#E0A800;flex:none;box-shadow:inset 0 3px 0 #F2B807}
+.sfile>div:nth-child(2){flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.sfile b{font-size:13.5px}.sfile span{font-size:12.5px;color:var(--muted)}
+.btn.danger-out{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 35%,var(--line))}
+.btn.danger-out:hover{background:color-mix(in srgb,var(--bad) 8%,transparent);border-color:var(--bad)}
+.sset-danger .sset-l h4{color:var(--bad)}
+@media (max-width:860px){.sset-row{grid-template-columns:1fr;gap:12px}.sset-sched{grid-template-columns:1fr}}
+/* leads: selection bar */
+.selmore .menu{right:0;top:calc(100% + 6px);min-width:190px}
+.selbar .linkbtn.muted{text-decoration:none}
+/* lists */
+.lmodal{width:min(520px,100%)}
+.lmbody{display:flex;flex-direction:column;gap:12px}
+.lmlist{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;overflow:hidden;max-height:320px;overflow-y:auto}
+.lmrow{display:flex;align-items:center;gap:10px;padding:9px 10px 9px 14px;border-bottom:1px solid var(--line);background:var(--surface)}
+.lmrow:last-child{border-bottom:0}
+.lmrow.on{background:var(--accent-soft)}
+.lmrow input[type=radio]{accent-color:var(--accent);width:16px;height:16px;flex:none;margin:0;cursor:pointer}
+.lmname{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;cursor:pointer;margin:0}
+.lmname b{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lmname span{font-size:12px;color:var(--muted)}
+.lmrow .iconbtn{width:30px;height:30px;color:var(--faint)}
+.lmrow .iconbtn:hover{color:var(--ink)}
+.lmrow .lmtrash:hover{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,var(--line))}
+.lmdot{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:none}
+.lmrow.editing .input{flex:1;height:34px}
+.lmrow.deleting{background:color-mix(in srgb,var(--bad) 6%,var(--surface));font-size:13px}
+.lmrow.deleting span{flex:1}
+.btn.danger-solid{background:var(--bad);border-color:var(--bad);color:#fff}
+.lmnew{display:flex;align-items:center;gap:10px;padding:8px 10px 8px 14px;border:1px dashed var(--line);border-radius:12px}
+.lmnew.on{border-style:solid;border-color:var(--accent);background:var(--accent-soft)}
+.lmnew input[type=radio]{accent-color:var(--accent);width:16px;height:16px;margin:0;flex:none}
+.lmnew .input{flex:1;height:36px;background:var(--surface)}

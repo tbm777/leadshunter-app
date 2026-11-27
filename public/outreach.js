@@ -305,16 +305,23 @@ async function flushSave() {
 /* settings tab */
 function settingsTab(c) {
   const hours = (sel, from, to) => Array.from({ length: to - from + 1 }, (_, i) => from + i).map(h => `<option value="${h}" ${h === sel ? 'selected' : ''}>${hourLbl(h)}</option>`).join('');
-  return `<div class="card"><div class="card-b sgrid2">
-    <div class="field"><label for="s-name">Campaign name</label><input class="input" id="s-name" data-ssave="name" value="${A.esc(c.name)}" maxlength="80"></div>
-    <div class="field"><label for="s-sender">Send as</label><div class="row" style="flex-wrap:nowrap"><select class="input" id="s-sender" data-ssave="sender_id"><option value="">Choose a sender profile</option>${OS.senders.map(s => `<option value="${s.id}" ${s.id === c.sender_id ? 'selected' : ''}>${A.esc(s.label)} · ${A.esc(s.email)}</option>`).join('')}</select><button class="btn" data-o="newsender">${A.ic('plus', 13)}New</button></div><span class="help">Name, email and phone typed into every form.</span></div>
-    <div class="field" style="grid-column:1/-1"><span class="flabel">How it sends</span>${modeOpts(c.mode || 'auto', 'smode')}<span class="help">Switching moves leads that are waiting: to your Manual queue, or back to the robot.</span></div>
-    ${c.mode === 'manual' ? '' : `<div class="field"><label for="s-limit">Daily limit</label><input class="input" id="s-limit" type="number" min="1" max="2000" data-ssave="daily_limit" value="${c.daily_limit}"><span class="help">Forms sent per day, counted in Los Angeles time.</span></div>
-    <div class="field"><label>Sending hours (PT)</label><div class="row" style="flex-wrap:nowrap"><select class="input" data-ssave="window_start">${hours(c.window_start, 0, 23)}</select><span class="help">to</span><select class="input" data-ssave="window_end">${hours(c.window_end, 1, 24)}</select></div><span class="help">Business hours look the most natural.</span></div>
-    <div class="field" style="grid-column:1/-1"><label>Sending days</label><div class="days" role="group">${[1, 2, 3, 4, 5, 6, 0].map(d => `<button class="${c.weekdays.includes(String(d)) ? 'on' : ''}" data-day="${d}" aria-pressed="${c.weekdays.includes(String(d))}">${DAYS[d]}</button>`).join('')}</div></div>`}
-    <div class="field" style="grid-column:1/-1"><label>File for forms that require an upload</label><label class="opt on" style="cursor:default"><input type="radio" checked disabled><div><b>The Bat Marketing</b><span>Two pages: your subject and message, then your offer. Attached only when a form requires a file.</span></div></label></div>
-    <div style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line);padding-top:14px"><span class="help" id="s-save"></span><button class="btn ghost sm" data-o="delcamp" style="color:var(--bad)">${A.ic('trash', 13)}Delete campaign</button></div>
-  </div></div>`;
+  const sec = (title, desc, body, cls = '') => `<section class="sset-row ${cls}"><div class="sset-l"><h4>${title}</h4><p>${desc}</p></div><div class="sset-r">${body}</div></section>`;
+  return `<div class="card sset">
+    <div class="sset-top"><span class="help">Changes save automatically</span><span class="help" id="s-save"></span></div>
+    ${sec('Basics', 'The campaign name is just for you. The sender profile is what forms receive.', `
+      <div class="field"><label for="s-name">Campaign name</label><input class="input" id="s-name" data-ssave="name" value="${A.esc(c.name)}" maxlength="80"></div>
+      <div class="field"><label for="s-sender">Send as</label><div class="sset-inline"><select class="input" id="s-sender" data-ssave="sender_id"><option value="">Choose a sender profile</option>${OS.senders.map(s => `<option value="${s.id}" ${s.id === c.sender_id ? 'selected' : ''}>${A.esc(s.label)} · ${A.esc(s.email)}</option>`).join('')}</select><button class="btn" data-o="newsender">${A.ic('plus', 13)}New</button></div></div>`)}
+    ${sec('How it sends', 'Switching moves leads that are waiting: to your Manual queue, or back to the robot.', modeOpts(c.mode || 'auto', 'smode'))}
+    ${c.mode === 'manual' ? '' : sec('Schedule', 'When the robot sends, in Los Angeles time. Business hours look the most natural.', `
+      <div class="sset-sched">
+        <div class="field"><label for="s-limit">Daily limit</label><div class="sset-suffix"><input class="input" id="s-limit" type="number" min="1" max="2000" data-ssave="daily_limit" value="${c.daily_limit}"><span>forms a day</span></div></div>
+        <div class="field"><label>Sending hours</label><div class="sset-inline"><select class="input" data-ssave="window_start" aria-label="From">${hours(c.window_start, 0, 23)}</select><span class="help">to</span><select class="input" data-ssave="window_end" aria-label="Until">${hours(c.window_end, 1, 24)}</select></div></div>
+      </div>
+      <div class="field"><label>Sending days</label><div class="days" role="group">${[1, 2, 3, 4, 5, 6, 0].map(d => `<button class="${c.weekdays.includes(String(d)) ? 'on' : ''}" data-day="${d}" aria-pressed="${c.weekdays.includes(String(d))}">${DAYS[d]}</button>`).join('')}</div></div>`)}
+    ${sec('Attachment', 'Only used when a form requires a file upload.', `
+      <div class="sfile"><div class="sfile-ic">${A.ic('copy', 18)}</div><div><b>The Bat Marketing</b><span>PDF · page 1 is your subject and message, page 2 your offer. Image-only forms get page 1 as an image.</span></div><button class="btn sm" data-o="previewfile">Preview</button></div>`)}
+    ${sec('Delete campaign', 'Removes the campaign and its results. Contacted leads stay marked Contacted.', `<div><button class="btn danger-out" data-o="delcamp">${A.ic('trash', 14)}Delete campaign</button></div>`, 'sset-danger')}
+  </div>`;
 }
 async function saveSetting(c, patch) {
   const sv = A.$('#s-save'); if (sv) sv.textContent = 'Saving…';
@@ -821,6 +828,7 @@ async function onClick(e) {
     case 'dismissbanner': A.$('#c-banner').innerHTML = ''; break;
     case 'moreitems': loadItems(c.id, true); break;
     case 'extguide': extGuide(); break;
+    case 'previewfile': { const P = cp(c.id); P.tab = 'message'; P.previewMode = 'file'; A.render(); setTimeout(() => document.querySelector('.pvcard')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); break; }
     case 'reviewnoconf': { const P = cp(c.id); P.tab = 'leads'; P.filter = 'noconf'; P.items = null; A.render(); break; }
     case 'newnote': {
       try { const r = await A.api('POST', '/api/notes', { title: b.dataset.title || '', tag: b.dataset.ntype || 'idea', body: b.dataset.body || '' }); NT.notes.unshift(r.note); NT.notes.sort(byOrder); NT.tag = 'all'; NT.q = ''; A.render(); openNote(r.note.id); setTimeout(() => (b.dataset.title ? A.$('#nt-body') : A.$('#nt-title'))?.focus(), 0); }
