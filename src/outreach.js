@@ -17,7 +17,7 @@ export async function outreachOverview(env) {
     env.DB.prepare("SELECT * FROM campaigns WHERE status != 'archived' ORDER BY id DESC"),
     env.DB.prepare('SELECT campaign_id, status, COUNT(*) AS n FROM outreach GROUP BY campaign_id, status'),
     env.DB.prepare(`SELECT campaign_id, COUNT(*) AS n FROM outreach WHERE sent_at >= ? AND status IN ('sent','submitted','sent_manual') GROUP BY campaign_id`).bind(today),
-    env.DB.prepare("SELECT COUNT(*) AS n FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE o.status = 'manual' AND c.status != 'archived'"),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE o.status = 'manual' AND c.status = 'active'"),
     env.DB.prepare("SELECT id, campaign_id, status, params, to_check, checked, created_at, started_at, finished_at, error, run_url FROM searches WHERE kind = 'outreach' AND id IN (SELECT MAX(id) FROM searches WHERE kind = 'outreach' GROUP BY campaign_id)"),
   ]);
   const by = {};
@@ -40,7 +40,7 @@ function campaignOut(c, counts = {}, today = 0, job = null) {
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   return {
     id: c.id, name: c.name, sender_id: c.sender_id, subject: c.subject, message: c.message, file_template: c.file_template,
-    daily_limit: c.daily_limit, window_start: c.window_start, window_end: c.window_end, weekdays: c.weekdays, status: c.status, start_at: c.start_at || null, msg_version: c.msg_version || 1,
+    daily_limit: c.daily_limit, window_start: c.window_start, window_end: c.window_end, weekdays: c.weekdays, status: c.status, mode: c.mode || 'auto', start_at: c.start_at || null, msg_version: c.msg_version || 1,
     created_at: c.created_at, updated_at: c.updated_at, today, job,
     counts: { total, queued: n('queued'), sending: n('sending'), sent: n('sent'), submitted: n('submitted'), sent_manual: n('sent_manual'), manual: n('manual'), failed: n('failed'), skipped: n('skipped') },
   };
@@ -90,6 +90,7 @@ export async function saveCampaign(env, b, id) {
     name: b.name !== undefined ? str(b.name, 80) : cur?.name, sender_id: b.sender_id !== undefined ? (+b.sender_id || null) : cur?.sender_id ?? null,
     subject: b.subject !== undefined ? str(b.subject, 200) : cur?.subject ?? '', message: b.message !== undefined ? String(b.message ?? '').slice(0, 5000) : cur?.message ?? '',
     file_template: TEMPLATES.includes(b.file_template) ? b.file_template : cur?.file_template || 'bat-marketing',
+    mode: ['auto', 'manual'].includes(b.mode) ? b.mode : cur?.mode || 'auto',
     daily_limit: b.daily_limit !== undefined ? Math.max(1, Math.min(2000, Math.floor(+b.daily_limit || 0))) : cur?.daily_limit ?? 100,
     window_start: b.window_start !== undefined ? Math.max(0, Math.min(23, Math.floor(+b.window_start))) : cur?.window_start ?? 8,
     window_end: b.window_end !== undefined ? Math.max(1, Math.min(24, Math.floor(+b.window_end))) : cur?.window_end ?? 18,
@@ -104,6 +105,15 @@ export async function saveCampaign(env, b, id) {
   const cols = Object.keys(v);
   if (id) await env.DB.prepare(`UPDATE campaigns SET ${cols.map(c => c + ' = ?').join(', ')}, updated_at = ? WHERE id = ?`).bind(...Object.values(v), now(), id).run();
   else id = (await env.DB.prepare(`INSERT INTO campaigns (${cols.join(', ')}, created_at, updated_at) VALUES (${inList(cols.length)}, ?, ?) RETURNING id`).bind(...Object.values(v), now(), now()).first()).id;
+  // Switching mode moves waiting leads: manual → all to the manual queue; auto → back to the robot's queue.
+  if (cur && v.mode !== (cur.mode || 'auto')) {
+    const t = now();
+    if (v.mode === 'manual') await env.DB.batch([
+      env.DB.prepare("UPDATE searches SET status = 'cancelled', finished_at = ? WHERE kind = 'outreach' AND campaign_id = ? AND status IN ('queued','running')").bind(t, id),
+      env.DB.prepare("UPDATE outreach SET status = 'manual', reason = 'manual', updated_at = ? WHERE campaign_id = ? AND status = 'queued'").bind(t, id),
+    ]);
+    else await env.DB.prepare("UPDATE outreach SET status = 'queued', reason = NULL, updated_at = ? WHERE campaign_id = ? AND status = 'manual' AND reason = 'manual'").bind(t, id).run();
+  }
   return getCampaign(env, id);
 }
 function checkReady(c) {
@@ -138,7 +148,7 @@ async function setLeadStatus(env, ids, status, onlyFrom = null) {
 
 /** Add leads. With dry: true, only report what would happen (the confirm step in the app). */
 export async function addLeads(env, id, b) {
-  const c = await env.DB.prepare('SELECT id, status FROM campaigns WHERE id = ?').bind(id).first();
+  const c = await env.DB.prepare('SELECT id, status, mode FROM campaigns WHERE id = ?').bind(id).first();
   if (!c || c.status === 'archived') throw new HttpError(404, 'Campaign not found.');
   const ids = [...new Set((Array.isArray(b.ids) ? b.ids : []).map(Number).filter(Number.isInteger))].slice(0, 20000);
   if (!ids.length) throw new HttpError(400, 'Select at least one lead.');
@@ -163,16 +173,18 @@ export async function addLeads(env, id, b) {
     else if (l.form_status === 1) out.manual.push(l);   // CAPTCHA known from the website check: straight to the manual queue
     else out.add.push(l);
   }
-  const summary = { add: out.add.length, manual: out.manual.length, skipped: out.skipped };
+  const summary = { add: c.mode === 'manual' ? 0 : out.add.length, manual: out.manual.length + (c.mode === 'manual' ? out.add.length : 0), captcha: out.manual.length, mode: c.mode || 'auto', skipped: out.skipped };
   if (b.dry) return json(summary);
   const t = now();
   const stmts = [
-    ...out.add.map(l => env.DB.prepare("INSERT OR IGNORE INTO outreach (campaign_id, lead_id, status, form_url, created_at, updated_at) VALUES (?, ?, 'queued', ?, ?, ?)").bind(id, l.id, l.form_url, t, t)),
+    ...out.add.map(l => c.mode === 'manual'
+      ? env.DB.prepare("INSERT OR IGNORE INTO outreach (campaign_id, lead_id, status, reason, form_url, created_at, updated_at) VALUES (?, ?, 'manual', 'manual', ?, ?, ?)").bind(id, l.id, l.form_url, t, t)
+      : env.DB.prepare("INSERT OR IGNORE INTO outreach (campaign_id, lead_id, status, form_url, created_at, updated_at) VALUES (?, ?, 'queued', ?, ?, ?)").bind(id, l.id, l.form_url, t, t)),
     ...out.manual.map(l => env.DB.prepare("INSERT OR IGNORE INTO outreach (campaign_id, lead_id, status, reason, form_url, created_at, updated_at) VALUES (?, ?, 'manual', 'captcha', ?, ?, ?)").bind(id, l.id, l.form_url, t, t)),
   ];
   for (const part of chunk(stmts, 400)) await env.DB.batch(part);
   await setLeadStatus(env, [...out.add, ...out.manual].map(l => l.id), 1, [0]);
-  if (c.status === 'active') ctxTick(env, id);
+  if (c.status === 'active' && c.mode !== 'manual') ctxTick(env, id);
   return json(summary);
 }
 function ctxTick(env, id) { env.CTX?.waitUntil(env.DB.prepare('SELECT * FROM campaigns WHERE id = ?').bind(id).first().then(c => c && tickCampaign(env, c)).catch(() => {})); }
@@ -244,7 +256,7 @@ export async function listItems(env, url) {
   const st = (q.get('status') || '').split(',').filter(s => STATUSES.includes(s));
   if (st.length) { where.push(`o.status IN (${inList(st.length)})`); vals.push(...st); }
   if (q.get('test')) where.push('o.test_status IS NOT NULL');
-  if (!cid) where.push("c.status != 'archived'");
+  if (!cid) where.push(st.length === 1 && st[0] === 'manual' ? "c.status = 'active'" : "c.status != 'archived'");   // manual queue: launched campaigns only
   // Campaign lists keep the order leads were added, so rows don't jump while a run updates them.
   const order = q.get('order') === 'sent' ? 'o.sent_at DESC, o.id DESC' : q.get('order') === 'recent' ? 'o.updated_at DESC, o.id DESC' : 'o.id';
   const limit = Math.min(500, +q.get('limit') || 200), offset = Math.max(0, +q.get('offset') || 0);
@@ -271,6 +283,8 @@ export async function itemAction(env, oid, b) {
     await setLeadStatus(env, [o.lead_id], 0, [1]);
   } else if (b.action === 'retry') {
     if (!['manual', 'failed', 'skipped'].includes(o.status)) throw new HttpError(409, 'Only failed, skipped or manual items can be retried.');
+    const cm = await env.DB.prepare('SELECT mode FROM campaigns WHERE id = ?').bind(o.campaign_id).first();
+    if (cm && cm.mode === 'manual') throw new HttpError(409, 'This campaign is manual, so the robot doesn’t send its forms. Switch it to automatic in Settings to let the robot send.');
     await env.DB.prepare("UPDATE outreach SET status = 'queued', reason = NULL, evidence = NULL, updated_at = ? WHERE id = ?").bind(t, oid).run();
     await setLeadStatus(env, [o.lead_id], 1, [0]);
     ctxTick(env, o.campaign_id);
@@ -329,6 +343,38 @@ export async function orderNotes(env, b) {
 }
 export async function deleteNote(env, id) { await env.DB.prepare('DELETE FROM notes WHERE id = ?').bind(id).run(); return json({ ok: true }); }
 
+/* ------------------------------------------------------------------ lead lists */
+export async function getLists(env) {
+  const [ls, mem] = await env.DB.batch([
+    env.DB.prepare('SELECT l.id, l.name, l.created_at, (SELECT COUNT(*) FROM list_leads x WHERE x.list_id = l.id) AS n FROM lists l ORDER BY l.name COLLATE NOCASE'),
+    env.DB.prepare('SELECT list_id, lead_id FROM list_leads'),
+  ]);
+  const members = {};
+  for (const r of mem.results) (members[r.list_id] ||= []).push(r.lead_id);
+  return json({ lists: ls.results.map(l => ({ id: l.id, name: l.name, count: l.n, created_at: l.created_at })), members });
+}
+export async function saveList(env, b, id) {
+  const name = str(b.name, 80);
+  if (!name) throw new HttpError(400, 'Give the list a name.');
+  const t = now();
+  if (id) await env.DB.prepare('UPDATE lists SET name = ?, updated_at = ? WHERE id = ?').bind(name, t, id).run();
+  else id = (await env.DB.prepare('INSERT INTO lists (name, created_at, updated_at) VALUES (?, ?, ?) RETURNING id').bind(name, t, t).first()).id;
+  return json({ list: { id, name } });
+}
+export async function deleteList(env, id) {
+  await env.DB.batch([env.DB.prepare('DELETE FROM list_leads WHERE list_id = ?').bind(id), env.DB.prepare('DELETE FROM lists WHERE id = ?').bind(id)]);
+  return json({ ok: true });
+}
+export async function listLeads(env, id, b) {
+  if (!(await env.DB.prepare('SELECT id FROM lists WHERE id = ?').bind(id).first())) throw new HttpError(404, 'List not found.');
+  const ids = [...new Set((b.ids || []).map(Number).filter(Number.isInteger))].slice(0, 20000);
+  const t = now();
+  const stmts = ids.map(l => b.remove ? env.DB.prepare('DELETE FROM list_leads WHERE list_id = ? AND lead_id = ?').bind(id, l) : env.DB.prepare('INSERT OR IGNORE INTO list_leads (list_id, lead_id, added_at) VALUES (?, ?, ?)').bind(id, l, t));
+  for (const part of chunk(stmts, 400)) await env.DB.batch(part);
+  await env.DB.prepare('UPDATE lists SET updated_at = ? WHERE id = ?').bind(t, id).run();
+  return json({ ok: true, count: ids.length });
+}
+
 /* ------------------------------------------------------------------ runs */
 async function activeJob(env, cid) {
   return env.DB.prepare("SELECT id, status FROM searches WHERE kind = 'outreach' AND campaign_id = ? AND status IN ('queued','running') ORDER BY id DESC LIMIT 1").bind(cid).first();
@@ -369,6 +415,7 @@ export async function runCampaign(env, id, b) {
   const c = await env.DB.prepare('SELECT * FROM campaigns WHERE id = ?').bind(id).first();
   if (!c || c.status === 'archived') throw new HttpError(404, 'Campaign not found.');
   checkReady(c);
+  if (c.mode === 'manual' && b.mode !== 'test') throw new HttpError(409, 'This is a manual campaign: its forms are sent from your Manual queue.');
   const mode = b.mode === 'test' ? 'test' : 'send';
   let count = Math.max(1, Math.floor(+b.count || 0));
   if (mode === 'test') count = Math.min(TEST_MAX, count || 10);
@@ -390,7 +437,7 @@ function ptNow() {
 }
 export function inWindow(c) { const { hour, day } = ptNow(); return c.weekdays.includes(String(day)) && hour >= c.window_start && hour < c.window_end; }
 async function tickCampaign(env, c) {
-  if (c.status !== 'active' || !inWindow(c) || (c.start_at && c.start_at > now())) return null;
+  if (c.status !== 'active' || c.mode === 'manual' || !inWindow(c) || (c.start_at && c.start_at > now())) return null;
   const left = c.daily_limit - await sentToday(env, c.id);
   if (left <= 0) return null;
   const r = await startJob(env, c, 'send', Math.min(BATCH, left));

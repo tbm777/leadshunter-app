@@ -71,7 +71,7 @@ async function api(method, path, body) {
 }
 
 /* ================================================================ state */
-const ST = { industries: [], searches: [], config: {}, cols: [], leads: [], byId: new Map(), seq: 0, views: [], places: null, postal: {}, syncing: false, lastSync: 0 };
+const ST = { lists: [], leadLists: new Map(), industries: [], searches: [], config: {}, cols: [], leads: [], byId: new Map(), seq: 0, views: [], places: null, postal: {}, syncing: false, lastSync: 0 };
 const SS = ['Loads', 'Slow (over 5 s)', 'Down', 'Not checked yet', 'No website', 'Blocked us', 'Parked or for sale', 'Social or directory page'];
 const SS_SHORT = ['Loads', 'Slow', 'Down', 'Not checked', '', 'Blocked us', 'Parked', 'Profile page'];
 const SS_C = ['ok', 'warn', 'bad', 'faint', 'faint', 'warn', 'faint', 'faint'];
@@ -305,7 +305,7 @@ function runFilter() {
     if (F.em !== 'any' && ((F.em === 'yes') !== !!L.email)) { n++; g = 9; }
     if (F.st.size && !F.st.has(L.status)) { n++; g = 10; }
     if (addMs && now - L.created_at > addMs) { n++; g = 11; }
-    if (F.src.size && !F.src.has(L.search_id)) { n++; g = 12; }
+    if (F.src.size && !inLists(L, F.src)) { n++; g = 12; }
     if (F.hideClosed && L.closed) { n++; g = 13; }
     if (q && !L.k.includes(q)) { n++; g = 14; }
     if (n > 1) continue;
@@ -322,7 +322,7 @@ function runFilter() {
     if (all || g === 8) C[8][L.phone ? 1 : 0]++;
     if (all || g === 9) C[9][L.email ? 1 : 0]++;
     if (all || g === 10) C[10][L.status]++;
-    if (all || g === 12) C[12].set(L.search_id, (C[12].get(L.search_id) || 0) + 1);
+    if (all || g === 12) { C[12].set(L.search_id, (C[12].get(L.search_id) || 0) + 1); const ls = ST.leadLists.get(L.id); if (ls) for (const id of ls) C[12].set('l' + id, (C[12].get('l' + id) || 0) + 1); }
   }
   const s = L$.sort;
   res.sort(s === 'reviews' ? (a, b) => b.reviews - a.reviews : s === 'rating' ? (a, b) => ((b.rating || 0) - (a.rating || 0)) || b.reviews - a.reviews
@@ -377,6 +377,17 @@ function withFocus(fn) {
   const p = $('#lf-panel'); if (p && pt != null) p.scrollTop = pt;
   if (id) { const n = document.getElementById(id); if (n && n !== document.activeElement) { n.focus(); try { if (ss != null) n.setSelectionRange(ss, ss); } catch { /* not a text field */ } } }
 }
+// Lists: your own lists ('l' + id) and searches (their id). A search is a list of the leads it found.
+function inLists(L, sel) { if (sel.has(L.search_id)) return true; const ls = ST.leadLists.get(L.id); if (ls) for (const id of ls) if (sel.has('l' + id)) return true; return false; }
+function listName(v) { if (typeof v === 'string' && v[0] === 'l') return ST.lists.find(l => 'l' + l.id === v)?.name || 'List'; return searchName(v); }
+async function loadLists() {
+  try {
+    const r = await api('GET', '/api/lists');
+    ST.lists = r.lists; ST.leadLists = new Map();
+    for (const [lid, ids] of Object.entries(r.members)) for (const id of ids) { let s = ST.leadLists.get(id); if (!s) ST.leadLists.set(id, s = new Set()); s.add(+lid); }
+    if ($('#vt')) { leadsUpdate(); }
+  } catch (e) { if (e.status !== 401) console.warn('Lists unavailable', e); }
+}
 function industryName(id) { return ST.industries.find(i => i.id === id)?.name || 'Other'; }
 function searchName(id) { const s = ST.searches.find(x => x.id === id); return s ? s.name : (ST.hiddenNames && ST.hiddenNames[id]) || `Search #${id}`; }
 function ddOpts(key) {
@@ -387,7 +398,11 @@ function ddOpts(key) {
   if (key === 'form') return FM.map((l, i) => ({ v: i, l, n: C[6][i] }));
   if (key === 'pf') return PF.map((l, i) => ({ v: i, l, n: C[7][i] }));
   if (key === 'st') return LS.map((l, i) => ({ v: i, l, n: C[10][i] }));
-  if (key === 'src') { const ids = [...C[12].keys()]; return ids.map(id => ({ v: id, l: searchName(id), n: C[12].get(id) || 0, sub: dayPT(ST.searches.find(s => s.id === id)?.created_at) })).sort((a, b) => b.v - a.v); }
+  if (key === 'src') {
+    const mine = ST.lists.map(l => ({ v: 'l' + l.id, l: l.name, n: C[12].get('l' + l.id) || 0, sub: 'Your list' }));
+    const searches = [...C[12].keys()].filter(k => typeof k === 'number').map(id => ({ v: id, l: searchName(id), n: C[12].get(id) || 0, sub: `Search · ${dayPT(ST.searches.find(s => s.id === id)?.created_at)}` })).sort((a, b) => b.v - a.v);
+    return [...mine, ...searches];
+  }
   return [];
 }
 function dd(key, label, allText) {
@@ -430,12 +445,13 @@ function renderPanel() {
   const el = $('#lf-panel'); if (!el) return; const C = L$.C;
   withFocus(() => {
     el.innerHTML = `<div class="fp-h"><b>Filters${activeCount() ? ` <span class="dd-n">${activeCount()}</span>` : ''}</b><button class="btn ghost sm" data-act="reset" ${activeCount() ? '' : 'disabled'}>Reset all</button></div>
+    <div class="fp-sec"><h5>Lists</h5>${dd('src', 'List or search', 'All leads')}</div>
     <div class="fp-sec"><h5>Business</h5>${dd('ind', 'Industry', 'All industries')}${dd('loc', 'Location', 'All locations')}${rngRating()}${rngReviews()}
       ${segF('ph', 'Phone number', [['any', 'Any'], ['yes', 'Has', 1], ['no', 'None', 0]], C[8])}
       <label class="ck"><input type="checkbox" data-fchk="hideClosed" ${L$.F.hideClosed ? 'checked' : ''}>Hide permanently closed businesses</label></div>
     <div class="fp-sec"><h5>Website</h5>${segF('web', 'Website', [['any', 'Any'], ['yes', 'Has', 1], ['no', 'None', 0]], C[4])}${dd('site', 'Site status', 'Any status')}${dd('pf', 'Platform', 'Any platform')}</div>
     <div class="fp-sec"><h5>Contact</h5>${dd('form', 'Contact form', 'Any')}${segF('em', 'Email address', [['any', 'Any'], ['yes', 'Found', 1], ['no', 'None', 0]], C[9])}</div>
-    <div class="fp-sec" style="border-bottom:0"><h5>Pipeline</h5>${dd('st', 'Lead status', 'Any status')}${dd('src', 'Found by search', 'Any search')}${segF('add', 'Date added', [[0, 'Any'], [1, '24 h'], [7, '7 days'], [30, '30 days']])}</div>`;
+    <div class="fp-sec" style="border-bottom:0"><h5>Pipeline</h5>${dd('st', 'Lead status', 'Any status')}${segF('add', 'Date added', [[0, 'Any'], [1, '24 h'], [7, '7 days'], [30, '30 days']])}</div>`;
   });
 }
 function summaryParts() {
@@ -452,7 +468,7 @@ function summaryParts() {
   if (F.em !== 'any') p.push(F.em === 'yes' ? 'email found' : 'no email');
   if (F.ph !== 'any') p.push(F.ph === 'yes' ? 'has phone' : 'no phone');
   if (F.st.size) p.push('status ' + names(F.st, i => LS[i].toLowerCase()));
-  if (F.src.size) p.push(F.src.size === 1 ? `from “${searchName([...F.src][0])}”` : `from ${F.src.size} searches`);
+  if (F.src.size) p.push(F.src.size === 1 ? `in “${listName([...F.src][0])}”` : `in ${F.src.size} lists`);
   if (F.add) p.push(F.add === 1 ? 'added in the last 24 hours' : `added in the last ${F.add} days`);
   if (!F.hideClosed) p.push('including closed');
   if (F.q.trim()) p.push(`matching “${F.q.trim()}”`);
@@ -469,7 +485,7 @@ function renderSel() {
   const n = L$.sel.size, m = L$.res.length, allIn = m && n >= m && L$.res.every(l => L$.sel.has(l.id));
   const cb = $('#cb-all'); if (cb) cb.className = 'cb ' + (allIn ? 'on' : n ? 'part' : '');
   $('#lf-selbar').innerHTML = n ? `<div class="selbar"><b class="num">${fmt(n)} selected</b>${!allIn && m > n ? `<button class="linkbtn" data-act="selall">Select all ${fmt(m)} matching</button>` : ''}<button class="linkbtn" data-act="clearsel">Clear selection</button>
-    <div class="selacts"><button class="btn sm" data-act="addcamp">${ic('campaigns', 14)}Add to campaign</button><button class="btn sm ghost" data-act="export">${ic('download', 14)}Export</button><button class="btn sm ghost" data-act="checkmodal">${ic('globe', 14)}Check websites</button><button class="btn sm ghost" data-act="bdnc">${ic('shield', 14)}Do not contact</button></div></div>` : '';
+    <div class="selacts"><button class="btn sm" data-act="addcamp">${ic('campaigns', 14)}Add to campaign</button><button class="btn sm ghost" data-act="addlist">${ic('leads', 14)}Add to list</button>${L$.F.src.size === 1 && String([...L$.F.src][0])[0] === 'l' ? `<button class="btn sm ghost" data-act="rmlist">${ic('x', 14)}Remove from list</button>` : ''}<button class="btn sm ghost" data-act="export">${ic('download', 14)}Export</button><button class="btn sm ghost" data-act="checkmodal">${ic('globe', 14)}Check websites</button><button class="btn sm ghost" data-act="bdnc">${ic('shield', 14)}Do not contact</button></div></div>` : '';
 }
 function renderRows() {
   const vt = $('#vt'), body = $('#vt-body'); if (!vt || !body) return;
@@ -1195,7 +1211,7 @@ document.addEventListener('click', async (e) => {
   if ((v = ds('fseg')) !== undefined) { const i = v.indexOf(':'), k = v.slice(0, i), val = v.slice(i + 1); L$.F[k] = k === 'add' ? +val : val; changed(); return; }
   if ((v = ds('dd')) !== undefined) { L$.openDD = L$.openDD === v ? null : v; L$.ddq = ''; renderPanel(); setTimeout(() => $('#ddq-' + v)?.focus(), 0); return; }
   if ((v = ds('ddonly')) !== undefined) { e.stopPropagation(); const [k, val] = v.split(':'); L$.F[k] = new Set([+val]); changed(); return; }
-  if ((v = ds('ddopt')) !== undefined) { const [k, val] = v.split(':'); const s = L$.F[k]; s.has(+val) ? s.delete(+val) : s.add(+val); changed(); return; }
+  if ((v = ds('ddopt')) !== undefined) { const [k, raw] = v.split(':'); const val = /^l\d+$/.test(raw) ? raw : +raw; const s = L$.F[k]; s.has(val) ? s.delete(val) : s.add(val); changed(); return; }
   if ((v = ds('ddclear')) !== undefined) { L$.F[v] = new Set(); changed(); return; }
   if ((v = ds('view')) !== undefined) { applyView(v); return; }
   if ((v = ds('viewdel')) !== undefined) { try { await api('DELETE', `/api/views/${v}`); ST.views = ST.views.filter(x => String(x.id) !== v); renderViews(); toast('View deleted'); } catch (err) { toast(err.message, 'alert'); } return; }
@@ -1309,6 +1325,19 @@ document.addEventListener('click', async (e) => {
     case 'export': openExport(L$.sel.size ? 'sel' : 'view'); break;
     case 'checkmodal': checkModal([...L$.sel]); break;
     case 'addcamp': addToCampaign([...L$.sel]); break;
+    case 'addlist': listModal([...L$.sel]); break;
+    case 'rmlist': {
+      const lid = +String([...L$.F.src][0]).slice(1), ids = [...L$.sel];
+      try { await api('POST', `/api/lists/${lid}/leads`, { ids, remove: true }); ids.forEach(id => ST.leadLists.get(id)?.delete(lid)); L$.sel.clear(); toast(`Removed ${fmt(ids.length)} from “${listName('l' + lid)}”`); loadLists(); } catch (err) { toast(err.message, 'alert'); }
+      break;
+    }
+    case 'listgo': listSave(); break;
+    case 'listdel': {
+      const lid = +t.closest('[data-lid]').dataset.lid, l = ST.lists.find(x => x.id === lid);
+      if (!t.closest('[data-confirm]')) { t.closest('button').dataset.confirm = '1'; t.closest('button').innerHTML = 'Delete?'; return; }
+      try { await api('DELETE', `/api/lists/${lid}`); L$.F.src.delete('l' + lid); toast(`Deleted “${l.name}”. Its leads are still in Leads.`); await loadLists(); listModal(LM.ids); } catch (err) { toast(err.message, 'alert'); }
+      break;
+    }
     case 'checkone': checkModal([+t.closest('[data-id]').dataset.id]); break;
     case 'bdnc': {
       const ids = [...L$.sel];
@@ -1333,6 +1362,29 @@ document.addEventListener('click', async (e) => {
     case 'indsave': saveIndustry(); break;
   }
 });
+/* Add to list */
+const LM = { ids: [], pick: null };
+function listModal(ids) {
+  LM.ids = ids; if (LM.pick !== 'new' && !ST.lists.some(l => l.id === LM.pick)) LM.pick = ST.lists[0]?.id ?? 'new';
+  $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Add to list">
+    <div class="card-h"><div><h2>Add ${fmt(ids.length)} lead${ids.length === 1 ? '' : 's'} to a list</h2><p>Lists are yours to organise. Every search is also a list automatically.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
+    <div class="card-b" style="display:flex;flex-direction:column;gap:8px">
+      ${ST.lists.map(l => `<label class="opt sm lmrow ${LM.pick === l.id ? 'on' : ''}" data-lid="${l.id}"><input type="radio" name="lmpick" value="${l.id}" ${LM.pick === l.id ? 'checked' : ''}><div style="flex:1"><b>${esc(l.name)}</b><span>${fmt(l.count)} lead${l.count === 1 ? '' : 's'}</span></div><button type="button" class="btn ghost sm lmdel" data-act="listdel" title="Delete list">${ic('trash', 13)}</button></label>`).join('')}
+      <label class="opt sm ${LM.pick === 'new' ? 'on' : ''}"><input type="radio" name="lmpick" value="new" ${LM.pick === 'new' ? 'checked' : ''}><div style="flex:1"><b>New list</b><input class="input" id="lm-name" placeholder="e.g. Orange County decks, call first" style="margin-top:6px" autocomplete="off"></div></label>
+      <div class="help" id="lm-err" style="color:var(--bad)"></div></div>
+    <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="listgo">${ic('plus', 14)}Add to list</button></div></div></div>`;
+  if (LM.pick === 'new') setTimeout(() => $('#lm-name')?.focus(), 0);
+}
+async function listSave() {
+  const btn = document.querySelector('[data-act="listgo"]'); btn.disabled = true;
+  try {
+    let lid = LM.pick;
+    if (lid === 'new') { const name = $('#lm-name').value.trim(); if (!name) { $('#lm-err').textContent = 'Give the list a name.'; btn.disabled = false; return; } lid = (await api('POST', '/api/lists', { name })).list.id; }
+    await api('POST', `/api/lists/${lid}/leads`, { ids: LM.ids });
+    closeOverlay(); L$.sel.clear(); await loadLists();
+    toast(`Added ${fmt(LM.ids.length)} to “${listName('l' + lid)}”`);
+  } catch (e) { $('#lm-err').textContent = e.message; btn.disabled = false; }
+}
 function applyView(id) {
   L$.F = defaultF(); L$.view = id === 'all' ? 'all' : +id;
   const v = ST.views.find(x => x.id === +id);
@@ -1377,6 +1429,7 @@ let noteTimer = 0;
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.id === 'lq') { L$.F.q = t.value; changed(); return; }
+  if (t.id === 'lm-name' && LM.pick !== 'new') { LM.pick = 'new'; document.querySelectorAll('[name="lmpick"]').forEach(r => { r.checked = r.value === 'new'; r.closest('.opt').classList.toggle('on', r.checked); }); return; }
   if (t.id === 'ind-q') { IP.q = t.value; rerenderInd(); return; }
   if (t.id === 'ind-name' && $('.inddrawer h2')) { $('.inddrawer h2').textContent = t.value || 'Untitled'; }
   if (t.id && t.id.startsWith('ddq-')) { L$.ddq = t.value; renderPanel(); return; }
@@ -1415,6 +1468,7 @@ document.addEventListener('change', async (e) => {
   if (t.dataset.xopt) { XP[t.dataset.xopt] = t.checked; XP.file = $('#x-file').value; exportModal(); return; }
   if (t.dataset.xcol) { t.checked ? XP.cols.add(t.dataset.xcol) : XP.cols.delete(t.dataset.xcol); XP.preset = Object.entries(XPRESETS).find(([, a]) => a.length === XP.cols.size && a.every(c => XP.cols.has(c)))?.[0] || 'custom'; exportModal(); return; }
   if (t.id === 'x-pfmt') { XP.pfmt = t.value; XP.file = $('#x-file').value; exportModal(); return; }
+  if (t.name === 'lmpick') { LM.pick = t.value === 'new' ? 'new' : +t.value; document.querySelectorAll('[name="lmpick"]').forEach(r => r.closest('.opt').classList.toggle('on', r.checked)); if (LM.pick === 'new') $('#lm-name')?.focus(); return; }
   if (t.dataset.ck) { CK[t.dataset.ck] = t.checked; t.closest('.opt').classList.toggle('on', t.checked); return; }
   if (t.id === 'fs-ind') { FS.ind = +t.value; FS.terms = new Set(curInd().terms.map((_, i) => i)); FS.extra = []; refreshFind(['what']); return; }
   if (t.dataset.depth != null) { FS.depth = +t.dataset.depth; if (FS.depth === 0) FS.emails = false; $('#fs-collect').innerHTML = collectHTML(); refreshFind([]); return; }
@@ -1437,7 +1491,7 @@ async function boot() {
   ST.industries = data.industries; ST.searches = data.searches; ST.hiddenNames = data.hiddenNames || {}; ST.config = data.config; ST.cols = data.cols;
   try { ST.views = (await api('GET', '/api/views')).views; } catch { ST.views = []; }
   shell(); render();
-  loadOutreach();
+  loadOutreach(); loadLists();
   await initLeads();
   if (ST.searches.some(ACTIVE)) startPolling();
   setInterval(() => { if (!document.hidden && !pollTimer) sync(); }, 60000);

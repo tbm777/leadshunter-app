@@ -19,13 +19,14 @@ const REASON = {
   'page-error': 'The page broke while filling the form', 'no-submit-button': 'The form has no send button', 'fields-still-invalid': 'The form kept rejecting a field',
   'gave-up-after-retries': 'The site kept rejecting the form', 'sent-no-confirmation': 'Sent, but the site showed no confirmation', 'no-response': 'The site did not respond to the send',
   'no-confirmation': 'The site showed no confirmation', 'validation-error': 'The form kept rejecting a field', 'file-type': 'The form only accepts Word files',
-  'skipped by you': 'Skipped by you', 'do not contact': 'Marked do not contact', 'already contacted': 'You marked this lead as contacted', 'directory-page': 'The website is a directory or social profile, not their own site', 'no-contact-form': 'No contact form found',
+  'skipped by you': 'Skipped by you', 'do not contact': 'Marked do not contact', 'already contacted': 'You marked this lead as contacted', 'directory-page': 'The website is a directory or social profile, not their own site', manual: 'Manual campaign: you send this one yourself', 'no-contact-form': 'No contact form found',
 };
 const SENT = ['sent', 'submitted', 'sent_manual'];
 const reasonText = r => REASON[r] || (r ? String(r).replace(/-/g, ' ') : '');
 const pill = (st) => `<span class="pill" style="--c:${ST_COLOR[st] || 'var(--idle)'}">${ST_LABEL[st] || st}</span>`;
 const CSTATUS = { draft: ['Draft', 'var(--idle)'], active: ['Active', 'var(--ok)'], paused: ['Paused', 'var(--warn)'], archived: ['Archived', 'var(--idle)'] };
-const scheduled = c => c.status === 'active' && c.start_at && c.start_at > Date.now();
+const scheduled = c => c.status === 'active' && c.mode !== 'manual' && c.start_at && c.start_at > Date.now();
+const modePill = c => c.mode === 'manual' ? '<span class="pill plain modepill">Manual</span>' : '';
 const cpill = c => scheduled(c) ? '<span class="pill" style="--c:var(--info)">Scheduled</span>' : `<span class="pill" style="--c:${CSTATUS[c.status][1]}">${CSTATUS[c.status][0]}</span>`;
 const startLbl = c => scheduled(c) ? `Starts ${new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(c.start_at))} PT` : '';
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -76,7 +77,7 @@ function campRow(c) {
   const seg = (v, col) => v ? `<i style="width:${(v / Math.max(1, tot) * 100).toFixed(2)}%;background:${col}"></i>` : '';
   const live = jobActive(c.job);
   return `<a class="camp" href="#campaign/${c.id}">
-    <div><h4>${A.esc(c.name)}</h4><div class="meta">${cpill(c)}${scheduled(c) ? `<span style="color:var(--info)">${startLbl(c)}</span>` : ''}<span>${s ? A.esc(s.label) : '<span style="color:var(--warn)">No sender</span>'}</span><span>${c.daily_limit}/day</span><span>${schedLbl(c)}</span></div></div>
+    <div><h4>${A.esc(c.name)}</h4><div class="meta">${cpill(c)}${modePill(c)}${scheduled(c) ? `<span style="color:var(--info)">${startLbl(c)}</span>` : ''}<span>${s ? A.esc(s.label) : '<span style="color:var(--warn)">No sender</span>'}</span>${c.mode === 'manual' ? '<span>You send from the Manual queue</span>' : `<span>${c.daily_limit}/day</span><span>${schedLbl(c)}</span>`}</div></div>
     <div class="prog"><div class="t"><span><b class="num" style="color:var(--ink)">${A.fmt(done)}</b> of ${A.fmt(tot)} contacted</span>${n.manual ? `<span style="color:var(--manual)">${A.fmt(n.manual)} need you</span>` : ''}</div>
       <div class="seg">${seg(done, 'var(--ok)')}${seg(n.manual, 'var(--manual)')}${seg(n.failed + n.skipped, 'var(--bad)')}${seg(n.sending, 'var(--warn)')}</div></div>
     <div class="ctoday">${live ? `<span class="okline" style="color:var(--warn)"><span class="spin"></span>${c.job.mode === 'test' ? 'Testing' : 'Sending'} ${c.job.done}/${c.job.total}</span>` : `<b class="num">${A.fmt(c.today)}</b><span> / ${c.daily_limit} today</span>`}</div></a>`;
@@ -87,12 +88,16 @@ function emptyCampaigns() {
     <div class="osteps">${step(1, 'Sender profile', 'Your name, email and phone for the forms.', !OS.senders.length)}${step(2, 'Write the message', 'Subject and message, with the company name filled in.', OS.senders.length)}${step(3, 'Add leads and start', 'Pick leads on the Leads page, test, then start.', false)}</div>
     <div class="row" style="justify-content:center;padding:0 0 28px">${OS.senders.length ? `<button class="btn primary" data-o="newcamp">${A.ic('plus')}New campaign</button>` : `<button class="btn primary" data-o="newsender">${A.ic('plus')}Create sender profile</button>`}</div></div>`;
 }
+function modeOpts(cur, name) {
+  return `<div class="modeopts">${[['auto', 'Automatic', 'The robot fills and sends each form. CAPTCHAs come to your Manual queue.'], ['manual', 'Manual', 'Every form goes to your Manual queue. You send each one with Fill form.']].map(([v, t, d]) => `<label class="opt sm ${cur === v ? 'on' : ''}"><input type="radio" name="${name}" value="${v}" ${cur === v ? 'checked' : ''}><div><b>${t}</b><span>${d}</span></div></label>`).join('')}</div>`;
+}
 function newCampaignModal(then) {
   A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="New campaign">
     <div class="card-h"><div><h2>New campaign</h2><p>You can change everything later.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
     <div class="card-b" style="display:flex;flex-direction:column;gap:14px">
       <div class="field"><label for="nc-name">Name</label><input class="input big" id="nc-name" placeholder="e.g. Roofers, missed calls" autocomplete="off"></div>
       <div class="field"><label for="nc-sender">Send as</label>${OS.senders.length ? `<select class="input" id="nc-sender">${OS.senders.map(s => `<option value="${s.id}">${A.esc(s.label)} · ${A.esc(s.email)}</option>`).join('')}</select>` : `<div class="help">No sender profile yet. You can add one in Settings after creating the campaign.</div>`}</div>
+      <div class="field"><span class="flabel">How it sends</span>${modeOpts('auto', 'ncmode')}</div>
       <div class="help" id="nc-err" style="color:var(--bad)"></div></div>
     <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-o="newcampok">Create campaign</button></div></div></div>`;
   newCampaignModal.then = then;
@@ -104,7 +109,7 @@ async function createCampaign() {
   if (!name) { A.$('#nc-err').textContent = 'Give it a name.'; return; }
   btn.disabled = true;
   try {
-    const r = await A.api('POST', '/api/campaigns', { name, sender_id: A.$('#nc-sender') ? +A.$('#nc-sender').value : null, subject: DEFAULT_SUBJECT, message: '' });
+    const r = await A.api('POST', '/api/campaigns', { name, sender_id: A.$('#nc-sender') ? +A.$('#nc-sender').value : null, subject: DEFAULT_SUBJECT, message: '', mode: document.querySelector('[name="ncmode"]:checked')?.value || 'auto' });
     upsertCampaign(r.campaign); A.closeOverlay();
     if (newCampaignModal.then) { const f = newCampaignModal.then; newCampaignModal.then = null; f(r.campaign); }
     else { cp(r.campaign.id).tab = 'message'; location.hash = `#campaign/${r.campaign.id}`; }
@@ -118,7 +123,7 @@ function campaignView(arg) {
   if (!c) { A.api('GET', `/api/campaigns/${id}`).then(r => { upsertCampaign(r.campaign); A.render(); }).catch(() => { location.hash = '#campaigns'; }); return loading(); }
   const P = cp(id);
   return `<div class="chead">
-      <div><a class="back" href="#campaigns">${A.ic('back', 14)}Campaigns</a><h1>${A.esc(c.name)}</h1><div class="meta">${cpill(c)}${scheduled(c) ? `<span style="color:var(--info);font-weight:550">${startLbl(c)}</span>` : ''}<span>${senderOf(c) ? 'Sends as ' + A.esc(senderOf(c).label) : 'No sender yet'}</span><span>${c.daily_limit} a day</span><span>${schedLbl(c)}</span></div></div>
+      <div><a class="back" href="#campaigns">${A.ic('back', 14)}Campaigns</a><h1>${A.esc(c.name)}</h1><div class="meta">${cmeta(c)}</div></div>
       <div class="row" id="c-actions">${actionsHTML(c)}</div></div>
     <div id="c-banner">${bannerHTML(c)}</div>
     ${c.status === 'draft' ? `<div id="c-ready">${readyHTML(c)}</div>` : ''}
@@ -126,7 +131,13 @@ function campaignView(arg) {
     <div class="ctabs" role="tablist">${[['leads', 'Leads', c.counts.total], ['message', 'Message'], ['settings', 'Settings']].map(([k, l, n]) => `<button role="tab" aria-selected="${P.tab === k}" class="${P.tab === k ? 'on' : ''}" data-ctab="${k}">${l}${n != null ? ` <span class="n num">${A.fmt(n)}</span>` : ''}</button>`).join('')}</div>
     <div id="c-tab">${tabHTML(c)}</div>`;
 }
+function cmeta(c) {
+  return `${cpill(c)}${modePill(c)}${scheduled(c) ? `<span style="color:var(--info);font-weight:550">${startLbl(c)}</span>` : ''}<span>${senderOf(c) ? 'Sends as ' + A.esc(senderOf(c).label) : 'No sender yet'}</span>${c.mode === 'manual' ? '<span>You send each form from the Manual queue</span>' : `<span>${c.daily_limit} a day</span><span>${schedLbl(c)}</span>`}`;
+}
 function actionsHTML(c) {
+  if (c.mode === 'manual') {
+    return `${c.status === 'active' ? `<a class="btn" href="#manual" data-o="toqueue">${A.ic('manual', 14)}Open Manual queue${c.counts.manual ? ` <span class="n num">${A.fmt(c.counts.manual)}</span>` : ''}</a><button class="btn" data-o="pause">Pause</button>` : `<button class="btn primary" data-o="launchmanual">${A.ic('play', 13)}${c.status === 'paused' ? 'Resume' : 'Launch campaign'}</button>`}`;
+  }
   const live = jobActive(c.job);
   const left = Math.max(0, c.daily_limit - c.today);
   return `<button class="btn" data-o="test" ${live || !c.counts.queued ? 'disabled' : ''} title="Fills up to 10 forms and stops before pressing send">${A.ic('check', 14)}Test run</button>
@@ -137,7 +148,7 @@ function statsHTML(c) {
   const n = c.counts;
   return `<div><span>Queued</span><b class="num">${A.fmt(n.queued + n.sending)}</b></div><div><span>Sent</span><b class="num" style="color:var(--ok)">${A.fmt(contacted(c))}</b>${n.submitted ? `<button class="linkbtn muted" data-o="reviewnoconf" style="font-size:11.5px;text-align:left">${A.fmt(n.submitted)} without confirmation · Review</button>` : ''}</div>
     <div><span>Needs you</span><b class="num" style="color:${n.manual ? 'var(--manual)' : 'inherit'}">${A.fmt(n.manual)}</b></div><div><span>Failed or skipped</span><b class="num">${A.fmt(n.failed + n.skipped)}</b></div>
-    <div><span>Today</span><b class="num">${A.fmt(c.today)} <small>/ ${c.daily_limit}</small></b></div>`;
+    <div><span>Today</span><b class="num">${A.fmt(c.today)}${c.mode === 'manual' ? '' : ` <small>/ ${c.daily_limit}</small>`}</b></div>`;
 }
 function readyHTML(c) {
   const steps = [
@@ -292,9 +303,10 @@ function settingsTab(c) {
   return `<div class="card"><div class="card-b sgrid2">
     <div class="field"><label for="s-name">Campaign name</label><input class="input" id="s-name" data-ssave="name" value="${A.esc(c.name)}" maxlength="80"></div>
     <div class="field"><label for="s-sender">Send as</label><div class="row" style="flex-wrap:nowrap"><select class="input" id="s-sender" data-ssave="sender_id"><option value="">Choose a sender profile</option>${OS.senders.map(s => `<option value="${s.id}" ${s.id === c.sender_id ? 'selected' : ''}>${A.esc(s.label)} · ${A.esc(s.email)}</option>`).join('')}</select><button class="btn" data-o="newsender">${A.ic('plus', 13)}New</button></div><span class="help">Name, email and phone typed into every form.</span></div>
-    <div class="field"><label for="s-limit">Daily limit</label><input class="input" id="s-limit" type="number" min="1" max="2000" data-ssave="daily_limit" value="${c.daily_limit}"><span class="help">Forms sent per day, counted in Los Angeles time.</span></div>
+    <div class="field" style="grid-column:1/-1"><span class="flabel">How it sends</span>${modeOpts(c.mode || 'auto', 'smode')}<span class="help">Switching moves leads that are waiting: to your Manual queue, or back to the robot.</span></div>
+    ${c.mode === 'manual' ? '' : `<div class="field"><label for="s-limit">Daily limit</label><input class="input" id="s-limit" type="number" min="1" max="2000" data-ssave="daily_limit" value="${c.daily_limit}"><span class="help">Forms sent per day, counted in Los Angeles time.</span></div>
     <div class="field"><label>Sending hours (PT)</label><div class="row" style="flex-wrap:nowrap"><select class="input" data-ssave="window_start">${hours(c.window_start, 0, 23)}</select><span class="help">to</span><select class="input" data-ssave="window_end">${hours(c.window_end, 1, 24)}</select></div><span class="help">Business hours look the most natural.</span></div>
-    <div class="field" style="grid-column:1/-1"><label>Sending days</label><div class="days" role="group">${[1, 2, 3, 4, 5, 6, 0].map(d => `<button class="${c.weekdays.includes(String(d)) ? 'on' : ''}" data-day="${d}" aria-pressed="${c.weekdays.includes(String(d))}">${DAYS[d]}</button>`).join('')}</div></div>
+    <div class="field" style="grid-column:1/-1"><label>Sending days</label><div class="days" role="group">${[1, 2, 3, 4, 5, 6, 0].map(d => `<button class="${c.weekdays.includes(String(d)) ? 'on' : ''}" data-day="${d}" aria-pressed="${c.weekdays.includes(String(d))}">${DAYS[d]}</button>`).join('')}</div></div>`}
     <div class="field" style="grid-column:1/-1"><label>File for forms that require an upload</label><label class="opt on" style="cursor:default"><input type="radio" checked disabled><div><b>The Bat Marketing</b><span>Two pages: your subject and message, then your offer. Attached only when a form requires a file.</span></div></label></div>
     <div style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line);padding-top:14px"><span class="help" id="s-save"></span><button class="btn ghost sm" data-o="delcamp" style="color:var(--bad)">${A.ic('trash', 13)}Delete campaign</button></div>
   </div></div>`;
@@ -307,7 +319,7 @@ async function saveSetting(c, patch) {
 function refreshCampaignChrome(c) {
   const set = (sel, html) => { const el = A.$(sel); if (el) el.innerHTML = html; };
   set('#c-actions', actionsHTML(c)); set('#c-banner', bannerHTML(c)); set('#c-stats', statsHTML(c)); set('#c-ready', readyHTML(c));
-  const meta = document.querySelector('.chead .meta'); if (meta) meta.innerHTML = `${cpill(c)}${scheduled(c) ? `<span style="color:var(--info);font-weight:550">${startLbl(c)}</span>` : ''}<span>${senderOf(c) ? 'Sends as ' + A.esc(senderOf(c).label) : 'No sender yet'}</span><span>${c.daily_limit} a day</span><span>${schedLbl(c)}</span>`;
+  const meta = document.querySelector('.chead .meta'); if (meta) meta.innerHTML = cmeta(c);
   const h = document.querySelector('.chead h1'); if (h) h.textContent = c.name;
   document.querySelectorAll('.ctabs [data-ctab="leads"] .n').forEach(n => { n.textContent = A.fmt(c.counts.total); });
   const fl = document.querySelector('.ofilters .tabs');
@@ -355,11 +367,11 @@ function acModal() {
   A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop role="dialog" aria-label="Add to campaign">
     <div class="card-h"><div><h2>Add ${A.fmt(AC.ids.length)} lead${AC.ids.length === 1 ? '' : 's'} to a campaign</h2><p>Nothing is sent until the campaign is started.</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
     <div class="card-b" style="display:flex;flex-direction:column;gap:10px">
-      ${live.length ? `<div class="acpick">${live.map(c => `<label class="opt sm ${AC.cid === c.id ? 'on' : ''}"><input type="radio" name="accamp" value="${c.id}" ${AC.cid === c.id ? 'checked' : ''}><div><b>${A.esc(c.name)}</b><span>${CSTATUS[c.status][0]} · ${A.fmt(c.counts.total)} leads · ${A.fmt(contacted(c))} sent</span></div></label>`).join('')}</div>` : `<p style="margin:0;color:var(--muted)">You don't have a campaign yet.</p>`}
+      ${live.length ? `<div class="acpick">${live.map(c => `<label class="opt sm ${AC.cid === c.id ? 'on' : ''}"><input type="radio" name="accamp" value="${c.id}" ${AC.cid === c.id ? 'checked' : ''}><div><b>${A.esc(c.name)}</b><span>${CSTATUS[c.status][0]}${c.mode === 'manual' ? ' · Manual' : ''} · ${A.fmt(c.counts.total)} leads · ${A.fmt(contacted(c))} sent</span></div></label>`).join('')}</div>` : `<p style="margin:0;color:var(--muted)">You don't have a campaign yet.</p>`}
       <button class="linkbtn" data-o="acnew" style="align-self:flex-start">${A.ic('plus', 12)} New campaign</button>
       ${AC.cid ? `<div class="acsum">${!s ? `<span class="spin"></span> Checking these leads…` : `
-        <div class="acline ok"><b class="num">${A.fmt(s.add)}</b> will be queued for sending</div>
-        ${s.manual ? `<div class="acline man"><b class="num">${A.fmt(s.manual)}</b> go to the Manual queue (their form has a CAPTCHA)</div>` : ''}
+        ${s.mode === 'manual' ? `<div class="acline man"><b class="num">${A.fmt(s.manual)}</b> go to your Manual queue to send yourself (manual campaign)</div>` : `<div class="acline ok"><b class="num">${A.fmt(s.add)}</b> will be queued for sending</div>
+        ${s.manual ? `<div class="acline man"><b class="num">${A.fmt(s.manual)}</b> go to the Manual queue (their form has a CAPTCHA)</div>` : ''}`}
         ${sk.length ? `<div class="acline skip"><b class="num">${A.fmt(Object.values(s.skipped).reduce((a, b) => a + b, 0))}</b> skipped: ${sk.join(', ')}</div>` : ''}
         ${s.skipped.contacted || AC.includeContacted ? `<label class="ck"><input type="checkbox" id="ac-inc" ${AC.includeContacted ? 'checked' : ''}> Include leads I've already contacted</label>` : ''}`}</div>` : ''}
       <div class="help" id="ac-err" style="color:var(--bad)"></div></div>
@@ -405,11 +417,11 @@ function extGuide() {
       <p class="help" style="margin:12px 0 0">Updating: download again, replace the folder's files, then click the reload icon on the extension in <code>opera://extensions</code>. The extension only acts on pages you open with Fill form, and it never solves CAPTCHAs.</p></div>
     <div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end"><button class="btn" data-act="close">Done</button></div></div></div>`;
 }
-const MQ_REASONS = [['all', 'All'], ['captcha', 'CAPTCHA'], ['interrupted', 'Interrupted'], ['login-required', 'Login'], ['other', 'Other']];
-const mqGroup = r => ['captcha', 'interrupted', 'login-required'].includes(r) ? r : 'other';
+const MQ_REASONS = [['all', 'All'], ['manual', 'Manual campaigns'], ['captcha', 'CAPTCHA'], ['interrupted', 'Interrupted'], ['login-required', 'Login'], ['other', 'Other']];
+const mqGroup = r => ['manual', 'captcha', 'interrupted', 'login-required'].includes(r) ? r : 'other';
 const ageLbl = t => { const m = Math.round((Date.now() - t) / 60000); return m < 60 ? `${Math.max(1, m)}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`; };
-const REASON_C = { captcha: 'var(--manual)', interrupted: 'var(--warn)', 'login-required': 'var(--info)', other: 'var(--idle)' };
-const REASON_SHORT = { captcha: 'CAPTCHA', interrupted: 'Interrupted', 'login-required': 'Login', 'file-type': 'Word file', 'directory-page': 'Directory page' };
+const REASON_C = { manual: 'var(--accent)', captcha: 'var(--manual)', interrupted: 'var(--warn)', 'login-required': 'var(--info)', other: 'var(--idle)' };
+const REASON_SHORT = { manual: 'Manual', captcha: 'CAPTCHA', interrupted: 'Interrupted', 'login-required': 'Login', 'file-type': 'Word file', 'directory-page': 'Directory page' };
 function mqFiltered() {
   const q = (MQ.q || '').trim().toLowerCase();
   return MQ.items.filter(it => (MQ.reason === 'all' || mqGroup(it.reason) === MQ.reason) && (!MQ.camp || it.campaign_id === MQ.camp) && (!q || `${it.name} ${it.website || ''}`.toLowerCase().includes(q)));
@@ -457,7 +469,7 @@ function mqDetail() {
   const list = mqFiltered(), pos = list.indexOf(it);
   const canFill = hasExt() && it.fill_token && snd && subj && msg && url && it.reason !== 'login-required';
   const f = (k, v) => v ? `<div class="mfield"><span class="k">${k}</span><span class="val">${A.esc(v)}</span><button class="dcopy" data-copy="${A.esc(v)}">${A.ic('copy', 12)}<span>Copy</span></button></div>` : '';
-  const why = it.reason === 'captcha' ? 'This form has a CAPTCHA you need to solve. Everything else is filled in for you.' : it.reason === 'interrupted' ? 'The robot stopped while sending this one. Open the form and check whether it went through before sending again.' : reasonText(it.reason);
+  const why = it.reason === 'manual' ? 'This campaign is manual, so you send each form yourself. Fill form opens it already filled in.' : it.reason === 'captcha' ? 'This form has a CAPTCHA you need to solve. Everything else is filled in for you.' : it.reason === 'interrupted' ? 'The robot stopped while sending this one. Open the form and check whether it went through before sending again.' : reasonText(it.reason);
   return `<div class="mqw-h"><div><h2>${A.esc(cleanCompanyName(it.name))}</h2><p>${url ? `<a href="${A.esc(url)}" target="_blank" rel="noopener">${A.esc(domain(url))}</a> · ` : ''}${A.esc(it.campaign)}</p></div><div class="mqw-nav"><button class="iconbtn sm" data-mqnav="-1" aria-label="Previous" ${pos <= 0 ? 'disabled' : ''}>${A.ic('back', 14)}</button><span class="num">${pos + 1} / ${list.length}</span><button class="iconbtn sm" data-mqnav="1" aria-label="Next" ${pos >= list.length - 1 ? 'disabled' : ''}>${A.ic('arrow', 14)}</button></div></div>
     <div class="mqw-b">
       <div class="note ${it.reason === 'interrupted' ? '' : 'neutral'}">${A.ic('alert')}<div>${A.esc(why)}</div></div>
@@ -750,6 +762,13 @@ async function onClick(e) {
       catch (err) { A.$('#st-err').textContent = err.message; b.disabled = false; }
       break;
     }
+    case 'launchmanual': {
+      b.disabled = true;
+      try { const r = await A.api('POST', `/api/campaigns/${c.id}/status`, { status: 'active' }); upsertCampaign(r.campaign); await loadOutreach(); A.render(); A.toast(`Launched. ${A.fmt(r.campaign.counts.manual)} form${r.campaign.counts.manual === 1 ? ' is' : 's are'} waiting in your Manual queue.`); }
+      catch (err) { A.toast(err.message, 'alert'); b.disabled = false; }
+      break;
+    }
+    case 'toqueue': MQ.camp = c.id; MQ.reason = 'all'; MQ.loaded = false; break;
     case 'pause': {
       b.disabled = true;
       try { const r = await A.api('POST', `/api/campaigns/${c.id}/status`, { status: 'paused' }); upsertCampaign(r.campaign); A.render(); A.toast('Paused. Nothing more will be sent.'); }
@@ -924,6 +943,8 @@ function onChange(e) {
   const t = e.target, c = curCampaign();
   if (t.dataset.ssave && c) { const k = t.dataset.ssave; const v = ['daily_limit', 'window_start', 'window_end'].includes(k) ? +t.value : k === 'sender_id' ? (+t.value || null) : t.value; saveSetting(c, { [k]: v }); return; }
   if (t.name === 'accamp') { AC.cid = +t.value; acSummary(); return; }
+  if (t.name === 'ncmode') { document.querySelectorAll('[name="ncmode"]').forEach(r => r.closest('.opt').classList.toggle('on', r.checked)); return; }
+  if (t.name === 'smode' && c) { saveSetting(c, { mode: t.value }).then(() => { A.render(); loadOutreach(); }); return; }
   if (t.name === 'stwhen' || t.id === 'st-date' || t.id === 'st-time') { if (t.id === 'st-date' || t.id === 'st-time') A.$('#st-later').checked = true; const later = A.$('#st-later').checked; A.$('#st-o1').classList.toggle('on', !later); A.$('#st-o2').classList.toggle('on', later); A.$('#st-go').textContent = later ? 'Schedule campaign' : 'Start campaign'; return; }
   if (t.id === 'ac-inc') { AC.includeContacted = t.checked; acSummary(); return; }
   if (t.id === 'mq-camp') { MQ.camp = +t.value || 0; mqRender(['list', 'detail']); return; }
