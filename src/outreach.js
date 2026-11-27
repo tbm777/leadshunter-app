@@ -48,7 +48,7 @@ export async function outreachOverview(env) {
     env.DB.prepare("SELECT COUNT(*) AS n FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE o.status = 'manual' AND c.status = 'active'"),
     env.DB.prepare("SELECT id, campaign_id, status, params, to_check, checked, created_at, started_at, finished_at, error, run_url FROM searches WHERE kind = 'outreach' AND id IN (SELECT MAX(id) FROM searches WHERE kind = 'outreach' GROUP BY campaign_id)"),
     env.DB.prepare('SELECT * FROM campaign_steps ORDER BY campaign_id, step'),
-    env.DB.prepare('SELECT o.campaign_id, SUM(o.next_at IS NOT NULL) AS sched, SUM(l.status = 4) AS replied FROM outreach o JOIN leads l ON l.id = o.lead_id GROUP BY o.campaign_id'),
+    env.DB.prepare('SELECT o.campaign_id, SUM(o.next_at IS NOT NULL) AS sched, SUM(l.status = 4) AS replied, SUM(o.shot_at IS NOT NULL AND o.review IS NULL) AS to_review FROM outreach o JOIN leads l ON l.id = o.lead_id GROUP BY o.campaign_id'),
   ]);
   const stepsBy = {}; for (const r of stp.results) (stepsBy[r.campaign_id] ||= []).push(r);
   const seqBy = Object.fromEntries(sq.results.map(r => [r.campaign_id, r]));
@@ -75,7 +75,7 @@ function campaignOut(c, counts = {}, today = 0, job = null, steps = [], seq = {}
     id: c.id, name: c.name, sender_id: c.sender_id, subject: c.subject, message: c.message, file_template: c.file_template,
     daily_limit: c.daily_limit, window_start: c.window_start, window_end: c.window_end, weekdays: c.weekdays, status: c.status, mode: c.mode || 'auto', start_at: c.start_at || null, msg_version: c.msg_version || 1,
     created_at: c.created_at, updated_at: c.updated_at, today, job,
-    counts: { total, queued: n('queued'), sending: n('sending'), sent: n('sent'), submitted: n('submitted'), sent_manual: n('sent_manual'), manual: n('manual'), failed: n('failed'), skipped: n('skipped'), scheduled: seq.sched || 0, replied: seq.replied || 0 },
+    counts: { total, queued: n('queued'), sending: n('sending'), sent: n('sent'), submitted: n('submitted'), sent_manual: n('sent_manual'), manual: n('manual'), failed: n('failed'), skipped: n('skipped'), scheduled: seq.sched || 0, replied: seq.replied || 0, to_review: seq.to_review || 0 },
     steps: steps.map(stepOut),
   };
 }
@@ -87,7 +87,7 @@ async function campaignById(env, id) {
     env.DB.prepare(`SELECT COUNT(*) AS n FROM outreach WHERE campaign_id = ? AND sent_at >= ? AND status IN ('sent','submitted','sent_manual')`).bind(id, today),
     env.DB.prepare("SELECT id, campaign_id, status, params, to_check, checked, created_at, started_at, finished_at, error, run_url FROM searches WHERE kind = 'outreach' AND campaign_id = ? ORDER BY id DESC LIMIT 1").bind(id),
     env.DB.prepare('SELECT * FROM campaign_steps WHERE campaign_id = ? ORDER BY step').bind(id),
-    env.DB.prepare('SELECT SUM(o.next_at IS NOT NULL) AS sched, SUM(l.status = 4) AS replied FROM outreach o JOIN leads l ON l.id = o.lead_id WHERE o.campaign_id = ?').bind(id),
+    env.DB.prepare('SELECT SUM(o.next_at IS NOT NULL) AS sched, SUM(l.status = 4) AS replied, SUM(o.shot_at IS NOT NULL AND o.review IS NULL) AS to_review FROM outreach o JOIN leads l ON l.id = o.lead_id WHERE o.campaign_id = ?').bind(id),
   ]);
   const row = c.results[0];
   if (!row) throw new HttpError(404, 'Campaign not found.');
@@ -319,7 +319,7 @@ export async function listItems(env, url) {
   // Campaign lists keep the order leads were added, so rows don't jump while a run updates them.
   const order = q.get('order') === 'sent' ? 'o.sent_at DESC, o.id DESC' : q.get('order') === 'recent' ? 'o.updated_at DESC, o.id DESC' : 'o.id';
   const limit = Math.min(500, +q.get('limit') || 200), offset = Math.max(0, +q.get('offset') || 0);
-  const sql = `SELECT o.id, o.campaign_id, o.lead_id, o.status, o.reason, o.evidence, o.form_url, o.test_status, o.test_reason, o.test_at, o.sent_at, o.updated_at, o.step, o.next_at, l.status AS lead_status,
+  const sql = `SELECT o.id, o.campaign_id, o.lead_id, o.status, o.reason, o.evidence, o.form_url, o.test_status, o.test_reason, o.test_at, o.shot_at, o.review, o.answers, o.sent_at, o.updated_at, o.step, o.next_at, l.status AS lead_status,
       l.name, l.website, l.city, l.region, l.postal, l.country, l.phone, l.category, l.industry_id, c.name AS campaign
     FROM outreach o JOIN leads l ON l.id = o.lead_id JOIN campaigns c ON c.id = o.campaign_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${order} LIMIT ? OFFSET ?`;
@@ -616,3 +616,39 @@ export async function runnerStartItem(env, s, params, b) {
   return json({ ok: true, stop: cur.status === 'cancelled' });
 }
 export { LEAD_COLS };
+
+
+/* ------------------------------------------------------------------ test-run review (accuracy answer key) */
+const REVIEWS = ['right', 'wrong_fields', 'not_contact', 'correct_none', 'missed_form', 'captcha_ok', 'captcha_wrong'];
+/** Runner: store a test-run screenshot (JPEG) for one form, kept 14 days. */
+export async function runnerShot(env, s, params, req, url) {
+  const oid = +url.searchParams.get('oid');
+  if (params.mode !== 'test' || !oid) throw new HttpError(400, 'Screenshots are for test runs only.');
+  const o = await env.DB.prepare('SELECT id FROM outreach WHERE id = ? AND test_job = ?').bind(oid, s.id).first();
+  if (!o) throw new HttpError(404, 'Not in this run.');
+  const buf = await req.arrayBuffer();
+  if (buf.byteLength > 600000) throw new HttpError(413, 'Screenshot too large.');
+  await env.KV.put('shot:' + oid, buf, { expirationTtl: 14 * 86400 });
+  await env.DB.prepare('UPDATE outreach SET shot_at = ?, review = NULL, review_at = NULL WHERE id = ?').bind(now(), oid).run();
+  return json({ ok: true });
+}
+export async function getShot(env, oid) {
+  const b = await env.KV.get('shot:' + oid, { type: 'arrayBuffer' });
+  if (!b) throw new HttpError(404, 'Screenshot expired or missing.');
+  return new Response(b, { headers: { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=86400' } });
+}
+/** Your verdict on one test result; recomputes the detection and field scores from the last 60 days of reviews. */
+export async function reviewItem(env, oid, b) {
+  if (!REVIEWS.includes(b.review)) throw new HttpError(400, 'Unknown verdict.');
+  await env.DB.prepare('UPDATE outreach SET review = ?, review_at = ? WHERE id = ?').bind(b.review, now(), oid).run();
+  const rows = (await env.DB.prepare('SELECT review, COUNT(*) AS n FROM outreach WHERE review IS NOT NULL AND review_at >= ? GROUP BY review').bind(now() - 60 * 864e5).all()).results;
+  const n = Object.fromEntries(rows.map(r => [r.review, r.n])), g = k => n[k] || 0;
+  const detOk = g('right') + g('wrong_fields') + g('correct_none') + g('captcha_ok'), detAll = detOk + g('not_contact') + g('missed_form') + g('captcha_wrong');
+  const fillAll = g('right') + g('wrong_fields');
+  const day = new Date().toISOString().slice(0, 10), put = (k, v) => env.DB.prepare('INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)').bind('score:' + k, JSON.stringify(v));
+  const ops = [];
+  if (detAll) ops.push(put('detection', { pct: Math.round(detOk / detAll * 1000) / 10, n: detAll, at: day }));
+  if (fillAll) ops.push(put('fields', { pct: Math.round(g('right') / fillAll * 1000) / 10, n: fillAll, at: day }));
+  if (ops.length) await env.DB.batch(ops);
+  return json({ ok: true, reviewed: detAll });
+}

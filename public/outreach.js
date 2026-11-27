@@ -174,7 +174,7 @@ function bannerHTML(c) {
   if (j.mode === 'test' && j.status === 'done') {
     const its = (cp(c.id).items || []).filter(i => i.test_status);
     const ready = its.filter(i => i.test_status === 'ready').length, man = its.filter(i => i.test_status === 'manual').length, bad = its.filter(i => i.test_status === 'failed').length;
-    return `<div class="jbanner ok">${A.ic('check', 16)}<div><b>Test run finished: ${ready} ready${man ? `, ${man} need you` : ''}${bad ? `, ${bad} failed` : ''}</b><span>Nothing was sent. Results show in the Test column below.</span></div><button class="btn ghost sm" data-o="dismissbanner">Dismiss</button></div>`;
+    return `<div class="jbanner ok">${A.ic('check', 16)}<div><b>Test run finished: ${ready} ready${man ? `, ${man} need you` : ''}${bad ? `, ${bad} failed` : ''}</b><span>Nothing was sent. Check what the robot did: it takes about 20 seconds per form and makes the engine more accurate.</span></div><button class="btn sm" data-o="testreview">Review results</button><button class="btn ghost sm" data-o="dismissbanner">Dismiss</button></div>`;
   }
   return '';
 }
@@ -193,7 +193,8 @@ function leadsTab(c) {
   if (!n.total) return `<div class="card"><div class="empty"><b>No leads in this campaign yet</b>Go to Leads, select the businesses you want, then choose “Add to campaign”.<div style="margin-top:14px"><button class="btn primary" data-o="addleads">${A.ic('leads', 14)}Pick leads</button></div></div></div>`;
   return `<div class="card">
     <div class="card-h ofilters"><div class="tabs">${FILTERS.filter(([k]) => k !== 'noconf' || cnt.noconf).map(([k, l]) => `<button class="${P.filter === k ? 'on' : ''}" data-ofilter="${k}">${l}<span class="n">${A.fmt(cnt[k])}</span></button>`).join('')}</div><button class="btn ghost sm" data-o="addleads">${A.ic('plus', 13)}Add leads</button></div>
-    <div id="c-items">${itemsHTML(c)}</div></div>`;
+    <div id="c-items">${itemsHTML(c)}</div></div>
+    ${(c.counts.to_review || 0) ? `<div class="rvbar">${A.ic('check', 14)}<span><b class="num">${A.fmt(c.counts.to_review)}</b> test result${c.counts.to_review === 1 ? '' : 's'} waiting for your check</span><button class="btn sm" data-o="testreview">Review now</button></div>` : ''}`;
 }
 function itemsHTML(c) {
   const P = cp(c.id);
@@ -935,6 +936,9 @@ async function onClick(e) {
       break;
     }
     case 'dismissbanner': A.$('#c-banner').innerHTML = ''; break;
+    case 'testreview': openReview(curCampaign()); break;
+    case 'rvskip': rvGo(1); break;
+    case 'rvprev': rvGo(-1); break;
     case 'moreitems': loadItems(c.id, true); break;
     case 'extguide': extGuide(); break;
     case 'addstep': { await flushSave(); c.steps = c.steps || []; const n = c.steps.length + 2; c.steps.push({ step: n, channel: 'form', delay_days: 3, subject: '', message: '' }); cp(c.id).step = n; A.$('#c-tab').innerHTML = tabHTML(c); renderPreview(c); queueSteps(c, true); setTimeout(() => A.$('#st-body')?.focus(), 0); break; }
@@ -1078,6 +1082,13 @@ function onChange(e) {
   if (t.id === 'mq-camp') { MQ.camp = +t.value || 0; mqRender(['list', 'detail']); return; }
 }
 function onKey(e) {
+  if (RV.open && document.querySelector('.rvm')) {
+    if (/INPUT|TEXTAREA/.test(e.target.tagName)) return;
+    const b = document.querySelector(`.rvm [data-rvkey="${e.key}"]`);
+    if (b) { e.preventDefault(); b.click(); return; }
+    if (e.key === 'ArrowRight') { e.preventDefault(); rvGo(1); return; }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); rvGo(-1); return; }
+  }
   if (e.target.id === 'del-in' && e.key === 'Enter') { e.preventDefault(); document.querySelector('[data-o="delcampok"]:not([disabled])')?.click(); return; }
   if (A.currentView() !== 'manual' || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || document.querySelector('.scrim') || e.metaKey || e.ctrlKey) return;
   const k = e.key.toLowerCase();
@@ -1159,3 +1170,52 @@ export function install(ctx) {
   window.addEventListener('beforeunload', () => { if (pendingSave) navigator.sendBeacon && flushSave(); });
 }
 export const outreachNav = () => [['campaigns', 'Campaigns', 'campaigns'], ['manual', 'Manual queue', 'manual', OS.manual], ['playbook', 'Playbook', 'playbook'], ['senders', 'Sender profiles', 'senders']];
+
+
+/* ------------------------------------------------------------------ review test results (the accuracy answer key) */
+const RV = { open: false, list: [], i: 0, done: 0 };
+const RV_Q = {
+  ready: ['Did the robot fill the right form correctly?', [['right', 'Yes, right form and fields'], ['wrong_fields', 'Some fields wrong or empty'], ['not_contact', 'Not the contact form']]],
+  captcha: ['Is there a CAPTCHA a person has to solve?', [['captcha_ok', 'Yes, there is'], ['captcha_wrong', 'No CAPTCHA here']]],
+  none: ['Is there really no contact form here?', [['correct_none', 'Right, no form'], ['missed_form', 'There is a form']]],
+};
+const rvKind = it => it.test_status === 'ready' ? 'ready' : it.test_reason === 'captcha' ? 'captcha' : 'none';
+async function openReview(c) {
+  if (!c) return;
+  RV.open = true; RV.cid = c.id; RV.list = []; RV.i = 0; RV.done = 0;
+  rvRender();
+  try {
+    const r = await A.api('GET', `/api/outreach/items?campaign=${c.id}&test=1&limit=500`);
+    RV.list = r.items.filter(i => i.shot_at).sort((a, b) => (a.review ? 1 : 0) - (b.review ? 1 : 0));
+  } catch (e) { A.toast(e.message, 'alert'); }
+  rvRender();
+}
+function rvGo(d) { RV.i = Math.max(0, Math.min(RV.list.length, RV.i + d)); rvRender(); }
+async function rvVerdict(v) {
+  const it = RV.list[RV.i]; if (!it) return;
+  try { const r = await A.api('POST', `/api/outreach/${it.id}/review`, { review: v }); if (!it.review) RV.done++; it.review = v; RV.score = r; } catch (e) { A.toast(e.message, 'alert'); return; }
+  rvGo(1);
+}
+function rvRender() {
+  const it = RV.list[RV.i], n = RV.list.length;
+  const head = `<div class="rv-h"><div><h2>Review test results</h2><p>${n ? `${Math.min(RV.i + 1, n)} of ${n} · ${RV.list.filter(x => x.review).length} checked` : 'Loading…'}</p></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>`;
+  let body;
+  if (!n) body = `<div class="rv-empty">${RV.list === null ? '' : '<span class="spin"></span>'}</div>`;
+  else if (!it) body = `<div class="rv-empty"><b>All checked</b><span>Thanks. Your answers set the form detection and field accuracy on the Usage page scorecard.</span><button class="btn primary" data-act="close">Done</button></div>`;
+  else {
+    const k = rvKind(it), [q, opts] = RV_Q[k];
+    const said = k === 'ready' ? `Filled the form, ready to send${it.evidence ? `: ${A.esc(it.evidence.replace(/^Filled /, '').replace(/, ready.*$/, ''))}` : ''}` : k === 'captcha' ? 'Found a CAPTCHA, so it would go to your Manual queue' : `Found no usable contact form${it.test_reason && it.test_reason !== 'no-form' ? ` (${A.esc(reasonText(it.test_reason))})` : ''}`;
+    body = `<div class="rv-b">
+      <div class="rv-shot"><img src="/api/outreach/${it.id}/shot" alt="What the robot saw on ${A.esc(it.name)}"></div>
+      <div class="rv-side">
+        <div><b class="rv-name">${A.esc(it.name)}</b><a class="rv-site" href="${A.esc(it.form_url || it.website || '#')}" target="_blank" rel="noopener noreferrer">${A.esc(domain(it.form_url || it.website))} ${A.ic('ext', 12)}</a></div>
+        <div class="rv-said"><span>The robot says</span><b>${said}</b></div>
+        ${k === 'ready' && it.answers ? `<div class="rv-ans"><span>Extra answers it chose</span><p>${A.esc(it.answers)}</p></div>` : ''}
+        <div class="rv-q"><span>${q}</span>${opts.map(([v, l], i) => `<button class="btn ${it.review === v ? 'primary' : ''}" data-rv="${v}" data-rvkey="${i + 1}"><kbd>${i + 1}</kbd>${l}</button>`).join('')}</div>
+        <p class="help">The picture shows the page as the robot left it. Open the site if you're unsure.</p>
+        <div class="rv-nav"><button class="btn ghost sm" data-o="rvprev" ${RV.i ? '' : 'disabled'}>${A.ic('back', 13)}Back</button><button class="btn ghost sm" data-o="rvskip">Skip ${A.ic('arrow', 13)}</button></div>
+      </div></div>`;
+  }
+  A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal rvm" data-stop role="dialog" aria-label="Review test results">${head}${body}</div></div>`;
+}
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-rv]'); if (b && RV.open) rvVerdict(b.dataset.rv); });

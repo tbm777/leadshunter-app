@@ -55,4 +55,9 @@ for (const { fx, out, r, pass, ms } of rows) {
 }
 const passed = rows.filter(r => r.pass).length;
 console.log(`\n${passed}/${rows.length} passed in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+// False "Sent": the engine said sent, but no valid submission reached the server (the worst error).
+const saidSent = rows.filter(r => ['confirmed', 'submitted'].includes(r.out.status));
+const falseSent = saidSent.filter(r => !r.r.valid).length;
+const wrongSend = rows.filter(r => (r.fx.expect === 'manual' || r.fx.expect === 'noform') && r.r.posts > 0).length;
+console.log('SUMMARY ' + JSON.stringify({ total: rows.length, passed, said_sent: saidSent.length, false_sent: falseSent, sent_when_it_should_not: wrongSend }));
 process.exit(passed === rows.length ? 0 : 1);

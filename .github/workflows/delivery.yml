@@ -1,0 +1,51 @@
+name: Delivery test
+
+# Checks that "Sent" means the message arrived: runs the 34 test forms on GitHub's machines, then a few
+# real sends to your Formspree form. Counts only in the logs; secrets are never printed.
+on:
+  workflow_dispatch:
+    inputs:
+      sends:
+        description: Real sends to the Formspree form (max 5; the free plan allows 50 a month)
+        required: false
+        default: '3'
+  schedule:
+    - cron: '41 16 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  delivery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Restore browser
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.cache/ms-playwright
+          key: playwright-1.48.2-v1
+      - name: Install browser
+        run: |
+          npm install --no-save --silent playwright@1.48.2
+          npx playwright install --with-deps chromium
+      - name: Form suite
+        id: suite
+        run: |
+          node tests/forms/run.mjs | tee suite.txt || true
+          echo "summary=$(grep '^SUMMARY ' suite.txt | tail -1)" >> "$GITHUB_OUTPUT"
+      - name: Real sends and score
+        env:
+          TEST_FORM_URL: ${{ secrets.TEST_FORM_URL }}
+          SEED_INBOXES: ${{ secrets.SEED_INBOXES }}
+          LH_API: ${{ vars.LH_API }}
+          RUNNER_SECRET: ${{ secrets.RUNNER_SECRET }}
+          SUITE_SUMMARY: ${{ steps.suite.outputs.summary }}
+          SENDS: ${{ inputs.sends || '3' }}
+        run: node scripts/delivery.mjs

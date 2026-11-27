@@ -486,5 +486,91 @@ export const FIXTURES = [
   },
 ];
 
+// Copies of the most common form tools' real markup (Phase 2: more realistic coverage).
+const okScript = (id, sel, success) => `<script>(function(){var f=document.querySelector('${sel}');
+f.addEventListener('submit',function(e){e.preventDefault();var fd=new FormData(f);
+fetch('/submit/${id}',{method:'POST',body:fd}).then(function(r){return r.json()}).then(function(j){${success}});});})();</script>`;
+FIXTURES.push(
+  {
+    id: 'elementor-pro', industry: 'Roofing', note: 'Elementor Pro form: bracketed names, AJAX, success message in place', mode: 'json',
+    req: ['form_fields[name]', 'form_fields[email]', 'form_fields[message]'],
+    html: () => layout('Summit Roofing Co', `<form class="elementor-form" method="post" name="Contact" id="ef">
+      <input type="hidden" name="post_id" value="12"><input type="hidden" name="form_id" value="a1b2c3">
+      <div class="elementor-form-fields-wrapper">
+      <div class="elementor-field-group elementor-field-type-text elementor-field-required"><label for="form-field-name" class="elementor-field-label">Name</label><input type="text" name="form_fields[name]" id="form-field-name" class="elementor-field" placeholder="Name" required aria-required="true"></div>
+      <div class="elementor-field-group elementor-field-type-email elementor-field-required"><label for="form-field-email" class="elementor-field-label">Email</label><input type="email" name="form_fields[email]" id="form-field-email" class="elementor-field" placeholder="Email" required aria-required="true"></div>
+      <div class="elementor-field-group elementor-field-type-tel"><label for="form-field-phone" class="elementor-field-label">Phone</label><input type="tel" name="form_fields[phone]" id="form-field-phone" class="elementor-field" placeholder="Phone"></div>
+      <div class="elementor-field-group elementor-field-type-textarea elementor-field-required"><label for="form-field-message" class="elementor-field-label">Message</label><textarea name="form_fields[message]" id="form-field-message" class="elementor-field" rows="4" placeholder="Message" required aria-required="true"></textarea></div>
+      <div class="elementor-field-group elementor-field-type-submit"><button type="submit" class="elementor-button"><span><span class="elementor-button-text">Send</span></span></button></div></div></form>
+      ${okScript('elementor-pro', '#ef', "var m=document.createElement('div');m.className=j.ok?'elementor-message elementor-message-success':'elementor-message elementor-message-danger';m.setAttribute('role','alert');m.textContent=j.ok?'Your submission was successful.':j.error;f.appendChild(m);if(j.ok)f.reset();")}`),
+  },
+  {
+    id: 'hubspot-embed', industry: 'Accounting', note: 'HubSpot form in an iframe: split names, hs-button, form replaced by a thank-you', mode: 'json', embed: true,
+    req: ['firstname', 'lastname', 'email', 'message'],
+    html: () => layout('Ledger & Co CPAs', `<p>Book a free consultation.</p><iframe class="hs-form-iframe" src="/embed/hubspot-embed" style="width:100%;height:640px;border:0"></iframe>`),
+    inner: () => layout('', `<form class="hs-form stacked hs-custom-form" id="hsf" novalidate>
+      <div class="hs_firstname hs-form-field"><label for="firstname-9f2"><span>First name</span><span class="hs-form-required">*</span></label><div class="input"><input id="firstname-9f2" name="firstname" class="hs-input" required></div></div>
+      <div class="hs_lastname hs-form-field"><label for="lastname-9f2"><span>Last name</span><span class="hs-form-required">*</span></label><div class="input"><input id="lastname-9f2" name="lastname" class="hs-input" required></div></div>
+      <div class="hs_email hs-form-field"><label for="email-9f2"><span>Email</span><span class="hs-form-required">*</span></label><div class="input"><input id="email-9f2" name="email" type="email" class="hs-input" required></div></div>
+      <div class="hs_company hs-form-field"><label for="company-9f2"><span>Company name</span></label><div class="input"><input id="company-9f2" name="company" class="hs-input"></div></div>
+      <div class="hs_message hs-form-field"><label for="message-9f2"><span>How can we help?</span><span class="hs-form-required">*</span></label><div class="input"><textarea id="message-9f2" name="message" class="hs-input" required></textarea></div></div>
+      <div class="hs_submit hs-submit"><div class="actions"><input type="submit" class="hs-button primary large" value="Submit"></div></div></form>
+      ${okScript('hubspot-embed', '#hsf', "if(j.ok){var d=document.createElement('div');d.className='submitted-message';d.textContent='Thanks for submitting the form.';f.replaceWith(d);}else{var e=document.createElement('ul');e.className='hs-error-msgs';e.setAttribute('role','alert');e.textContent=j.error;f.appendChild(e);}")}`),
+  },
+  {
+    id: 'jotform-embed', industry: 'Landscaping', note: 'Jotform in an iframe: compound field names, classic post to a thank-you page', mode: 'redirect', embed: true,
+    req: ['q3_name[first]', 'q3_name[last]', 'q4_email', 'q6_message'],
+    html: () => layout('Green Acres Landscaping', `<iframe id="JotFormIFrame-2312" title="Contact Form" src="/embed/jotform-embed" style="width:100%;height:760px;border:none"></iframe>`),
+    inner: () => layout('', `<form class="jotform-form" action="/submit/jotform-embed" method="post" name="form_2312" id="2312"><!--ERR-->
+      <ul class="form-section"><li class="form-line jf-required" id="id_3"><label class="form-label form-label-top" id="label_3">Name<span class="form-required">*</span></label>
+        <div class="form-input-wide"><span class="form-sub-label-container"><input type="text" id="first_3" name="q3_name[first]" class="form-textbox validate[required]" aria-labelledby="label_3 sublabel_3_first" required><label class="form-sub-label" for="first_3" id="sublabel_3_first">First Name</label></span>
+        <span class="form-sub-label-container"><input type="text" id="last_3" name="q3_name[last]" class="form-textbox validate[required]" aria-labelledby="label_3 sublabel_3_last" required><label class="form-sub-label" for="last_3" id="sublabel_3_last">Last Name</label></span></div></li>
+      <li class="form-line jf-required" id="id_4"><label class="form-label form-label-top" id="label_4" for="input_4">E-mail<span class="form-required">*</span></label><div class="form-input-wide"><input type="email" id="input_4" name="q4_email" class="form-textbox validate[required, Email]" required></div></li>
+      <li class="form-line" id="id_5"><label class="form-label form-label-top" id="label_5" for="input_5_full">Phone Number</label><div class="form-input-wide"><input type="tel" id="input_5_full" name="q5_phoneNumber[full]" class="form-textbox" placeholder="(000) 000-0000"></div></li>
+      <li class="form-line jf-required" id="id_6"><label class="form-label form-label-top" id="label_6" for="input_6">Tell us about your project<span class="form-required">*</span></label><div class="form-input-wide"><textarea id="input_6" name="q6_message" class="form-textarea validate[required]" required></textarea></div></li>
+      <li class="form-line" id="id_2"><div class="form-input-wide"><button id="input_2" type="submit" class="form-submit-button submit-button jf-form-buttons">Submit</button></div></li></ul></form>`),
+  },
+  {
+    id: 'squarespace-form', industry: 'Photography', note: 'Squarespace form: name fieldset with first/last, form replaced by thank-you text', mode: 'json',
+    req: ['fname', 'lname', 'email', 'message'],
+    html: () => layout('Lumen Studio', `<div class="form-wrapper"><div class="form-inner-wrapper"><form class="react-form-contents" id="sqf" novalidate>
+      <fieldset class="form-item fields name required"><legend class="title">Name <span class="required">*</span></legend>
+        <div class="field first-name"><label class="caption" for="fname-yui"><input id="fname-yui" class="field-element field-control" name="fname" type="text" spellcheck="false" maxlength="30" data-title="First" aria-required="true"><span class="caption-text">First Name</span></label></div>
+        <div class="field last-name"><label class="caption" for="lname-yui"><input id="lname-yui" class="field-element field-control" name="lname" type="text" spellcheck="false" maxlength="30" data-title="Last" aria-required="true"><span class="caption-text">Last Name</span></label></div></fieldset>
+      <div class="form-item field email required"><label class="title" for="email-yui">Email <span class="required">*</span></label><input class="field-element" name="email" type="email" id="email-yui" autocomplete="false" spellcheck="false" aria-required="true"></div>
+      <div class="form-item field textarea required"><label class="title" for="textarea-yui">Message <span class="required">*</span></label><textarea class="field-element" id="textarea-yui" name="message" aria-required="true"></textarea></div>
+      <div class="form-button-wrapper form-button-wrapper--align-left"><button class="button sqs-system-button sqs-editable-button sqs-button-element--primary" type="submit">Submit</button></div></form>
+      <div class="form-submission-text hidden" style="display:none">Thank you!</div></div></div>
+      ${okScript('squarespace-form', '#sqf', "if(j.ok){f.style.display='none';var t=document.querySelector('.form-submission-text');t.style.display='block';t.classList.remove('hidden');}else{var e=document.createElement('div');e.className='form-item error';e.setAttribute('role','alert');e.textContent=j.error;f.prepend(e);}")}`),
+  },
+  {
+    id: 'wix-form', industry: 'Salon', note: 'Wix form: no form tag, button without a submit type, inline thank-you', mode: 'json',
+    req: ['first-name', 'email', 'message'],
+    html: () => layout('Velvet Hair Studio', `<div id="comp-kx1" class="wixui-form" data-testid="richTextElement">
+      <div class="field"><label for="input_comp-a1" class="wixui-text-input__label">First Name *</label><input id="input_comp-a1" name="first-name" class="has-custom-focus wixui-text-input__input" type="text" aria-required="true" required></div>
+      <div class="field"><label for="input_comp-a2" class="wixui-text-input__label">Email *</label><input id="input_comp-a2" name="email" class="has-custom-focus wixui-text-input__input" type="email" aria-required="true" required></div>
+      <div class="field"><label for="textarea_comp-a3" class="wixui-text-box__label">Message *</label><textarea id="textarea_comp-a3" name="message" class="wixui-text-box__input" aria-required="true" required></textarea></div>
+      <div data-testid="buttonElement-wrapper"><button data-testid="buttonElement" class="wixui-button" aria-disabled="false"><span class="wixui-button__label">Submit</span></button></div>
+      <p id="wix-thanks" class="wixui-rich-text" style="display:none">Thanks for submitting!</p></div>
+      <script>(function(){var b=document.querySelector('[data-testid=buttonElement]');b.addEventListener('click',function(){var fd=new FormData();
+      document.querySelectorAll('#comp-kx1 input, #comp-kx1 textarea').forEach(function(x){fd.append(x.name,x.value)});
+      fetch('/submit/wix-form',{method:'POST',body:fd}).then(function(r){return r.json()}).then(function(j){if(j.ok){document.getElementById('wix-thanks').style.display='block';document.querySelectorAll('#comp-kx1 input, #comp-kx1 textarea').forEach(function(x){x.value=''});}
+      else{var e=document.createElement('p');e.setAttribute('role','alert');e.className='error';e.textContent=j.error;b.parentNode.appendChild(e);}});});})();</script>`),
+  },
+  {
+    id: 'ninja-forms', industry: 'Pest control', note: 'Ninja Forms: generic field names, submit is type=button, success message replaces fields', mode: 'json',
+    req: ['nf-field-1', 'nf-field-2', 'nf-field-3'],
+    html: () => layout('BugOut Pest Control', `<div class="nf-form-cont"><div class="nf-form-layout"><form id="nf" novalidate><div class="nf-form-content">
+      <div class="nf-field-container textbox-container label-above"><div class="nf-field-label"><label for="nf-field-1" id="nf-label-field-1">Name <span class="ninja-forms-req-symbol">*</span></label></div><div class="nf-field-element"><input type="text" id="nf-field-1" name="nf-field-1" class="ninja-forms-field nf-element" aria-required="true"></div></div>
+      <div class="nf-field-container email-container label-above"><div class="nf-field-label"><label for="nf-field-2" id="nf-label-field-2">Email <span class="ninja-forms-req-symbol">*</span></label></div><div class="nf-field-element"><input type="email" id="nf-field-2" name="nf-field-2" class="ninja-forms-field nf-element" aria-required="true"></div></div>
+      <div class="nf-field-container textarea-container label-above"><div class="nf-field-label"><label for="nf-field-3" id="nf-label-field-3">Message <span class="ninja-forms-req-symbol">*</span></label></div><div class="nf-field-element"><textarea id="nf-field-3" name="nf-field-3" class="ninja-forms-field nf-element" aria-required="true"></textarea></div></div>
+      <div class="nf-field-container submit-container"><div class="nf-field-element"><input id="nf-field-4" class="ninja-forms-field nf-element" type="button" value="Submit"></div></div></div></form>
+      <div class="nf-response-msg"></div></div></div>
+      <script>(function(){var f=document.getElementById('nf');document.getElementById('nf-field-4').addEventListener('click',function(){
+      fetch('/submit/ninja-forms',{method:'POST',body:new FormData(f)}).then(function(r){return r.json()}).then(function(j){var m=document.querySelector('.nf-response-msg');
+      if(j.ok){f.style.display='none';m.innerHTML='<p>Your form has been successfully submitted.</p>';}else{m.innerHTML='<p class="nf-error-msg" role="alert">'+j.error+'</p>';}});});})();</script>`),
+  },
+);
+
 export const byId = Object.fromEntries(FIXTURES.map(f => [f.id, f]));
 export { isEmail, today };

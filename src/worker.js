@@ -107,6 +107,8 @@ async function route(req, env, url, ctx) {
   if ((mm = p.match(/^\/api\/leads\/(\d+)$/)) && m === 'PATCH') return patchLead(env, +mm[1], await body(req));
   if (p === '/api/leads/bulk' && m === 'POST') return bulkLeads(env, await body(req));
   if ((mm = p.match(/^\/api\/leads\/(\d+)\/outreach$/)) && m === 'GET') return O.leadOutreach(env, +mm[1]);
+  if ((mm = p.match(/^\/api\/outreach\/(\d+)\/shot$/)) && m === 'GET') return O.getShot(env, +mm[1]);
+  if ((mm = p.match(/^\/api\/outreach\/(\d+)\/review$/)) && m === 'POST') return O.reviewItem(env, +mm[1], await body(req));
 
   if (p === '/api/views' && m === 'GET') return json({ views: (await env.DB.prepare('SELECT id, name, filters FROM views ORDER BY id').all()).results });
   if (p === '/api/views' && m === 'POST') return saveView(env, await body(req));
@@ -447,6 +449,7 @@ async function runnerRoute(req, env, url) {
   if (action === '/outreach' && m === 'GET') return O.runnerItems(env, s, params);
   if (action === '/outreach-start' && m === 'POST') return O.runnerStartItem(env, s, params, await body(req));
   if (action === '/outreach-result' && m === 'POST') return O.runnerResult(env, s, params, await body(req));
+  if (action === '/shot' && m === 'PUT') return O.runnerShot(env, s, params, req, url);
   if (action === '/cell' && m === 'POST') return ingestCell(env, s, params, await body(req));
   if (action === '/checks' && m === 'POST') return ingestChecks(env, s, params, await body(req));
   if (action === '/pending-checks' && m === 'GET') {

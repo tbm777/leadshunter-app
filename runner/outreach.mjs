@@ -19,6 +19,14 @@ function profileFrom(sender, campaign) {
   return { ...engineProfile(sender), subject: campaign.subject, message: campaign.message, fileTemplate: campaign.file_template };
 }
 
+/** A small JPEG of the visible page, scrolled to the form the robot filled. */
+async function snapshot(page) {
+  try {
+    await page.evaluate(() => { const el = document.querySelector('[data-lh]'); if (el) { el.scrollIntoView({ block: 'start' }); window.scrollBy(0, -100); } });
+    return await page.screenshot({ type: 'jpeg', quality: 50, timeout: 8000 });
+  } catch { return null; }
+}
+
 /** Links on the page that look like a contact or quote page, same site only. */
 async function contactPages(page, base) {
   const host = new URL(base).hostname.replace(/^www\./, '');
@@ -50,7 +58,10 @@ async function attempt(ctx, item, profile, dryRun, stat = {}) {
       const r = await submitForm(page, url, profile, { lead, dryRun, marks });
       marks.end = Date.now(); stat.marks = marks;
       r.form_url = page.url();
-      if (r.status === 'failed' && r.reason === 'no-form') { last = r; return { r, links: await contactPages(page, url) }; }
+      const noForm = r.status === 'failed' && r.reason === 'no-form';
+      // Test runs: keep a picture of what the robot saw, for your review (the filled form, or the first page when none was found).
+      if (dryRun && (!noForm || !stat.shot)) stat.shot = await snapshot(page);
+      if (noForm) { last = r; return { r, links: await contactPages(page, url) }; }
       return { r, done: true };
     } catch (e) {
       last = e.message === 'unsupported-file-type' ? { status: 'manual', reason: 'file-type' } : { status: 'failed', reason: /timeout|Timeout/.test(e.message) ? 'site-too-slow' : /net::|ERR_/.test(e.message) ? 'site-unreachable' : 'page-error' };
@@ -122,6 +133,7 @@ export async function runOutreach({ api, JOB, log, isCancelled }) {
       try { r = await withTimeout(attempt(ctx, item, prof, dryRun, stat), ITEM_TIMEOUT); }
       catch { r = { status: 'failed', reason: 'site-too-slow' }; }
       record(M, r, stat, Date.now() - t0);
+      if (dryRun && stat.shot) chain = chain.then(() => api('PUT', `/api/runner/jobs/${JOB}/shot?oid=${item.oid}`, stat.shot, { raw: true, headers: { 'content-type': 'image/jpeg' } })).catch(e => log('Could not save a screenshot:', e.message));
       await ctx.close().catch(() => {});
       tally[r.status] = (tally[r.status] || 0) + 1;
       await report(item.oid, r);
