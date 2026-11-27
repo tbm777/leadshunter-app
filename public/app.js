@@ -28,6 +28,7 @@ const P = {
   campaigns: '<path d="M21 3 10 14"/><path d="M21 3l-7 18-4-7-7-4z"/>',
   manual: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="m9 13 2 2 4-4"/>',
   messages: '<path d="M4 5h16v11H8l-4 4z"/><path d="M8 9h8M8 12h5"/>',
+  playbook: '<path d="M12 6.5C9.5 4.8 6 4.5 3 5.3v13.2c3-.8 6.5-.5 9 1.2 2.5-1.7 6-2 9-1.2V5.3c-3-.8-6.5-.5-9 1.2z"/><path d="M12 6.5v13.2"/><path d="M16 5.1V10l1.5-1 1.5 1V5.2"/>',
   senders: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2.2"/><path d="M5.5 16c.6-1.6 1.9-2.4 3.5-2.4s2.9.8 3.5 2.4M15 10h3M15 13h3"/>',
   industries: '<path d="M3 21h18M5 21V10l5-3v14M10 21V8l9-4v17M14 9h2M14 13h2M14 17h2"/>',
   plus: '<path d="M12 5v14M5 12h14"/>', check: '<path d="m5 12 5 5 9-10"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',

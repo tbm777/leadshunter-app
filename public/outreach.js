@@ -520,14 +520,14 @@ const NT = { notes: [], loaded: false, sel: null, q: '', tag: 'all' };
 const NOTE_TAGS = [['idea', 'Idea', 'var(--info)'], ['draft', 'Draft', 'var(--warn)'], ['ready', 'Ready', 'var(--ok)'], ['flow', 'Flow', 'var(--manual)']];
 const byOrder = (a, z) => (z.pinned - a.pinned) || (a.position - z.position) || (z.id - a.id);
 const tagOf = k => NOTE_TAGS.find(t => t[0] === k) || NOTE_TAGS[0];
-async function loadNotes() { try { NT.notes = (await A.api('GET', '/api/notes')).notes; NT.loaded = true; if (NT.sel == null && NT.notes[0]) NT.sel = NT.notes[0].id; if (A.currentView() === 'messages') A.render(); } catch (e) { A.toast(e.message, 'alert'); } }
+async function loadNotes() { try { NT.notes = (await A.api('GET', '/api/notes')).notes; NT.loaded = true; if (NT.sel == null && NT.notes[0]) NT.sel = NT.notes[0].id; if (A.currentView() === 'playbook') A.render(); } catch (e) { A.toast(e.message, 'alert'); } }
 const ntFiltered = () => { const q = NT.q.trim().toLowerCase(); return NT.notes.filter(n => (NT.tag === 'all' || n.tag === NT.tag) && (!q || `${n.title} ${n.subject} ${n.body}`.toLowerCase().includes(q))); };
 // A slight, stable tilt per note so the board looks like real paper.
 const tilt = id => (((id * 37) % 7) - 3) * 0.55;
 function messagesView() {
   if (!NT.loaded) { loadNotes(); return loading(); }
   const list = ntFiltered();
-  return `<div class="head"><div><div class="eyebrow">Outreach</div><h1>Messages</h1><p>Your writing desk for outreach: angles, drafts and follow-up flows. When one's ready, send it to a campaign in one click.</p></div>
+  return `<div class="head"><div><div class="eyebrow">Outreach</div><h1>Playbook</h1><p>Your outreach playbook: angles, message drafts and follow-up flows. When one's ready, send it to a campaign in one click.</p></div>
     <div class="row"><button class="btn primary" data-o="newnote">${A.ic('plus')}New note</button></div></div>
   ${NT.notes.length ? `<div class="desk-bar"><div class="lsearch">${A.ic('find', 15)}<input id="nt-q" placeholder="Search notes" value="${A.esc(NT.q)}" autocomplete="off"></div>
       <div class="tabs" id="nt-tabs">${ntTabs()}</div></div>
@@ -972,14 +972,15 @@ export async function leadOutreachInto(el, L) {
 /* ------------------------------------------------------------------ install */
 export function install(ctx) {
   A = ctx;
-  Object.assign(ctx.V, { campaigns: campaignsView, campaign: campaignView, manual: manualView, messages: messagesView, senders: sendersView });
+  // The old #messages address still works and lands on the Playbook.
+  Object.assign(ctx.V, { campaigns: campaignsView, campaign: campaignView, manual: manualView, playbook: messagesView, messages: () => { setTimeout(() => { location.replace('#playbook'); }, 0); return loading(); }, senders: sendersView });
   Object.assign(ctx.MOUNT, {
     campaign: mountCampaign,
     campaigns: () => { if (!pollT && OS.loaded && OS.campaigns.some(c => jobActive(c.job))) pollT = setInterval(() => loadOutreach().then(() => A.currentView() === 'campaigns' && A.render()), 6000); },
     manual: () => { if (MQ.loaded && !MQ.fresh) { MQ.fresh = true; loadManual().then(() => { MQ.fresh = false; }); } },
-    messages: () => { if (NT.loaded && !NT.fresh && !document.querySelector('.sheet')) { NT.fresh = true; loadNotes().then(() => { NT.fresh = false; }); } },
+    playbook: () => { if (NT.loaded && !NT.fresh && !document.querySelector('.sheet')) { NT.fresh = true; loadNotes().then(() => { NT.fresh = false; }); } },
   });
-  Object.assign(ctx.TITLES, { campaigns: 'Campaigns', campaign: 'Campaign', manual: 'Manual queue', messages: 'Messages', senders: 'Sender profiles' });
+  Object.assign(ctx.TITLES, { campaigns: 'Campaigns', campaign: 'Campaign', manual: 'Manual queue', playbook: 'Playbook', messages: 'Playbook', senders: 'Sender profiles' });
   ctx.CRUMBS.campaign = (arg) => { const c = OS.campaigns.find(x => x.id === +arg); return `<a href="#campaigns">Campaigns</a><span>›</span><b>${A.esc(c ? c.name : 'Campaign')}</b>`; };
   ctx.NAV_ACTIVE.campaign = 'campaigns';
   document.addEventListener('click', onClick);
@@ -997,4 +998,4 @@ export function install(ctx) {
   document.addEventListener('visibilitychange', () => { if (!document.hidden && A.currentView() === 'manual' && MQ.loaded && !MQ.fresh) { MQ.fresh = true; loadManual().then(() => { MQ.fresh = false; }); loadOutreach(); } });
   window.addEventListener('beforeunload', () => { if (pendingSave) navigator.sendBeacon && flushSave(); });
 }
-export const outreachNav = () => [['campaigns', 'Campaigns', 'campaigns'], ['manual', 'Manual queue', 'manual', OS.manual], ['messages', 'Messages', 'messages'], ['senders', 'Sender profiles', 'senders']];
+export const outreachNav = () => [['campaigns', 'Campaigns', 'campaigns'], ['manual', 'Manual queue', 'manual', OS.manual], ['playbook', 'Playbook', 'playbook'], ['senders', 'Sender profiles', 'senders']];
