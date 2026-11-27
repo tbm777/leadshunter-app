@@ -672,9 +672,13 @@ async function ingestChecks(env, s, params, b) {
 /* ------------------------------------------------------------------ usage */
 /** Midnight in Los Angeles, as a timestamp, for "today" in the app's time zone. */
 export function ptMidnight(at = new Date()) {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(at).map(x => [x.type, x.value]));
-  const sinceMidnight = ((+parts.hour * 60 + +parts.minute) * 60 + +parts.second) * 1000;
-  return at.getTime() - sinceMidnight - at.getMilliseconds();
+  // The instant Pacific time reads 00:00 on today's Pacific date. Pacific is UTC-8 or UTC-7, so midnight is 07:00 or 08:00 UTC;
+  // checking both is exact on daylight-saving days too (subtracting the clock time is an hour off on those days).
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
+  const [y, m, d] = day.split('-').map(Number);
+  const hm = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  for (const off of [8, 7]) { const t = Date.UTC(y, m - 1, d, off); if (hm.format(new Date(t)) === '00:00') return t; }
+  return Date.UTC(y, m - 1, d, 8);
 }
 async function cfGraphQL(env, query, variables) {
   const res = await fetch('https://api.cloudflare.com/client/v4/graphql', {

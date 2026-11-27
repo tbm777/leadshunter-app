@@ -1530,3 +1530,16 @@ input[type=checkbox]:disabled,input[type=radio]:disabled{opacity:.55;cursor:defa
 .limbar b{color:var(--ink)}
 .limbar span{flex:1}
 .limbar .linkbtn{flex:none;text-decoration:none;font-size:13px;margin-top:1px}
+/* ---------- health alerts */
+.alerts{display:flex;flex-direction:column;gap:8px;margin:0 0 14px}
+.alert{display:flex;align-items:center;gap:10px;padding:10px 12px 10px 14px;border-radius:12px;border:1px solid var(--line);background:var(--surface);font-size:13.5px}
+.alert svg{flex:none}
+.alert span{flex:1}
+.alert.bad{border-color:color-mix(in srgb,var(--bad) 40%,var(--line));background:color-mix(in srgb,var(--bad) 6%,var(--surface))}
+.alert.bad>svg{color:var(--bad)}
+.alert.warn{border-color:color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 6%,var(--surface))}
+.alert.warn>svg{color:var(--warn)}
+.alert .linkbtn{text-decoration:none;font-size:13px}
+.navdot{width:8px;height:8px;border-radius:50%;margin-left:auto;flex:none}
+.navdot.bad{background:var(--bad)}
+.navdot.warn{background:var(--warn)}

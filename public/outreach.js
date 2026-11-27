@@ -53,7 +53,7 @@ const SAMPLE = { name: 'Summit Roofing Co. - #1 Roofer in Austin', city: 'Austin
 export async function loadOutreach() {
   try {
     const r = await A.api('GET', '/api/outreach');
-    OS.senders = r.senders; OS.campaigns = r.campaigns; OS.manual = r.manual; OS.limits = r.limits || null; OS.loaded = true;
+    OS.senders = r.senders; OS.campaigns = r.campaigns; OS.manual = r.manual; OS.limits = r.limits || null; OS.alerts = r.alerts || []; OS.loaded = true;
     A.renderNav(A.currentView());
   } catch (e) { if (e.status !== 401) console.warn('Outreach unavailable', e); }
 }
@@ -61,6 +61,17 @@ function upsertCampaign(c) { const i = OS.campaigns.findIndex(x => x.id === c.id
 
 /* ------------------------------------------------------------------ campaigns list */
 /** Tool-wide sending limits: the daily cap across all campaigns and the warm-up for new sender profiles. */
+function alertsHTML() {
+  const al = (OS.alerts || []).filter(a => !dismissedAlert(a.key));
+  if (!al.length) return '';
+  return `<div class="alerts">${al.map(a => `<div class="alert ${a.level}">${A.ic('alert', 15)}<span>${A.esc(a.text)}</span>${a.href && a.href !== '#campaigns' ? `<a class="linkbtn" href="${a.href}">Open</a>` : ''}<button class="iconbtn sm" data-alertx="${A.esc(a.key)}" aria-label="Dismiss">${A.ic('x', 13)}</button></div>`).join('')}</div>`;
+}
+const dismissedAlert = (k) => { try { return (JSON.parse(sessionStorage.getItem('lh-alerts-x') || '[]')).includes(k); } catch { return false; } };
+document.addEventListener('click', (e) => {
+  const x = e.target.closest('[data-alertx]'); if (!x) return;
+  try { const l = JSON.parse(sessionStorage.getItem('lh-alerts-x') || '[]'); l.push(x.dataset.alertx); sessionStorage.setItem('lh-alerts-x', JSON.stringify(l)); } catch { /* ignore */ }
+  x.closest('.alert')?.remove();
+});
 function limitsBar() {
   const L = OS.limits; if (!L) return '';
   const warming = L.senders.filter(x => x.cap).map(x => { const sd = OS.senders.find(y => y.id === x.id); return sd ? `${A.esc(sd.label)}: day ${x.warmup_day}, ${A.fmt(x.cap)} today` : ''; }).filter(Boolean);
@@ -86,6 +97,7 @@ function campaignsView() {
   ${cs.length ? `<div class="card ministats ostats">
     <div><span>Sent today</span><b class="num">${A.fmt(today)}${OS.limits ? ` <small>/ ${A.fmt(OS.limits.tool.cap)}</small>` : ''}</b></div><div><span>Sent all time</span><b class="num">${A.fmt(all)}</b></div>
     <div><span>Queued</span><b class="num">${A.fmt(queued)}</b></div><a href="#manual" class="${OS.manual ? 'hot' : ''}"><span>Needs you</span><b class="num">${A.fmt(OS.manual)}</b></a></div>
+  ${alertsHTML()}
   ${limitsBar()}
   <div class="card camps">${cs.map(campRow).join('')}</div>` : emptyCampaigns()}`;
 }
@@ -1192,7 +1204,7 @@ export function install(ctx) {
   document.addEventListener('visibilitychange', () => { if (!document.hidden && A.currentView() === 'manual' && MQ.loaded && !MQ.fresh) { MQ.fresh = true; loadManual().then(() => { MQ.fresh = false; }); loadOutreach(); } });
   window.addEventListener('beforeunload', () => { if (pendingSave) navigator.sendBeacon && flushSave(); });
 }
-export const outreachNav = () => [['campaigns', 'Campaigns', 'campaigns'], ['manual', 'Manual queue', 'manual', OS.manual], ['playbook', 'Playbook', 'playbook'], ['senders', 'Sender profiles', 'senders']];
+export const outreachNav = () => [['campaigns', 'Campaigns', 'campaigns', 0, (OS.alerts || []).length ? (OS.alerts.some(a => a.level === 'bad') ? 'bad' : 'warn') : ''], ['manual', 'Manual queue', 'manual', OS.manual], ['playbook', 'Playbook', 'playbook'], ['senders', 'Sender profiles', 'senders']];
 
 
 /* ------------------------------------------------------------------ review test results (the accuracy answer key) */

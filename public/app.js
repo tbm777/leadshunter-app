@@ -219,7 +219,7 @@ function shell() {
 }
 function renderNav(active) {
   $('#nav').innerHTML = `<div class="nav-label">Leads</div>` + NAV.map(([id, label, icon]) => `<a href="#${id}" class="${active === id ? 'on' : ''}">${ic(icon)}${label}${id === 'leads' ? `<span class="count">${ST.leads.length >= 1000 ? (ST.leads.length / 1000).toFixed(ST.leads.length >= 10000 ? 0 : 1) + 'k' : ST.leads.length}</span>` : ''}</a>`).join('')
-    + `<div class="nav-label">Outreach</div>` + outreachNav().map(([id, label, icon, n]) => `<a href="${active !== id && NAV_LAST[id] ? NAV_LAST[id] : '#' + id}" class="${active === id ? 'on' : ''}">${ic(icon)}${label}${n ? `<span class="count hot">${n > 999 ? '999+' : n}</span>` : ''}</a>`).join('')
+    + `<div class="nav-label">Outreach</div>` + outreachNav().map(([id, label, icon, n, dot]) => `<a href="${active !== id && NAV_LAST[id] ? NAV_LAST[id] : '#' + id}" class="${active === id ? 'on' : ''}">${ic(icon)}${label}${n ? `<span class="count hot">${n > 999 ? '999+' : n}</span>` : ''}${dot ? `<i class="navdot ${dot}" title="Needs attention"></i>` : ''}</a>`).join('')
     + `<div class="nav-label">Workspace</div><a href="#usage" class="${active === 'usage' ? 'on' : ''}">${ic('chart')}Usage</a>`;
   const rc = $('#railcount'); if (rc) rc.textContent = `${fmt(ST.leads.length)} leads stored here, so filtering is instant and free.`;
 }

@@ -11,7 +11,19 @@ const str = (v, n = 200) => String(v ?? '').trim().slice(0, n);
 const STOP = '(SELECT id FROM leads WHERE status IN (3,4))';   // do not contact, replied: sequences stop
 const ptDay = t => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short' }).format(new Date(t)));
 /** t plus n business days (Mon–Fri, Los Angeles), same time of day. */
-function addBizDays(t, n) { let d = t, left = Math.max(0, n); if (!left) return t; while (left > 0) { d += 864e5; const w = ptDay(d); if (w !== 0 && w !== 6) left--; } return d; }
+const PT_HOUR = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23' });
+const ptHour = (t) => +PT_HOUR.format(new Date(t));
+/** n business days later, at the same Pacific clock time (a day is 23 or 25 hours across daylight-saving changes). */
+export function addBizDays(t, n) {
+  let d = t, left = Math.max(0, n); if (!left) return t;
+  const h0 = ptHour(t);
+  while (left > 0) {
+    d += 864e5;
+    const dh = ptHour(d) - h0; if (dh) d -= (dh > 12 ? dh - 24 : dh < -12 ? dh + 24 : dh) * 36e5;
+    const w = ptDay(d); if (w !== 0 && w !== 6) left--;
+  }
+  return d;
+}
 async function stepsOf(env, cid) { return (await env.DB.prepare('SELECT * FROM campaign_steps WHERE campaign_id = ? ORDER BY step').bind(cid).all()).results; }
 async function logEvent(env, o, kind, detail = null) {
   await env.DB.prepare('INSERT INTO outreach_events (outreach_id, lead_id, campaign_id, step, kind, detail, at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(o.id, o.lead_id, o.campaign_id, o.step || 1, kind, detail ? String(detail).slice(0, 300) : null, now()).run();
@@ -61,6 +73,7 @@ export async function outreachOverview(env) {
     campaigns: cmp.results.map(c => campaignOut(c, by[c.id] || {}, td[c.id] || 0, jb[c.id] || null, stepsBy[c.id] || [], seqBy[c.id] || {})),
     manual: manual.results[0].n,
     limits: await limitsSummary(env),
+    alerts: await healthAlerts(env),
   });
 }
 function jobOut(j) {
@@ -687,4 +700,32 @@ export async function reviewItem(env, oid, b) {
   if (fillAll) ops.push(put('fields', { pct: Math.round(g('right') / fillAll * 1000) / 10, n: fillAll, at: day }));
   if (ops.length) await env.DB.batch(ops);
   return json({ ok: true, reviewed: detAll });
+}
+
+/* ------------------------------------------------------------------ health alerts */
+/** Problems worth your attention, shown in the app: failed runs, stalled campaigns, a full Manual queue. */
+export async function healthAlerts(env) {
+  const t = now(), out = [];
+  const failed = (await env.DB.prepare(`SELECT s.id, s.error, c.name FROM searches s JOIN campaigns c ON c.id = s.campaign_id WHERE s.kind = 'outreach' AND s.status = 'failed' AND s.finished_at >= ? ORDER BY s.id DESC LIMIT 3`).bind(t - 864e5).all()).results;
+  for (const f of failed) {
+    const why = /stopped responding|did not start|crashed/i.test(f.error || '') ? 'the robot stopped partway. Leads it hadn\'t reached went back to the queue, and any form caught mid-send is in the Manual queue to check.' : String(f.error || 'unknown error').slice(0, 140);
+    out.push({ level: 'bad', key: 'job-' + f.id, text: `A sending run for “${f.name}” stopped early: ${why}`, href: '#campaigns' });
+  }
+  const active = (await env.DB.prepare(`SELECT c.*, (SELECT COUNT(*) FROM outreach o WHERE o.campaign_id = c.id AND o.status = 'queued') AS queued,
+      (SELECT MAX(o.sent_at) FROM outreach o WHERE o.campaign_id = c.id) AS last_sent,
+      (SELECT MAX(COALESCE(s.finished_at, s.created_at)) FROM searches s WHERE s.kind = 'outreach' AND s.campaign_id = c.id) AS last_job
+    FROM campaigns c WHERE c.status = 'active' AND COALESCE(c.mode, 'auto') = 'auto'`).all()).results;
+  for (const c of active) {
+    if (!c.queued || !inWindow(c) || (c.start_at && c.start_at > t)) continue;
+    if (await activeJob(env, c.id)) continue;
+    const L = await limitsFor(env, c);
+    if (L.campaignLeft <= 0 || L.senderLeft <= 0 || L.toolLeft <= 0) continue;
+    const since = Math.max(c.last_sent || 0, c.last_job || 0, c.updated_at || 0);
+    if (t - since > 60 * 60000) out.push({ level: 'warn', key: 'stall-' + c.id, text: `“${c.name}” is in its sending hours with ${c.queued} leads waiting, but nothing has gone out for over an hour.`, href: `#campaign/${c.id}` });
+  }
+  const manual = (await env.DB.prepare("SELECT COUNT(*) AS n FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE o.status = 'manual' AND c.status != 'archived'").first()).n;
+  if (manual >= 25) out.push({ level: 'warn', key: 'manual', text: `${manual} forms are waiting in your Manual queue.`, href: '#manual' });
+  const paused = (await env.DB.prepare("SELECT id, name, v FROM campaigns c JOIN meta m ON m.k = 'autopause:' || c.id WHERE c.status = 'paused'").all()).results;
+  for (const p of paused) { let why = ''; try { why = JSON.parse(p.v).why; } catch { /* plain */ } out.push({ level: 'bad', key: 'autopause-' + p.id, text: `“${p.name}” was paused automatically: ${why}`, href: `#campaign/${p.id}` }); }
+  return out;
 }
