@@ -392,7 +392,7 @@ function manualView() {
   if (!MQ.loaded) { loadManual(); return loading(); }
   const its = MQ.items;
   return `<div class="head"><div><div class="eyebrow">Outreach</div><h1>Manual queue</h1><p>Forms the robot couldn't send on its own. Open the form, paste the fields, send, then mark it sent. Everything is already filled in for each business.</p></div>
-    <div class="row"><span class="help">Shortcuts: <span class="kbd">J</span> <span class="kbd">K</span> move, <span class="kbd">S</span> mark sent</span></div></div>
+    <div class="row"><span class="help">Shortcuts: <span class="kbd">J</span> <span class="kbd">K</span> move, <span class="kbd">S</span> mark sent</span>${hasExt() ? `<span class="okline">${A.ic('check', 13)}Form filler installed</span>` : `<button class="btn primary" data-o="extguide">${A.ic('download', 14)}Get the form filler</button>`}</div></div>
   ${its.length ? `<div class="split mq"><div class="card list" id="mq-list">${mqList()}</div><div class="card" id="mq-detail">${mqDetail()}</div></div>`
     : `<div class="card"><div class="empty"><b>All clear</b>Nothing needs you right now. CAPTCHA forms and anything the robot couldn't finish land here.</div></div>`}`;
 }
