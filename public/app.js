@@ -1036,7 +1036,7 @@ function jobsHTML() {
     const actions = active
       ? `${j.run_url ? `<a class="btn sm ghost" href="${esc(j.run_url)}" target="_blank" rel="noopener">${ic('ext', 13)}Log</a>` : ''}${stuck ? `<button class="btn sm" data-jact="retry" data-id="${j.id}">${ic('retry', 13)}Retry</button>` : ''}<button class="btn sm ghost" data-jact="cancel" data-id="${j.id}">Cancel</button>`
       : `${j.status === 'failed' || j.status === 'cancelled' ? `<button class="btn sm" data-jact="retry" data-id="${j.id}" title="Continue where it stopped">${ic('retry', 13)}${j.done ? 'Resume' : 'Retry'}</button>` : ''}
-         ${!check && (j.form && j.form !== 'any' ? j.qualified : j.new) ? `<button class="btn sm btn-soft" data-jact="view" data-id="${j.id}">View ${fmt(j.form && j.form !== 'any' ? j.qualified : j.new)} lead${(j.form && j.form !== 'any' ? j.qualified : j.new) === 1 ? '' : 's'} ${ic('arrow', 13)}</button>` : ''}
+         ${!check && viewN(j) ? `<button class="btn sm btn-soft" data-jact="view" data-id="${j.id}">View ${fmtviewN(j)} lead${viewN(j) === 1 ? '' : 's'} ${ic('arrow', 13)}</button>` : ''}
          <div class="kebab"><button class="iconbtn sm" data-menu="${j.id}" aria-label="More actions" aria-haspopup="true">⋯</button>${OPENMENU === j.id ? `<div class="menu" role="menu">
            ${!check && j.new ? `<button role="menuitem" data-jact="export" data-id="${j.id}">${ic('download', 14)}Export leads</button>` : ''}
            ${!check ? `<button role="menuitem" data-jact="again" data-id="${j.id}">${ic('play', 13)}Run again</button>` : ''}
@@ -1053,6 +1053,8 @@ function jobsHTML() {
   }).join('') + (ST.searches.length > 10 ? `<div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:center"><button class="btn ghost sm" data-act="allhist">${FS.allHist ? 'Show fewer' : `Show all ${ST.searches.length} searches`}</button></div>` : '');
 }
 let OPENMENU = null;
+// Leads you still have from a search (deleted ones don't count); while it runs, its own running total.
+const viewN = (j) => ACTIVE(j) ? (j.form && j.form !== 'any' ? j.qualified : j.new) : ST.leads.reduce((n, L) => n + (L.search_id === j.id ? 1 : 0), 0);
 function renderJobs() { const el = $('#jobs'); if (el) el.innerHTML = jobsHTML(); }
 async function excludedModal(id) {
   $('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal" data-stop><div class="card-b"><span class="spin"></span> Loading…</div></div></div>`;
