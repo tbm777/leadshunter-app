@@ -530,14 +530,16 @@ function messagesView() {
   return `<div class="head"><div><div class="eyebrow">Outreach</div><h1>Messages</h1><p>Your writing desk for outreach: angles, drafts and follow-up flows. When one's ready, send it to a campaign in one click.</p></div>
     <div class="row"><button class="btn primary" data-o="newnote">${A.ic('plus')}New note</button></div></div>
   ${NT.notes.length ? `<div class="desk-bar"><div class="lsearch">${A.ic('find', 15)}<input id="nt-q" placeholder="Search notes" value="${A.esc(NT.q)}" autocomplete="off"></div>
-      <div class="tabs">${[['all', 'All'], ...NOTE_TAGS].map(([k, l]) => `<button class="${NT.tag === k ? 'on' : ''}" data-nttag="${k}">${l}<span class="n">${k === 'all' ? NT.notes.length : NT.notes.filter(n => n.tag === k).length}</span></button>`).join('')}</div></div>
+      <div class="tabs" id="nt-tabs">${ntTabs()}</div></div>
     <div class="desk" id="nt-list">${ntList()}</div>`
   : `<div class="desk desk-empty">
       <button class="paper paper-new" data-o="newnote" style="--tilt:-1.5deg"><span class="tape" style="--tape:var(--accent)"></span><b class="hand">A blank page</b><span>Start from scratch</span></button>
       ${[['Missed calls angle', 'idea', 'When a homeowner calls and nobody picks up, they call the next contractor…'], ['Website refresh pitch', 'draft', 'I spotted a few quick wins on your website that could bring you more calls…'], ['3-touch follow-up flow', 'flow', 'Day 1: contact form, website angle\nDay 4: follow-up\nDay 9: last touch']].map(([t, g, b], i) => `<button class="paper" data-o="newnote" data-title="${t}" data-ntype="${g}" data-body="${A.esc(b)}" style="--tilt:${[1.2, -0.8, 1.6][i]}deg"><span class="tape" style="--tape:${tagOf(g)[2]}"></span><b class="hand">${t}</b><p>${A.esc(b)}</p><span class="stamp" style="--c:${tagOf(g)[2]}">${tagOf(g)[1]}</span></button>`).join('')}
     </div><p class="help" style="text-align:center;margin-top:-6px">Pick a starter or a blank page. Merge tags like [Company Name] work here too.</p>`}`;
 }
+const ntTabs = () => [['all', 'All'], ...NOTE_TAGS].map(([k, l]) => `<button class="${NT.tag === k ? 'on' : ''}" data-nttag="${k}">${l}<span class="n">${k === 'all' ? NT.notes.length : NT.notes.filter(n => n.tag === k).length}</span></button>`).join('');
 function ntList() {
+  setTimeout(() => { const t = A.$('#nt-tabs'); if (t) t.innerHTML = ntTabs(); }, 0);   // stage counts follow every change
   const list = ntFiltered();
   if (!list.length) return `<div class="empty" style="grid-column:1/-1"><b>No notes match</b>Try another word or stage.</div>`;
   return `<button class="paper paper-new" data-o="newnote" style="--tilt:0deg"><span class="plus">${A.ic('plus', 22)}</span><b class="hand">New note</b></button>` + list.map(n => { const [, l, c] = tagOf(n.tag);
