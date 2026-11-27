@@ -169,6 +169,8 @@ function chooseOption(f, cls, options, profile) {
   const preferred = real.filter(o => pref.test(o.text));
   return preferred.length ? preferred[0] : pick(real);
 }
+// A usable URL for website fields, even when the profile has none.
+const urlOf = (p) => { const w = String(p.website || '').trim(); return !w || w === 'N/A' ? (p.email && p.email.includes('@') ? `https://${p.email.split('@')[1]}` : 'https://example.com') : /^https?:\/\//i.test(w) ? w : `https://${w}`; };
 const digitsOf = s => String(s || '').replace(/\D/g, '');
 function phoneVariants(phone) {
   let d = digitsOf(phone); if (d.length === 11 && d.startsWith('1')) d = d.slice(1);
@@ -202,7 +204,7 @@ export function valueFor(f, cls, profile) {
     case 'name': return fit(`${profile.firstName} ${profile.lastName}`);
     case 'email': case 'confirm_email': return fit(profile.email);
     case 'company': return fit(profile.company || `${profile.firstName} ${profile.lastName}`);
-    case 'website': return fit(f.type === 'url' || /http/i.test(f.placeholder) ? (profile.website.startsWith('http') ? profile.website : `https://${profile.website}`) : profile.website);
+    case 'website': return fit(f.type === 'url' || /http/i.test(f.placeholder) || !profile.website || profile.website === 'N/A' ? urlOf(profile) : profile.website);
     case 'subject': return fit(profile.subject);
     case 'message': return fit(profile.message);
     case 'phone': { const v = phoneVariants(profile.phone); const byPh = /\(\d{3}\)/.test(f.placeholder) ? v[0] : /^\d{3}-\d{3}/.test(f.placeholder) ? v[1] : /^\d{10}$/.test(f.placeholder.replace(/\D/g, '')) && !/\D/.test(f.placeholder) ? v[2] : null; const pv = fitPattern(f.pattern, v); const pick1 = f.pattern ? pv : byPh || (f.maxLength && f.maxLength <= 10 ? v[2] : v[0]); return fit(pick1 ?? v[2]); }
@@ -374,12 +376,12 @@ export async function submitForm(page, url, profile, opts = {}) {
     if (f.tag === 'select' || f.role) { filled.delete(id); await fillField(f); return true; }
     let v;
     if (cls === 'phone' || /phone|digit|number/.test(h)) { const vs = phoneVariants(profile.phone); const ex = (hint || '').match(/[(+]?\d[\d ().+-]{8,}\d/); v = ex ? mirrorFormat(ex[0], profile.phone) : /digit|numbers only|without/.test(h) ? digitsOf(profile.phone).slice(-10) : vs[tried % vs.length]; }
-    else if (cls === 'website' || f.type === 'url' || /\burl\b|website|http/.test(h)) v = profile.website.startsWith('http') ? profile.website : `https://${profile.website}`;
+    else if (cls === 'website' || f.type === 'url' || /\burl\b|website|http/.test(h)) v = urlOf(profile);
     else if (cls === 'confirm_email' || (/\bmatch/.test(h) && /mail/.test(h))) v = profile.email;
     else if (/at least (\d+)|minimum (of )?(\d+)|(\d+) characters/.test(h)) { const n = +(h.match(/(\d+)/) || [0, 30])[1]; v = pad(String(filled.get(id) || valueFor(f, cls, profile)), n + 1); }
     else if (/too long|at most|maximum|no more than/.test(h)) { const n = +(h.match(/(\d+)/) || [0, 50])[1]; v = String(filled.get(id) || '').slice(0, n); }
     else if (/email/.test(h)) v = profile.email;
-    else if (/url|website|http/.test(h)) v = profile.website.startsWith('http') ? profile.website : `https://${profile.website}`;
+    else if (/url|website|http/.test(h)) v = urlOf(profile);
     else if (/zip|postal/.test(h)) v = (profile.zip || '78701').slice(0, 5);
     else v = valueFor(f, cls === 'text' ? 'text' : cls, profile);
     if (opts.resolveField && tried >= 2) { try { const ai = await opts.resolveField({ field: f, error: hint, current: filled.get(id) }); if (ai) v = ai; } catch { /* fall back to rules */ } }

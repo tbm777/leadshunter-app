@@ -1,6 +1,7 @@
 // LeadsHunter outreach pages: campaigns, manual queue, messages, sender profiles. Plugs into app.js through install().
 import { personalize, cleanCompanyName, MERGE_TAGS, unknownTags } from './shared/personalize.js';
 import { render as renderFile, ASSETS } from './shared/templates/bat-marketing.js';
+import { SENDER_FALLBACKS, OTHER_FIELDS } from './shared/fallbacks.js';
 
 let A;                       // helpers from app.js
 const OS = { loaded: false, senders: [], campaigns: [], manual: 0 };
@@ -456,17 +457,25 @@ function sendersView() {
     <div class="row"><button class="btn primary" data-o="newsender">${A.ic('plus')}New profile</button></div></div>
   <div class="profiles">${OS.senders.map(s => `<div class="card profile">
       <div class="who"><div class="avatar">${A.esc(initials(s))}</div><div style="min-width:0"><b>${A.esc(s.label)}</b><div class="help">${used(s.id) ? `Used by ${used(s.id)} campaign${used(s.id) === 1 ? '' : 's'}` : 'Not used yet'}</div></div></div>
-      <dl class="ld-dl"><div class="dk"><dt>Name</dt><dd>${A.esc(s.first_name)} ${A.esc(s.last_name)}</dd></div><div class="dk"><dt>Email</dt><dd>${A.esc(s.email)}</dd></div><div class="dk"><dt>Phone</dt><dd>${A.esc(s.phone)}</dd></div>${s.company ? `<div class="dk"><dt>Company</dt><dd>${A.esc(s.company)}</dd></div>` : ''}${s.website ? `<div class="dk"><dt>Website</dt><dd>${A.esc(s.website)}</dd></div>` : ''}</dl>
+      <dl class="ld-dl"><div class="dk"><dt>Name</dt><dd>${A.esc(s.first_name)} ${A.esc(s.last_name)}</dd></div><div class="dk"><dt>Email</dt><dd>${A.esc(s.email)}</dd></div><div class="dk"><dt>Phone</dt><dd>${A.esc(s.phone)}</dd></div><div class="dk"><dt>Company</dt><dd>${s.company ? A.esc(s.company) : `<span class="faint">${A.esc(fbHint('company', s))}</span>`}</dd></div><div class="dk"><dt>Website</dt><dd>${s.website ? A.esc(s.website) : `<span class="faint">${A.esc(fbHint('website', s))}</span>`}</dd></div>
+        <div class="dk"><dt>Address</dt><dd>${[s.address, s.city, s.state, s.zip].some(Boolean) ? A.esc([s.address, s.city, [s.state, s.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')) : `<span class="faint">Placeholder: 100 Congress Ave, Austin TX 78701</span>`}</dd></div></dl>
       <div class="row" style="justify-content:flex-end;margin-top:auto"><button class="btn sm" data-o="editsender" data-sid="${s.id}">${A.ic('edit', 13)}Edit</button></div></div>`).join('')}
     <button class="card profile padd" data-o="newsender">${A.ic('plus', 20)}<b>New profile</b><span>Another name or brand to send as</span></button></div>`;
 }
+const fbHint = (k, s) => SENDER_FALLBACKS[k] ? SENDER_FALLBACKS[k].hint(s) : '';
 function senderDrawer(s = {}, onSaved) {
-  const f = (k, label, ph = '', type = 'text', help = '') => `<div class="field"><label for="sp-${k}">${label}</label><input class="input" id="sp-${k}" type="${type}" value="${A.esc(s[k] || '')}" placeholder="${ph}" autocomplete="off">${help ? `<span class="help">${help}</span>` : ''}</div>`;
+  const f = (k, label, ph = '', type = 'text', help = '') => {
+    const fb = SENDER_FALLBACKS[k];
+    return `<div class="field"><label for="sp-${k}">${label}${fb ? ' <span class="opt-tag">optional</span>' : ''}</label><input class="input" id="sp-${k}" type="${type}" value="${A.esc(s[k] || '')}" placeholder="${fb ? A.esc(fbHint(k, s).replace(/ \(.*\)$/, '')) : ph}" autocomplete="off" data-spf="${k}">
+      ${fb ? `<span class="help fbh" data-fb="${k}" ${String(s[k] || '').trim() ? 'hidden' : ''}>If left empty, forms get: <b>${A.esc(fbHint(k, s))}</b></span>` : help ? `<span class="help">${help}</span>` : ''}</div>`;
+  };
   A.$('#overlay').innerHTML = `<div class="scrim" data-act="close"><div class="drawer" data-stop role="dialog" aria-label="Sender profile">
     <div class="drawer-h"><div><div class="eyebrow" style="margin:0 0 4px">${s.id ? 'Edit sender profile' : 'New sender profile'}</div><h2>${A.esc(s.label || 'Sender profile')}</h2></div><button class="btn ghost sm" data-act="close" aria-label="Close">${A.ic('x')}</button></div>
     <section><h5>Always used</h5><div class="fsrow2">${f('first_name', 'First name', 'Dustin')}${f('last_name', 'Last name', 'Morgan')}</div>${f('email', 'Email', 'you@company.com', 'email', 'Replies from businesses arrive here.')}${f('phone', 'Phone', '(512) 555-0142', 'tel', 'Typed in the format each form expects.')}</section>
-    <section><h5>Your business</h5>${f('company', 'Company', 'The Bat Marketing')}${f('website', 'Website', 'thebatmarketing.com')}</section>
-    <section><h5>Address <span style="text-transform:none;letter-spacing:0;font-weight:400">(optional)</span></h5><span class="help" style="margin-top:-4px">Only used when a form insists on an address. Leave blank and neutral values are used.</span>${f('address', 'Street')}<div class="fsrow2">${f('city', 'City')}${f('state', 'State', 'TX')}</div>${f('zip', 'ZIP code')}</section>
+    <section><h5>Your business</h5>${f('company', 'Company')}${f('website', 'Website')}</section>
+    <section><h5>Address</h5><span class="help" style="margin-top:-4px">Only typed in when a form insists on an address. With no address at all, the whole placeholder address is used so city, state and ZIP match.</span>${f('address', 'Street')}<div class="fsrow2">${f('city', 'City')}${f('state', 'State')}</div>${f('zip', 'ZIP code')}</section>
+    <section><h5>Questions the form asks that aren't in your profile</h5><span class="help" style="margin-top:-4px">The robot answers these so a form never fails for a missing value. Your subject and message come from the campaign.</span>
+      <dl class="fblist">${OTHER_FIELDS.map(([k, v]) => `<div><dt>${A.esc(k)}</dt><dd>${A.esc(v)}</dd></div>`).join('')}</dl></section>
     <section><h5>Profile name</h5>${f('label', 'Shown in the app', s.company || 'e.g. The Bat Marketing')}</section>
     <div class="help" id="sp-err" style="color:var(--bad);padding:0 20px"></div>
     <div class="drawer-foot">${s.id ? `<button class="btn ghost" data-o="delsender" data-sid="${s.id}" style="margin-right:auto;color:var(--bad)">Delete</button>` : ''}<button class="btn" data-act="close">Cancel</button><button class="btn primary" data-o="savesender" data-sid="${s.id || ''}">${s.id ? 'Save changes' : 'Create profile'}</button></div></div></div>`;
@@ -601,6 +610,7 @@ function insertTag(tag) {
 }
 function onInput(e) {
   const t = e.target, c = curCampaign();
+  if (t.dataset && t.dataset.spf) { updateFallbackHints(); return; }
   if (t.dataset.msave !== undefined && c) {
     lastField = t.id;
     if (t.id === 'm-body') A.$('#m-count').textContent = `${t.value.length} characters`;
@@ -609,6 +619,15 @@ function onInput(e) {
     queueSave(c);
     try { renderPreview(c); } catch (err) { console.warn('preview', err); }
   }
+}
+function senderDraft() { const o = {}; document.querySelectorAll('[data-spf]').forEach(i => { o[i.dataset.spf] = i.value; }); return o; }
+function updateFallbackHints() {
+  const d = senderDraft();
+  document.querySelectorAll('[data-fb]').forEach(h => {
+    const k = h.dataset.fb, empty = !String(d[k] || '').trim();
+    h.hidden = !empty; h.querySelector('b').textContent = fbHint(k, d);
+    const inp = document.getElementById('sp-' + k); if (inp) inp.placeholder = fbHint(k, d).replace(/ \(.*\)$/, '');
+  });
 }
 function onFocus(e) { if (e.target.dataset && e.target.dataset.msave !== undefined) lastField = e.target.id; }
 function onChange(e) {

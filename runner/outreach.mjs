@@ -2,6 +2,7 @@
 // Never logs lead data: the repository and its logs are public.
 import { getBrowser, closeBrowser } from './browser.mjs';
 import { submitForm } from './forms/filler.mjs';
+import { engineProfile } from '../public/shared/fallbacks.js';
 
 const CONCURRENCY = +process.env.OUTREACH_CONCURRENCY || 3;
 const ITEM_TIMEOUT = 150000;
@@ -12,11 +13,8 @@ function withTimeout(p, ms) { let t; return Promise.race([p, new Promise((_, rej
 const norm = u => { try { const x = new URL(u); x.hash = ''; return x.href.replace(/\/$/, ''); } catch { return null; } };
 
 function profileFrom(sender, campaign) {
-  return {
-    firstName: sender.first_name, lastName: sender.last_name, email: sender.email, phone: sender.phone, company: sender.company, website: sender.website,
-    address: sender.address, city: sender.city, state: sender.state, zip: sender.zip, country: sender.country,
-    subject: campaign.subject, message: campaign.message, fileTemplate: campaign.file_template,
-  };
+  // Empty profile fields get the same fallbacks the app shows in the sender profile form.
+  return { ...engineProfile(sender), subject: campaign.subject, message: campaign.message, fileTemplate: campaign.file_template };
 }
 
 /** Links on the page that look like a contact or quote page, same site only. */
