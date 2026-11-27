@@ -9,6 +9,10 @@ on:
         description: Real sends to the Formspree form (max 5; the free plan allows 50 a month)
         required: false
         default: '3'
+      debug:
+        description: Print the engine's step-by-step notes (test pages only)
+        required: false
+        default: ''
   schedule:
     - cron: '41 16 * * 1'
 
@@ -48,4 +52,5 @@ jobs:
           RUNNER_SECRET: ${{ secrets.RUNNER_SECRET }}
           SUITE_SUMMARY: ${{ steps.suite.outputs.summary }}
           SENDS: ${{ inputs.sends || '3' }}
+          DEBUG: ${{ inputs.debug }}
         run: node scripts/delivery.mjs

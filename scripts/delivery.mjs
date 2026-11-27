@@ -25,7 +25,7 @@ if (FORM && inbox && /^https:\/\/formspree\.io\/f\/\w+$/.test(FORM)) {
     const profile = { firstName: 'LeadsHunter', lastName: 'Delivery Test', email: inbox, phone: '(512) 555-0199', company: 'The Bat Marketing', website: 'thebatmarketing.com',
       city: 'Austin', state: 'TX', stateName: 'Texas', zip: '78701', country: 'United States', address: '100 Congress Ave',
       subject: `LeadsHunter delivery test ${stamp}-${n}`, message: `Delivery test ${stamp}-${n}. If you see this in your inbox, the send arrived. Code LH-${stamp}-${n}.` };
-    let r; try { r = await submitForm(p, `http://localhost:8898/f/${n}`, profile, { lead: { name: 'Test Contracting' } }); } catch (e) { r = { status: 'error', reason: e.message.split('\n')[0].slice(0, 80) }; }
+    let r; try { r = await submitForm(p, `http://localhost:8898/f/${n}`, profile, { lead: { name: 'Test Contracting' }, debug: !!process.env.DEBUG }); } catch (e) { r = { status: 'error', reason: e.message.split('\n')[0].slice(0, 80) }; if (process.env.DEBUG) console.log(String(e.stack).split('\n').slice(0, 6).join('\n')); }
     results.push({ n, status: r.status, reason: r.reason || '' });
     console.log(`Formspree send ${n}: ${r.status}${r.reason ? ` (${r.reason})` : ''}`);
     await ctx.close();
