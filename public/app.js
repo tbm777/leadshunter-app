@@ -1081,7 +1081,7 @@ function loadIntoForm(j) {
 const IP = { q: '', sort: 'mine', showRemoved: false, menu: null };
 const byPos = (a, b) => (a.position || 0) - (b.position || 0) || a.name.localeCompare(b.name);
 V.industries = () => `
-  <div class="head"><div><div class="eyebrow">Setup</div><h1>Industries</h1><p>What to search for, and which Google categories count as a match.</p></div>
+  <div class="head"><div><div class="eyebrow">Setup</div><h1>Industries</h1><p>The trades you search for, and the terms each one uses on Google Maps.</p></div>
     <button class="btn primary" data-act="indnew">${ic('plus')}Add industry</button></div>
   <div class="indtools">
     <div class="lsearch">${ic('find', 15)}<input id="ind-q" placeholder="Search industries or terms" value="${esc(IP.q)}" autocomplete="off"></div>
@@ -1110,7 +1110,6 @@ function industriesGrid() {
         <div class="kebab"><button class="iconbtn sm" data-indmenu="${d.id}" aria-label="More actions for ${esc(d.name)}" aria-haspopup="true">⋯</button>${IP.menu === d.id ? `<div class="menu" role="menu"><button role="menuitem" data-indedit="${d.id}">${ic('edit', 14)}Edit</button><button role="menuitem" class="danger" data-indrm="${d.id}">${ic('trash', 14)}Remove</button></div>` : ''}</div></div>
       <div class="indcard-stats"><span><b class="num">${fmt(n)}</b> lead${n === 1 ? '' : 's'}</span><span class="dotsep">·</span><span>${ls ? 'Searched ' + dayPT(ls).toLowerCase().replace(/^(\w)/, (m) => /\d/.test(m) ? m : m) : 'Never searched'}</span></div>
       <div class="indcard-terms">${d.terms.slice(0, 4).map((t, i) => `<span class="fx-term ${i < 2 ? 'def' : ''}" ${i < 2 ? 'title="Searched by default"' : ''}>${esc(t)}</span>`).join('')}${d.terms.length > 4 ? `<span class="fx-term">+${d.terms.length - 4}</span>` : ''}</div>
-      <div class="indcard-cats" title="${esc(d.categories.join(', '))}">${d.categories.length ? `Accepts ${esc(d.categories.slice(0, 2).join(', '))}${d.categories.length > 2 ? ` and ${d.categories.length - 2} more` : ''}` : 'Accepts any Google category'}</div>
       <div class="indcard-acts"><button class="btn sm" data-indfind="${d.id}">${ic('find', 13)}Find leads</button><button class="btn sm ghost" data-indedit="${d.id}">Edit</button>${n ? `<button class="btn sm ghost" data-indleads="${d.id}">View leads</button>` : ''}</div>
     </article>`;
   };
@@ -1158,18 +1157,18 @@ document.addEventListener('pointerup', async () => {
   ST.industries.sort(byPos); rerenderInd();
   try { await api('PUT', '/api/industries/order', { ids }); } catch (err) { toast(err.message, 'alert'); }
 });
+document.addEventListener('toggle', e => { if (e.target.id === 'ind-adv' && EDIT) EDIT.adv = e.target.open; }, true);
 function rerenderInd() { const g = $('#indgrid'); if (g) g.innerHTML = industriesGrid(); }
 let EDIT = null;
 function indModal() {
-  const e = EDIT, { cats } = industryStats();
-  const found = e.id == null ? [] : [...(cats.get(e.id) || new Map()).entries()].filter(([c]) => !e.categories.some(x => x.toLowerCase() === c.toLowerCase())).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const e = EDIT;
   const tok = (k, ph) => `<div class="tok" data-tokbox="${k}">${e[k].map((t, i) => `<span class="term">${esc(t)}<button data-tokdel="${k}:${i}" aria-label="Remove ${esc(t)}">×</button></span>`).join('')}<input id="tok-${k}" data-tok="${k}" placeholder="${ph}" autocomplete="off"></div>`;
   $('#overlay').innerHTML = `<div class="scrim" data-act="close"><div class="drawer inddrawer" data-stop role="dialog" aria-label="${e.id == null ? 'Add industry' : 'Edit industry'}">
     <div class="drawer-h"><div><div class="eyebrow" style="margin:0 0 4px">${e.id == null ? 'New industry' : 'Edit industry'}</div><h2>${esc(e.name || 'Untitled')}</h2></div><button class="btn ghost sm" data-act="close" aria-label="Close">${ic('x')}</button></div>
     <section><label class="flabel" for="ind-name">Name</label><input class="input big" id="ind-name" value="${esc(e.name)}" placeholder="e.g. Fence Installers"></section>
-    <section><span class="flabel">Search terms</span>${tok('terms', 'Type a term, press Enter')}<span class="help">Put the best term first. Searches start with the first two, so make the second one find different businesses (e.g. “roofer” then “roof repair”, tested on Google Maps).</span></section>
-    <section><span class="flabel">Accepted Google categories</span>${tok('categories', 'Type a category, press Enter')}<span class="help">${e.categories.length ? 'Results in other categories go to “excluded”.' : 'Empty means every category is accepted.'}</span>
-      ${found.length ? `<div class="catsug"><span class="flabel" style="font-size:11.5px">Found in your leads</span><div class="catsug-list">${found.map(([c, n]) => `<button class="catsug-btn" data-addcat="${esc(c)}">${ic('plus', 12)}${esc(c)}<span>${fmt(n)}</span></button>`).join('')}</div></div>` : ''}</section>
+    <section><span class="flabel">Search terms</span>${tok('terms', 'Type a term, press Enter')}<span class="help">Best term first. Searches use the first two by default.</span></section>
+    <details class="ind-adv" id="ind-adv"${e.adv ? ' open' : ''}><summary>${chev}Advanced: Google categories <span class="muted">${e.categories.length ? `${e.categories.length} accepted` : 'all accepted'}</span></summary>
+      <div class="ind-adv-body">${tok('categories', 'Type a category, press Enter')}<span class="help">Set from a real Google Maps test, so you rarely need to change this. Businesses in other categories are excluded unless their name says the trade. Empty accepts every category.</span></div></details>
     <div id="ind-err" class="help" style="color:var(--bad);padding:0 20px"></div>
     <div class="drawer-foot"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="indsave">${e.id == null ? 'Add industry' : 'Save changes'}</button></div>
   </div></div>`;
