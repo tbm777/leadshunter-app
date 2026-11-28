@@ -641,10 +641,11 @@ function mqList() {
   if (!list.length) return `<div class="empty"><b>Nothing matches</b>Try another filter.</div>`;
   const sel = MQ.items[MQ.sel];
   if (!sel || !list.includes(sel)) MQ.sel = MQ.items.indexOf(list[0]);
-  return list.slice(0, MQ.limit || 300).map(it => { const i = MQ.items.indexOf(it), g = mqGroup(it.reason);
+  const mixed = new Set(list.map(it => mqGroup(it.reason))).size > 1;
+  return `<div class="mqlist-h"><b class="num">${A.fmt(list.length)}</b> to do${MQ.done ? ` · <span class="okt">${A.fmt(MQ.done)} done</span>` : ''}<span class="mqkeys"><kbd>↑</kbd><kbd>↓</kbd> move</span></div>` + list.slice(0, MQ.limit || 300).map(it => { const i = MQ.items.indexOf(it), g = mqGroup(it.reason);
     return `<div class="mqrow ${i === MQ.sel ? 'on' : ''}" data-mq="${i}"><span class="cb ${MQ.checked.has(it.id) ? 'on' : ''}" data-mqchk="${it.id}" role="checkbox" aria-checked="${MQ.checked.has(it.id)}" aria-label="Select"></span>
       <div class="mqrow-b"><b>${A.esc(cleanCompanyName(it.name))}</b><span>${A.esc(domain(it.website))} · ${A.esc(it.campaign)}</span></div>
-      <div class="mqrow-r"><span class="pill" style="--c:${REASON_C[g]}">${REASON_SHORT[it.reason] || 'Other'}</span><small class="num">${ageLbl(it.updated_at)}</small></div></div>`; }).join('')
+      <div class="mqrow-r">${mixed ? `<span class="pill" style="--c:${REASON_C[g]}">${REASON_SHORT[it.reason] || 'Other'}</span>` : ''}<small class="num">${ageLbl(it.updated_at)}</small></div></div>`; }).join('')
     + (list.length > (MQ.limit || 300) ? `<button class="btn ghost sm mqmore" data-mqbulk="more">Show ${A.fmt(Math.min(300, list.length - (MQ.limit || 300)))} more</button>` : '');
 }
 function mqDetail() {
@@ -657,15 +658,25 @@ function mqDetail() {
   if (it.reason === 'call') return mqCall(it, c, lead, msg, pos, list);
   if (['email', 'sms', 'voicedrop'].includes(it.reason)) return mqTask(it, c, lead, subj, msg, pos, list);
   const canFill = hasExt() && it.fill_token && snd && subj && msg && url && it.reason !== 'login-required';
-  const f = (k, v) => v ? `<div class="mfield"><span class="k">${k}</span><span class="val">${A.esc(v)}</span><button class="dcopy" data-copy="${A.esc(v)}">${A.ic('copy', 12)}<span>Copy</span></button></div>` : '';
-  const why = it.reason === 'followup' ? `Follow-up (step ${it.step}) for a manual campaign. Fill form opens it with the follow-up message.` : it.reason === 'manual' ? 'This campaign is manual, so you send each form yourself. Fill form opens it already filled in.' : it.reason === 'captcha' ? 'This form has a CAPTCHA you need to solve. Everything else is filled in for you.' : it.reason === 'interrupted' ? 'The robot stopped while sending this one. Open the form and check whether it went through before sending again.' : reasonText(it.reason);
-  return `<div class="mqw-h"><div><h2>${A.esc(cleanCompanyName(it.name))}</h2><p>${url ? `<a href="${A.esc(url)}" target="_blank" rel="noopener">${A.esc(domain(url))}</a> · ` : ''}${A.esc(it.campaign)}${A.esc(asWho(it, c))}</p></div><div class="mqw-nav"><button class="iconbtn sm" data-mqnav="-1" aria-label="Previous" ${pos <= 0 ? 'disabled' : ''}>${A.ic('back', 14)}</button><span class="num">${pos + 1} / ${list.length}</span><button class="iconbtn sm" data-mqnav="1" aria-label="Next" ${pos >= list.length - 1 ? 'disabled' : ''}>${A.ic('arrow', 14)}</button></div></div>
+  const copyRow = (k, v, big) => v ? `<div class="mqp-row${big ? ' big' : ''}"><span class="k">${k}</span><span class="val">${A.esc(v)}</span><button class="dcopy" data-copy="${A.esc(v)}" title="Copy ${k.toLowerCase()}">${A.ic('copy', 12)}<span>Copy</span></button></div>` : '';
+  const why = it.reason === 'followup' ? `Follow-up, step ${it.step}. It opens with the follow-up message.` : it.reason === 'manual' ? 'Manual campaign: you send each form yourself.' : it.reason === 'captcha' ? 'This form has a CAPTCHA. Everything else is filled in for you.' : it.reason === 'interrupted' ? 'The robot stopped while sending this one. Check on the site whether it went through before sending again.' : reasonText(it.reason);
+  const step2 = it.reason === 'interrupted' ? 'Check it wasn’t sent, then send' : it.reason === 'captcha' ? 'Solve the CAPTCHA, press send' : 'Check it, press send';
+  const g = mqGroup(it.reason), multi = c && (c.variants || []).length;
+  const chip = (html, cls = '') => `<span class="mqchip ${cls}">${html}</span>`;
+  return `<div class="mqw-h"><div class="mqw-id"><div class="mqav" aria-hidden="true">${A.esc((cleanCompanyName(it.name) || '?').charAt(0).toUpperCase())}</div><div><h2>${A.esc(cleanCompanyName(it.name))}</h2><p>${url ? `<a href="${A.esc(url)}" target="_blank" rel="noopener">${A.esc(domain(url))}${A.ic('ext', 11)}</a>` : 'No website'}${it.city ? ` · ${A.esc(it.city)}${it.region ? ', ' + A.esc(it.region) : ''}` : ''}</p></div></div>
+      <div class="mqw-nav"><button class="iconbtn sm" data-mqnav="-1" aria-label="Previous" ${pos <= 0 ? 'disabled' : ''}>${A.ic('back', 14)}</button><span class="num">${pos + 1} / ${list.length}</span><button class="iconbtn sm" data-mqnav="1" aria-label="Next" ${pos >= list.length - 1 ? 'disabled' : ''}>${A.ic('arrow', 14)}</button></div></div>
     <div class="mqw-b">
-      <div class="note ${it.reason === 'interrupted' ? '' : 'neutral'}">${A.ic('alert')}<div>${A.esc(why)}</div></div>
-      ${canFill ? `<a class="btn primary mqopen" href="${A.esc(fillUrl(it, c, snd, url, subj, msg))}" target="_blank" rel="noopener" data-mqopened>${A.ic('edit', 15)}Fill form<span class="kbd2">F</span></a>
-          <ol class="mqsteps"><li>The form opens already filled in</li><li>${it.reason === 'interrupted' ? 'Check it wasn’t already sent, then press send' : it.reason === 'captcha' ? 'Solve the CAPTCHA and press send' : 'Check the fields and press send'}</li><li>It's marked sent here automatically</li></ol>`
+      <div class="mqmeta">${chip(`<i style="background:${REASON_C[g]}"></i>${REASON_SHORT[it.reason] || 'Other'}`)}${chip(A.esc(it.campaign))}${multi ? chip(`Variant ${A.esc(it.variant || 'A')}`) : ''}${snd ? chip(`${A.ic('senders', 12)}As ${A.esc(snd.first_name)} ${A.esc(snd.last_name)}`) : ''}</div>
+      <div class="mqaction ${it.reason === 'interrupted' ? 'warn' : ''}">
+        <p>${A.esc(why)}</p>
+        ${canFill ? `<a class="btn primary mqopen" href="${A.esc(fillUrl(it, c, snd, url, subj, msg))}" target="_blank" rel="noopener" data-mqopened>${A.ic('edit', 15)}Fill form<span class="kbd2">F</span></a>
+          <ol class="mqsteps"><li><i>1</i>Opens filled in</li><li><i>2</i>${step2}</li><li><i>3</i>Marked sent automatically</li></ol>`
         : url ? `<a class="btn primary mqopen" href="${A.esc(url)}" target="_blank" rel="noopener" data-mqopened>${A.ic('ext', 15)}Open the form<span class="kbd2">F</span></a>${hasExt() ? '' : `<div class="extcta">${A.ic('edit', 16)}<div><b>Skip the copy-paste</b><span>With the form filler extension, forms open already filled in and are marked sent automatically.</span></div><button class="btn sm" data-o="extguide">Get it</button></div>`}` : ''}
-      <details class="mqfields" ${canFill ? '' : 'open'}><summary>${canFill ? 'Copy fields by hand instead' : 'Fields to paste'}</summary><div>${f('Subject', subj)}${f('Message', msg)}${snd ? f('First name', snd.first_name) + f('Last name', snd.last_name) + f('Email', snd.email) + f('Phone', snd.phone) + f('Company', snd.company) + f('Website', snd.website) : ''}</div></details>
+      </div>
+      <div class="mqpreview"><div class="mqp-h"><h6>What gets sent</h6>${canFill ? '<span>The extension fills these for you</span>' : '<span>Copy each field into the form</span>'}</div>
+        ${copyRow('Subject', subj)}${copyRow('Message', msg, true)}
+        ${snd ? `<div class="mqp-from"><span class="k">From</span><div class="mqp-grid">${[['First name', snd.first_name], ['Last name', snd.last_name], ['Email', snd.email], ['Phone', snd.phone], ['Company', snd.company], ['Website', snd.website]].filter(x => x[1]).map(([k, v]) => `<button class="mqp-cell" data-copy="${A.esc(v)}" title="Copy ${k.toLowerCase()}"><small>${k}</small><b>${A.esc(v)}</b></button>`).join('')}</div></div>` : `<div class="note">${A.ic('alert')}<div>No sender profile on this campaign yet. Pick one in the campaign's settings.</div></div>`}
+      </div>
     </div>
     <div class="mqw-f"><button class="btn primary" data-mqact="sent">${A.ic('check', 14)}Mark as sent<span class="kbd2">S</span></button><button class="btn" data-mqact="retry" title="Send back to the robot">${A.ic('retry', 14)}Try robot<span class="kbd2">R</span></button><button class="btn" data-mqact="skip">Skip<span class="kbd2">X</span></button><button class="btn ghost" data-mqact="dnc" style="margin-left:auto;color:var(--bad)">${A.ic('shield', 14)}Do not contact</button></div>`;
 }
@@ -946,7 +957,13 @@ async function onClick(e) {
   const t = e.target;
   if (!t.closest('.kebab')) { document.querySelectorAll('.oi .menu').forEach(m => m.remove()); if (CMENU.open) { CMENU.open = false; const c0 = curCampaign(); const el = A.$('#c-actions'); if (c0 && el) el.innerHTML = actionsHTML(c0); } }
   const cpy = t.closest('[data-copy]');
-  if (cpy) { try { await navigator.clipboard.writeText(cpy.dataset.copy); const s = cpy.querySelector('span'); s.textContent = 'Copied'; setTimeout(() => { s.textContent = 'Copy'; }, 1400); } catch { A.toast('Copy failed. Select the text instead.', 'alert'); } return; }
+  if (cpy) {
+    try { await navigator.clipboard.writeText(cpy.dataset.copy); } catch { A.toast('Copy failed. Select the text instead.', 'alert'); return; }
+    const sp = cpy.querySelector(':scope > span');
+    if (sp) { sp.textContent = 'Copied'; setTimeout(() => { sp.textContent = 'Copy'; }, 1400); }
+    else { cpy.classList.add('copied'); const sm = cpy.querySelector('small'), was = sm && sm.textContent; if (sm) sm.textContent = 'Copied'; setTimeout(() => { cpy.classList.remove('copied'); if (sm) sm.textContent = was; }, 1400); }
+    return;
+  }
   const tag = t.closest('[data-tag]');
   if (tag) { insertTag(tag.dataset.tag); return; }
   const ldr = t.closest('[data-ldreplied]');

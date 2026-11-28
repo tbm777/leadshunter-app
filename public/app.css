@@ -1655,3 +1655,47 @@ input[type=checkbox]:disabled,input[type=radio]:disabled{opacity:.55;cursor:defa
 .vtag{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 4px;margin-right:6px;border-radius:5px;background:var(--surface-2);border:1px solid var(--line);font:650 10.5px/1 var(--f-ui);color:var(--muted);font-style:normal;vertical-align:1px}
 .mqvar{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
 .varhead{flex-wrap:nowrap;align-items:flex-start}.varhead>div:first-child{flex:1;min-width:0}
+/* Manual queue, redesigned: list and work pane share one height; the pane shows exactly what gets sent */
+.mqlist{height:calc(100vh - 96px);max-height:none;min-height:420px;padding:0;top:76px}
+.mqlist-h{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:6px;padding:10px 14px;background:var(--surface);border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+.mqlist-h b{color:var(--ink);font-weight:650}
+.mqlist-h .okt{color:var(--ok);font-weight:600}
+.mqkeys{margin-left:auto;display:inline-flex;align-items:center;gap:3px;font-size:11.5px;color:var(--faint)}
+.mqkeys kbd{font:600 10.5px/1 var(--f-ui);padding:3px 5px;border-radius:4px;border:1px solid var(--line);background:var(--surface-2);color:var(--muted)}
+.mqrow{padding:12px 14px}
+.mqrow-b b{font-size:13.5px}
+.mqwork{height:calc(100vh - 96px);min-height:420px;max-height:none;top:76px}
+.mqw-b{flex:1;gap:14px;padding:18px}
+.mqw-id{display:flex;gap:12px;align-items:center;min-width:0}
+.mqw-id>div:last-child{min-width:0}
+.mqav{flex:none;width:40px;height:40px;border-radius:11px;display:grid;place-items:center;font-weight:650;font-size:16px;color:var(--accent-text);background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 25%,transparent)}
+.mqw-h p a{display:inline-flex;align-items:center;gap:4px;text-decoration:none}
+.mqw-h p a:hover{text-decoration:underline}
+.mqmeta{display:flex;flex-wrap:wrap;gap:6px}
+.mqchip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:99px;background:var(--surface-2);border:1px solid var(--line);font-size:12px;color:var(--muted);font-weight:500}
+.mqchip i{width:7px;height:7px;border-radius:50%}
+.mqchip svg{color:var(--faint)}
+.mqaction{display:flex;flex-direction:column;gap:12px;padding:16px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line)}
+.mqaction>p{margin:0;font-size:13px;color:var(--muted)}
+.mqaction.warn{background:color-mix(in srgb,var(--warn) 8%,var(--surface));border-color:color-mix(in srgb,var(--warn) 35%,var(--line))}
+.mqaction.warn>p{color:var(--ink)}
+.mqsteps{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.mqsteps li{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);line-height:1.3}
+.mqsteps i{flex:none;display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--surface);border:1px solid var(--line);font:650 11px/1 var(--f-ui);color:var(--ink);font-style:normal}
+.mqpreview{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.mqp-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+.mqp-h h6{margin:0;font-size:12px;font-weight:650;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.mqp-h span{font-size:12px;color:var(--faint)}
+.mqp-row{display:grid;grid-template-columns:80px minmax(0,1fr) auto;gap:10px;align-items:start;padding:12px 14px;border-bottom:1px solid var(--line)}
+.mqp-row .k,.mqp-from .k{font-size:12px;color:var(--faint);padding-top:2px}
+.mqp-row .val{font-size:13.5px;white-space:pre-wrap;overflow-wrap:anywhere}
+.mqp-row.big .val{max-height:220px;overflow:auto;line-height:1.55}
+.mqp-row .dcopy{opacity:.55}.mqp-row:hover .dcopy{opacity:1}
+.mqp-from{display:grid;grid-template-columns:80px minmax(0,1fr);gap:10px;padding:12px 14px}
+.mqp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
+.mqp-cell{display:flex;flex-direction:column;gap:2px;text-align:left;padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:copy;min-width:0}
+.mqp-cell small{font-size:11px;color:var(--faint)}
+.mqp-cell b{font-size:12.5px;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mqp-cell:hover{border-color:var(--accent)}
+.mqp-cell.copied{border-color:var(--ok)}
+@media (max-width:900px){.mqgrid{grid-template-columns:1fr}.mqlist,.mqwork{height:auto;min-height:0;position:static}.mqlist{max-height:320px}.mqsteps{grid-template-columns:1fr}}
