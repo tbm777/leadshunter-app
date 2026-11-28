@@ -389,24 +389,26 @@ const LEAD_STATUS = [0, 2, 3, 4];   // 4 = replied: stops follow-ups
 async function patchLead(env, id, b) {
   const sets = [], vals = [];
   if (b.status !== undefined) { if (+b.status === 1) throw new HttpError(400, '“In campaign” is set automatically when you add a lead to a campaign.');
-    if (+b.status === 0 && (await env.DB.prepare('SELECT status FROM leads WHERE id = ?').bind(id).first())?.status === 1) throw new HttpError(409, 'This lead is in a campaign. Remove it from the campaign to set it back to New.'); if (!LEAD_STATUS.includes(+b.status)) throw new HttpError(400, 'Unknown status.'); sets.push('status = ?'); vals.push(+b.status); }
+    if (!LEAD_STATUS.includes(+b.status)) throw new HttpError(400, 'Unknown status.');
+    // Campaigns follow the lead's status (see coordinateLeadStatus). A form sent by mistake that goes back to the queue keeps the lead In campaign.
+    b.co = await O.coordinateLeadStatus(env, [id], +b.status);
+    sets.push('status = ?'); vals.push(b.co.requeued.size ? 1 : +b.status); }
   if (b.notes !== undefined) { sets.push('notes = ?'); vals.push(String(b.notes).slice(0, 5000)); }
   if (!sets.length) throw new HttpError(400, 'Nothing to change.');
   const seq = await reserveSeq(env, 1);
   const r = await env.DB.prepare(`UPDATE leads SET ${sets.join(', ')}, seq = ?, updated_at = ? WHERE id = ? RETURNING ${COLS_SQL}`).bind(...vals, seq, now(), id).raw();
   if (!r.length) throw new HttpError(404, 'Lead not found.');
-  if (b.status !== undefined) await O.skipUnsent(env, [id], +b.status);
-  return json({ cols: LEAD_COLS, row: r[0] });
+  return json({ cols: LEAD_COLS, row: r[0], ...(b.co ? { requeued: b.co.requeued.size, removed: b.co.removed, marked: b.co.marked } : {}) });
 }
 async function bulkLeads(env, b) {
   const ids = [...new Set((b.ids || []).map(Number).filter(Number.isInteger))].slice(0, 20000);
   if (!ids.length || !LEAD_STATUS.includes(+b.status)) throw new HttpError(400, 'Select leads and a status.');
+  const co = await O.coordinateLeadStatus(env, ids, +b.status), moved = co.requeued;
   let seq = await reserveSeq(env, ids.length);
   const t = now();
-  const stmts = ids.map(id => env.DB.prepare('UPDATE leads SET status = ?, seq = ?, updated_at = ? WHERE id = ?').bind(+b.status, seq++, t, id));
+  const stmts = ids.map(id => env.DB.prepare('UPDATE leads SET status = ?, seq = ?, updated_at = ? WHERE id = ?').bind(moved.has(id) ? 1 : +b.status, seq++, t, id));
   for (const part of chunk(stmts, 400)) await env.DB.batch(part);
-  await O.skipUnsent(env, ids, +b.status);
-  return json({ ok: true, updated: ids.length });
+  return json({ ok: true, updated: ids.length, requeued: moved.size, removed: co.removed, marked: co.marked });
 }
 
 /** Delete leads: they disappear from every browser on the next sync. Unsent campaign items and scheduled follow-ups go too;

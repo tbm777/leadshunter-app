@@ -393,7 +393,7 @@ export async function extSent(env, b) {
   if (!o) throw new HttpError(404, 'This item is no longer in LeadsHunter.');
   if (!SENT.includes(o.status)) {
     const t = now();
-    await env.DB.prepare("UPDATE outreach SET status = 'sent_manual', reason = NULL, evidence = ?, sent_at = ?, updated_at = ? WHERE id = ?").bind(str(b.evidence, 300) || 'Sent with the extension', t, t, oid).run();
+    await env.DB.prepare("UPDATE outreach SET status = 'sent_manual', undo_reason = reason, undo_sent_at = sent_at, undo_step = step, reason = NULL, evidence = ?, sent_at = ?, updated_at = ? WHERE id = ?").bind(str(b.evidence, 300) || 'Sent with the extension', t, t, oid).run();
     await stampVersion(env, o);
     await setLeadStatus(env, [o.lead_id], 2, [0, 1]);
     await afterSent(env, oid, 'sent_manual', str(b.evidence, 300) || 'Sent with the extension');
@@ -413,6 +413,58 @@ async function stampVersion(env, o) {
       : env.DB.prepare('INSERT OR IGNORE INTO variant_messages (campaign_id, variant, version, subject, message, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(c.id, g.variant, g.version, g.subject, g.message, t),
     env.DB.prepare('UPDATE outreach SET msg_version = ? WHERE id = ? AND msg_version IS NULL').bind(g.version, o.id),
   ]);
+}
+
+/** A form marked sent by hand that didn't really go out: back to the Manual queue exactly as it was. Robot sends can't be undone (they did go out). */
+async function unsend(env, o) {
+  if (o.status !== 'sent_manual') throw new HttpError(409, o.status === 'sent' || o.status === 'submitted' ? 'The robot sent this one, so it can’t be undone.' : 'This one isn’t marked sent.');
+  const step = o.undo_step || o.step || 1;
+  const reason = o.undo_reason || (step > 1 ? 'followup' : 'manual');
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE outreach SET status = 'manual', reason = ?, evidence = NULL, sent_at = undo_sent_at, step = ?, next_at = NULL, prev_status = ?,
+      msg_version = CASE WHEN ? = 1 THEN NULL ELSE msg_version END, undo_reason = NULL, undo_sent_at = NULL, undo_step = NULL, updated_at = ? WHERE id = ?`).bind(reason, step, step > 1 ? 'sent' : null, step, t, o.id),
+    // Take the mistaken send off the lead's timeline.
+    env.DB.prepare("DELETE FROM outreach_events WHERE id = (SELECT id FROM outreach_events WHERE outreach_id = ? AND step = ? AND (kind = 'sent_manual' OR kind LIKE 'call_%') ORDER BY at DESC LIMIT 1)").bind(o.id, step),
+  ]);
+  // Contacted → In campaign again, unless another campaign really reached them.
+  if (step === 1) {
+    const other = await env.DB.prepare("SELECT 1 FROM outreach WHERE lead_id = ? AND id != ? AND status IN ('sent','submitted','sent_manual') LIMIT 1").bind(o.lead_id, o.id).first();
+    if (!other) await setLeadStatus(env, [o.lead_id], 1, [0, 2]);
+  }
+}
+/**
+ * A lead's status changed in the Leads list or lead details: keep every campaign in step with it.
+ * New: a form marked sent by mistake goes back to the Manual queue (the lead is In campaign again); otherwise the lead
+ *      leaves the campaigns where it was only waiting. Contacted: a form still waiting counts as sent by you (follow-ups
+ *      start). Replied and Do not contact: everything unsent stops. Returns what moved, for the message you see.
+ */
+export async function coordinateLeadStatus(env, ids, status) {
+  const out = { requeued: new Set(), removed: 0, marked: 0 };
+  if (status === 0) {
+    out.requeued = await undoManualSends(env, ids);
+    const rest = ids.filter(id => !out.requeued.has(id));
+    for (const part of chunk(rest, 90)) out.removed += (await env.DB.prepare(`DELETE FROM outreach WHERE lead_id IN (${inList(part.length)}) AND step = 1 AND sent_at IS NULL AND status IN ('queued','manual','failed','skipped')`).bind(...part).run()).meta.changes;
+  } else if (status === 2) {
+    const t = now();
+    for (const part of chunk(ids, 90)) {
+      const rows = (await env.DB.prepare(`SELECT o.* FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE o.lead_id IN (${inList(part.length)}) AND o.step = 1 AND o.status IN ('queued','manual') AND c.status != 'archived'`).bind(...part).all()).results;
+      for (const o of rows) {
+        await env.DB.prepare("UPDATE outreach SET status = 'sent_manual', undo_reason = reason, undo_sent_at = sent_at, undo_step = step, reason = NULL, evidence = 'Marked contacted by you', sent_at = ?, updated_at = ? WHERE id = ?").bind(t, t, o.id).run();
+        await stampVersion(env, o); await afterSent(env, o.id, 'sent_manual', 'Marked contacted by you'); out.marked++;
+      }
+    }
+  } else await skipUnsent(env, ids, status);
+  return out;
+}
+/** Leads set back to New by hand: forms you had marked sent go back to the Manual queue. Returns the lead ids that moved. */
+export async function undoManualSends(env, leadIds) {
+  const moved = new Set();
+  for (const part of chunk(leadIds, 90)) {
+    const rows = (await env.DB.prepare(`SELECT o.* FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE o.lead_id IN (${inList(part.length)}) AND o.status = 'sent_manual' AND c.status != 'archived'`).bind(...part).all()).results;
+    for (const o of rows) { await unsend(env, o); moved.add(o.lead_id); }
+  }
+  return moved;
 }
 
 /* ------------------------------------------------------------------ items (campaign results, manual queue, messages) */
@@ -445,10 +497,12 @@ export async function itemAction(env, oid, b) {
     const CALL = { talked: 'Talked to them', voicemail: 'Left a voicemail', noanswer: 'No answer' };
     const DONE = { email: 'Email sent', sms: 'Text sent', voicedrop: 'Voicemail dropped' };
     const ev = b.action === 'call' ? `Call: ${CALL[b.outcome] || 'Called'}` : DONE[b.outcome] || null;
-    await env.DB.prepare("UPDATE outreach SET status = 'sent_manual', reason = NULL, evidence = COALESCE(?, evidence), sent_at = ?, updated_at = ? WHERE id = ?").bind(ev, t, t, oid).run();
+    await env.DB.prepare("UPDATE outreach SET status = 'sent_manual', undo_reason = reason, undo_sent_at = sent_at, undo_step = step, reason = NULL, evidence = COALESCE(?, evidence), sent_at = ?, updated_at = ? WHERE id = ?").bind(ev, t, t, oid).run();
     await stampVersion(env, o);
     await setLeadStatus(env, [o.lead_id], 2, [0, 1]);
     await afterSent(env, oid, b.action === 'call' ? `call_${CALL[b.outcome] ? b.outcome : 'talked'}` : 'sent_manual', ev);
+  } else if (b.action === 'unsend') {
+    await unsend(env, o);
   } else if (b.action === 'replied') {
     await setLeadStatus(env, [o.lead_id], 4);
     await skipUnsent(env, [o.lead_id], 4);

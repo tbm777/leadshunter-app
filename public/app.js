@@ -1295,8 +1295,7 @@ document.addEventListener('click', async (e) => {
   if ((v = ds('lstat')) !== undefined) {
     const [lid, st] = v.split(':').map(Number), cur = ST.byId.get(lid);
     if (cur && cur.status === st) return;
-    if (cur && cur.status === 1 && st === 0) { toast('This lead is in a campaign. Open the campaign and remove it there to set it back to New.', 'alert'); return; }
-    saveLead(lid, { status: st }, () => { toast(st === 4 ? 'Marked replied. Follow-ups for this lead are stopped.' : st === 3 ? 'Marked do not contact. Unsent campaign messages are skipped.' : st === 2 && cur?.status === 1 ? 'Marked contacted. Unsent campaign messages are skipped.' : 'Status saved'); if (DRAWER_ID === lid) leadDrawer(lid); });
+    saveLead(lid, { status: st }, (r) => { toast(statusMsg(st, r)); if (DRAWER_ID === lid) leadDrawer(lid); });
     return;
   }
   if ((v = ds('xpreset')) !== undefined) { XP.preset = v; XP.cols = new Set(XPRESETS[v]); exportModal(); return; }
@@ -1572,7 +1571,7 @@ document.addEventListener('change', async (e) => {
   if (t.dataset.fsel) { const k = t.dataset.fsel; L$.F[k] = k === 'add' ? +t.value : t.value; changed(); return; }
   if (t.dataset.fchk) { L$.F[t.dataset.fchk] = t.checked; changed(); return; }
   if (t.id === 'lsort') { L$.sort = t.value; leadsUpdate(false); $('#vt').scrollTop = 0; return; }
-  if (t.dataset.lstatus) { saveLead(+t.dataset.lstatus, { status: +t.value }, () => toast('Status saved')); return; }
+  if (t.dataset.lstatus) { const st = +t.value; saveLead(+t.dataset.lstatus, { status: st }, (r) => toast(statusMsg(st, r))); return; }
   if (t.dataset.xopt) { XP[t.dataset.xopt] = t.checked; exportModal(); return; }
   if (t.dataset.xcol) { t.checked ? XP.cols.add(t.dataset.xcol) : XP.cols.delete(t.dataset.xcol); XP.preset = Object.entries(XPRESETS).find(([, a]) => a.length === XP.cols.size && a.every(c => XP.cols.has(c)))?.[0] || 'custom'; exportModal(); return; }
   if (t.name === 'lmpick') { lmPick(t.value === 'new' ? 'new' : +t.value); return; }
@@ -1582,12 +1581,21 @@ document.addEventListener('change', async (e) => {
   if (t.id === 'fs-emails') { FS.emails = t.checked; if (FS.emails && FS.depth === 0) FS.depth = 1; $('#fs-collect').innerHTML = collectHTML(); refreshFind([]); return; }
   if (t.dataset.locrad != null) { FS.locs[+t.dataset.locrad].rad = +t.value; refreshFind(['where']); return; }
 });
+/** What a status change did, in plain words (campaigns follow the lead's status). */
+function statusMsg(st, r = {}) {
+  if (st === 0) return r.requeued ? 'It wasn’t really sent: back in the Manual queue, ready to send.' : r.removed ? 'Back to New. Taken out of the campaign, where it was still waiting.' : 'Marked new';
+  if (st === 2) return r.marked ? 'Marked contacted. The campaign counts it as sent by you.' : 'Marked contacted';
+  if (st === 3) return 'Marked do not contact. Nothing more will be sent.';
+  if (st === 4) return 'Marked replied. Follow-ups are stopped.';
+  return 'Status saved';
+}
 async function saveLead(id, patch, done) {
   try {
     const r = await api('PATCH', `/api/leads/${id}`, patch);
     applyRows(r.cols, [r.row]); saveCacheSoon(); bc && bc.postMessage('changed');
+    if (patch.status !== undefined) loadOutreach();   // campaigns and the Manual queue follow the lead's status
     if ($('#vt')) leadsUpdate();
-    done && done();
+    done && done(r);
   } catch (err) { toast(err.message, 'alert'); }
 }
 

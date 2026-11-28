@@ -276,6 +276,7 @@ function kebabMenu(it) {
   if (['manual', 'failed', 'queued'].includes(it.status)) acts.push(['sent', A.ic('check', 14) + 'Mark as sent']);
   if (['manual', 'failed', 'queued'].includes(it.status)) acts.push(['skip', A.ic('x', 14) + 'Skip']);
   if (['queued', 'manual', 'failed', 'skipped'].includes(it.status)) acts.push(['remove', A.ic('trash', 14) + 'Remove from campaign']);
+  if (it.status === 'sent_manual') acts.push(['unsend', A.ic('retry', 14) + 'Not sent? Back to Manual queue']);
   if (SENT.concat('manual').includes(it.status) && it.lead_status !== 4) acts.push(['replied', A.ic('messages', 14) + 'Mark replied (stops follow-ups)']);
   acts.push(['dnc', A.ic('shield', 14) + 'Do not contact', 'danger']);
   return `<div class="menu" role="menu">${acts.map(([a, l, cls]) => `<button role="menuitem" class="${cls || ''}" data-oact="${a}">${l}</button>`).join('')}</div>`;
@@ -632,7 +633,7 @@ function mqHead() {
 }
 function mqBulkHTML() {
   const n = MQ.checked ? MQ.checked.size : 0;
-  if (!n) return '';
+  if (!n) return MQ.last ? `<div class="mqundo">${A.ic('check', 14)}<span><b>${A.esc(MQ.last.name)}</b> marked sent</span><button class="linkbtn" data-mqundo="${MQ.last.id}">Undo</button><button class="iconbtn sm" data-mqundo="x" aria-label="Dismiss">${A.ic('x', 13)}</button></div>` : '';
   return `<div class="selbar mqsel"><b class="num">${A.fmt(n)} selected</b><button class="linkbtn" data-mqbulk="all">Select all ${A.fmt(mqFiltered().length)} shown</button><button class="linkbtn" data-mqbulk="none">Clear</button>
     <div class="selacts"><button class="btn sm" data-mqbulk="retry" title="Send back to the robot: it sends the ones without a CAPTCHA to solve">${A.ic('retry', 14)}Try robot again</button><button class="btn sm ghost" data-mqbulk="sent">${A.ic('check', 14)}Mark sent</button><button class="btn sm ghost" data-mqbulk="skip">${A.ic('x', 14)}Skip</button></div></div>`;
 }
@@ -736,6 +737,7 @@ async function mqAction(act, outcome) {
   try {
     await A.api('POST', `/api/outreach/${it.id}`, { action: act, outcome });
     MQ.items.splice(MQ.sel, 1); MQ.checked?.delete(it.id); MQ.done = (MQ.done || 0) + 1;
+    MQ.last = act === 'sent' || act === 'call' ? { id: it.id, name: cleanCompanyName(it.name) } : null;
     const rest = list.filter(x => x !== it), next = rest[Math.min(pos, rest.length - 1)];
     MQ.sel = next ? MQ.items.indexOf(next) : 0;
     OS.manual = Math.max(0, OS.manual - 1); A.renderNav('manual');
@@ -967,6 +969,15 @@ async function onClick(e) {
   }
   const tag = t.closest('[data-tag]');
   if (tag) { insertTag(tag.dataset.tag); return; }
+  const mu = t.closest('[data-mqundo]');
+  if (mu) {
+    const id = mu.dataset.mqundo; MQ.last = null;
+    if (id !== 'x') { try { await A.api('POST', `/api/outreach/${+id}`, { action: 'unsend' }); MQ.done = Math.max(0, (MQ.done || 0) - 1); OS.manual++; await loadManual(); MQ.sel = Math.max(0, MQ.items.findIndex(i => i.id === +id)); A.render(); A.toast('Back in the queue'); A.sync(); } catch (err) { A.toast(err.message, 'alert'); } }
+    else mqRender(['bulk']);
+    return;
+  }
+  const ldu = t.closest('[data-ldunsend]');
+  if (ldu) { try { await A.api('POST', `/api/outreach/${+ldu.dataset.ldunsend}`, { action: 'unsend' }); A.toast('Back in the Manual queue'); MQ.loaded = false; A.sync(); loadOutreach(); setTimeout(() => { const L = A.ST.byId.get(+document.querySelector('#ld-out')?.dataset.lid); if (L) A.openLead(L.id); }, 700); } catch (err) { A.toast(err.message, 'alert'); } return; }
   const ldr = t.closest('[data-ldreplied]');
   if (ldr) { try { await A.api('POST', `/api/outreach/${+ldr.dataset.ldreplied}`, { action: 'replied' }); A.toast('Marked replied. Follow-ups stopped.'); A.sync(); loadOutreach(); setTimeout(() => { const L = A.ST.byId.get(+document.querySelector('#ld-out')?.dataset.lid); if (L) A.openLead(L.id); }, 700); } catch (err) { A.toast(err.message, 'alert'); } return; }
   const vt = t.closest('[data-vtab]');
@@ -1192,7 +1203,7 @@ async function itemAct(oid, act) {
   try {
     if (act === 'remove') await A.api('POST', `/api/campaigns/${c.id}/remove`, { ids: [oid] });
     else await A.api('POST', `/api/outreach/${oid}`, { action: act });
-    A.toast({ retry: 'Queued again', sent: 'Marked as sent', skip: 'Skipped', remove: 'Removed from the campaign', dnc: 'Marked do not contact', replied: 'Marked replied. Follow-ups stopped.' }[act]);
+    A.toast({ unsend: 'Back in the Manual queue', retry: 'Queued again', sent: 'Marked as sent', skip: 'Skipped', remove: 'Removed from the campaign', dnc: 'Marked do not contact', replied: 'Marked replied. Follow-ups stopped.' }[act]);
     await refreshCampaign(c.id, { items: false }); loadItems(c.id); A.sync(); loadOutreach();
   } catch (e) { A.toast(e.message, 'alert'); }
 }
@@ -1295,7 +1306,7 @@ export async function leadOutreachInto(el, L) {
           <div class="ldo-msg"><h6>${sentOrWill}${(() => { const snd = OS.senders.find(x => x.id === it.sender_id), cc = OS.campaigns.find(x => x.id === it.campaign_id); return `${cc && (cc.variants || []).length ? ` · variant ${A.esc(it.variant || 'A')}` : ''}${snd ? ` · as ${A.esc(snd.first_name)} ${A.esc(snd.last_name)}` : ''}`; })()}</h6><b>${A.esc(personalize(it.subject, lead))}</b><p>${A.esc(personalize(it.message, lead))}</p></div>
           ${answers.length ? `<div class="ldo-ans"><h6>Other answers the robot gave</h6><ul>${answers.map(a => { const i = a.indexOf(': '); return `<li><span>${A.esc(i > 0 ? a.slice(0, i) : 'Field')}</span><b>${A.esc(i > 0 ? a.slice(i + 2) : a)}</b></li>`; }).join('')}</ul></div>` : ''}
           ${seqTimeline(it, L)}
-          <div class="row" style="justify-content:space-between">${SENT.concat('manual').includes(it.status) && L.status !== 4 && L.status !== 3 ? `<button class="btn sm" data-ldreplied="${it.id}">${A.ic('messages', 13)}Mark replied${it.steps && it.steps.length ? ' (stops follow-ups)' : ''}</button>` : '<span></span>'}<a class="linkbtn muted" href="#campaign/${it.campaign_id}">Open campaign</a></div>
+          <div class="row" style="justify-content:space-between">${SENT.concat('manual').includes(it.status) && L.status !== 4 && L.status !== 3 ? `<button class="btn sm" data-ldreplied="${it.id}">${A.ic('messages', 13)}Mark replied${it.steps && it.steps.length ? ' (stops follow-ups)' : ''}</button>` : '<span></span>'}<span class="row" style="gap:12px">${it.status === 'sent_manual' ? `<button class="linkbtn muted" data-ldunsend="${it.id}" title="Marked sent by mistake? It goes back to the Manual queue">Not sent? Back to queue</button>` : ''}<a class="linkbtn muted" href="#campaign/${it.campaign_id}">Open campaign</a></span></div>
         </div></details>`;
     }).join('')}</div>`;
   } catch { el.innerHTML = ''; }
