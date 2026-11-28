@@ -1381,3 +1381,13 @@ function rvRender() {
   A.$('#overlay').innerHTML = `<div class="scrim modal-scrim" data-act="close"><div class="modal rvm" data-stop role="dialog" aria-label="Review test results">${head}${body}</div></div>`;
 }
 document.addEventListener('click', (e) => { const b = e.target.closest('[data-rv]'); if (b && RV.open) rvVerdict(b.dataset.rv); });
+
+/* Manual queue panes: always exactly fill the visible window below them, so the action buttons are never off-screen. */
+function fitMq() {
+  const g = document.querySelector('.mqgrid'); if (!g || innerWidth <= 900) { if (g) g.style.removeProperty('--mqh'); return; }
+  const top = Math.max(76, g.getBoundingClientRect().top);
+  g.style.setProperty('--mqh', Math.max(420, innerHeight - top - 16) + 'px');
+}
+addEventListener('scroll', fitMq, { passive: true });
+addEventListener('resize', fitMq);
+new MutationObserver(() => { if (document.querySelector('.mqgrid')) fitMq(); }).observe(document.documentElement, { childList: true, subtree: true });
