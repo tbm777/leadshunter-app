@@ -527,7 +527,7 @@ async function refreshCampaign(id, { items = true } = {}) {
     stopPoll(); loadItems(id); A.sync(); loadOutreach();
     A.toast(c.job.status === 'failed' ? 'The run failed. See the banner for details.' : c.job.mode === 'test' ? 'Test run finished. Nothing was sent.' : `Run finished: ${contacted(c)} sent in total`, c.job.status === 'failed' ? 'alert' : 'check');
   }
-  if (jobActive(c.job) && !pollT) pollT = setInterval(() => refreshCampaign(id).catch(() => {}), 4000);
+  if (jobActive(c.job) && !pollT) pollT = setInterval(() => refreshCampaign(id).catch(() => {}), 8000);
   return c;
 }
 function mountCampaign(arg) {

@@ -84,7 +84,7 @@ export async function outreachOverview(env) {
     env.DB.prepare("SELECT COUNT(*) AS n FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE o.status = 'manual' AND c.status = 'active'"),
     env.DB.prepare("SELECT id, campaign_id, status, params, to_check, checked, created_at, started_at, finished_at, error, run_url FROM searches WHERE kind = 'outreach' AND id IN (SELECT MAX(id) FROM searches WHERE kind = 'outreach' GROUP BY campaign_id)"),
     env.DB.prepare('SELECT * FROM campaign_steps ORDER BY campaign_id, step'),
-    env.DB.prepare('SELECT o.campaign_id, SUM(o.next_at IS NOT NULL) AS sched, SUM(l.status = 4) AS replied, SUM(o.shot_at IS NOT NULL AND o.review IS NULL) AS to_review FROM outreach o JOIN leads l ON l.id = o.lead_id GROUP BY o.campaign_id'),
+    env.DB.prepare(SEQ_SQL('')),
     env.DB.prepare('SELECT * FROM campaign_variants ORDER BY campaign_id, variant'),
     env.DB.prepare(`${VSTATS} GROUP BY o.campaign_id, v`),
   ]);
@@ -126,7 +126,12 @@ function campaignOut(c, counts = {}, today = 0, job = null, steps = [], seq = {}
     vstats: Object.fromEntries(vstats.map(r => [r.v, { leads: r.leads, sent: r.sent || 0, replied: r.replied || 0 }])),
   };
 }
-const VSTATS = "SELECT o.campaign_id, COALESCE(o.variant, 'A') AS v, COUNT(*) AS leads, SUM(o.sent_at IS NOT NULL) AS sent, SUM(o.sent_at IS NOT NULL AND l.status = 4) AS replied FROM outreach o JOIN leads l ON l.id = o.lead_id";
+const VSTATS = "SELECT o.campaign_id, COALESCE(o.variant, 'A') AS v, COUNT(*) AS leads, SUM(o.sent_at IS NOT NULL) AS sent, SUM(o.sent_at IS NOT NULL AND l.status = 4) AS replied FROM outreach o JOIN leads l ON l.id = o.lead_id WHERE o.campaign_id IN (SELECT campaign_id FROM campaign_variants)";
+// Scheduled follow-ups, replies and test results to review, per campaign: each count uses its own small index.
+const SEQ_SQL = (w) => `SELECT campaign_id, SUM(k = 's') AS sched, SUM(k = 'r') AS replied, SUM(k = 'v') AS to_review FROM (
+    SELECT campaign_id, 's' AS k FROM outreach WHERE next_at IS NOT NULL${w}
+    UNION ALL SELECT o.campaign_id, 'r' FROM leads l JOIN outreach o ON o.lead_id = l.id WHERE l.status = 4${w.replace('campaign_id', 'o.campaign_id')}
+    UNION ALL SELECT campaign_id, 'v' FROM outreach WHERE shot_at IS NOT NULL AND review IS NULL${w}) GROUP BY campaign_id`;
 async function campaignById(env, id) {
   const today = ptMidnight();
   const [c, st, td, jb, stp, sq, vr, vs] = await env.DB.batch([
@@ -135,9 +140,9 @@ async function campaignById(env, id) {
     env.DB.prepare(`SELECT COUNT(*) AS n FROM outreach WHERE campaign_id = ? AND sent_at >= ? AND status IN ('sent','submitted','sent_manual')`).bind(id, today),
     env.DB.prepare("SELECT id, campaign_id, status, params, to_check, checked, created_at, started_at, finished_at, error, run_url FROM searches WHERE kind = 'outreach' AND campaign_id = ? ORDER BY id DESC LIMIT 1").bind(id),
     env.DB.prepare('SELECT * FROM campaign_steps WHERE campaign_id = ? ORDER BY step').bind(id),
-    env.DB.prepare('SELECT SUM(o.next_at IS NOT NULL) AS sched, SUM(l.status = 4) AS replied, SUM(o.shot_at IS NOT NULL AND o.review IS NULL) AS to_review FROM outreach o JOIN leads l ON l.id = o.lead_id WHERE o.campaign_id = ?').bind(id),
+    env.DB.prepare(SEQ_SQL(' AND campaign_id = ?')).bind(id, id, id),
     env.DB.prepare('SELECT * FROM campaign_variants WHERE campaign_id = ? ORDER BY variant').bind(id),
-    env.DB.prepare(`${VSTATS} WHERE o.campaign_id = ? GROUP BY v`).bind(id),
+    env.DB.prepare(`${VSTATS} AND o.campaign_id = ? GROUP BY v`).bind(id),
   ]);
   const row = c.results[0];
   if (!row) throw new HttpError(404, 'Campaign not found.');
