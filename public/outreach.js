@@ -640,7 +640,7 @@ function mqBulkHTML() {
   const n = MQ.checked ? MQ.checked.size : 0;
   if (!n) return MQ.last ? `<div class="mqundo">${A.ic('check', 14)}<span><b>${A.esc(MQ.last.name)}</b> marked sent</span><button class="linkbtn" data-mqundo="${MQ.last.id}">Undo</button><button class="iconbtn sm" data-mqundo="x" aria-label="Dismiss">${A.ic('x', 13)}</button></div>` : '';
   return `<div class="selbar mqsel"><b class="num">${A.fmt(n)} selected</b><button class="linkbtn" data-mqbulk="all">Select all ${A.fmt(mqFiltered().length)} shown</button><button class="linkbtn" data-mqbulk="none">Clear</button>
-    <div class="selacts"><button class="btn sm" data-mqbulk="retry" title="Send back to the robot: it sends the ones without a CAPTCHA to solve">${A.ic('retry', 14)}Try robot again</button><button class="btn sm ghost" data-mqbulk="sent">${A.ic('check', 14)}Mark sent</button><button class="btn sm ghost" data-mqbulk="skip">${A.ic('x', 14)}Skip</button></div></div>`;
+    <div class="selacts">${[...MQ.checked].some(id => { const it = MQ.items.find(i => i.id === id), c = it && OS.campaigns.find(x => x.id === it.campaign_id); return c && c.mode !== 'manual'; }) ? `<button class="btn sm" data-mqbulk="retry" title="The robot tries to send these itself (not for manual campaigns)">${A.ic('retry', 14)}Let the robot send them</button>` : ''}<button class="btn sm ghost" data-mqbulk="sent">${A.ic('check', 14)}Mark sent</button><button class="btn sm ghost" data-mqbulk="skip">${A.ic('x', 14)}Skip</button></div></div>`;
 }
 function mqList() {
   const list = mqFiltered();
@@ -688,7 +688,7 @@ function mqDetail() {
       </div>
     </div>
     <div class="mqw-f"><button class="btn primary" data-mqact="sent">${A.ic('check', 14)}Mark as sent<span class="kbd2">S</span></button><button class="btn" data-mqact="skip">Skip<span class="kbd2">X</span></button>
-      <span class="mqw-more"><button class="linkbtn muted" data-mqact="retry" title="Send back to the robot (R)">${A.ic('retry', 13)}Try robot</button><button class="linkbtn muted danger" data-mqact="dnc">${A.ic('shield', 13)}Do not contact</button></span></div>`;
+      <span class="mqw-more">${c && c.mode !== 'manual' ? `<button class="linkbtn muted" data-mqact="retry" title="The robot tries to send this form itself (R)">${A.ic('retry', 13)}Let the robot send it</button>` : ''}<button class="linkbtn muted danger" data-mqact="dnc" title="Marks the business Do not contact: nothing is sent to it again, from any campaign">${A.ic('shield', 13)}Never contact this business</button></span></div>`;
 }
 function mqCall(it, c, lead, script, pos, list) {
   const tel = String(it.phone || '').replace(/[^\d+]/g, '');
@@ -1285,7 +1285,7 @@ function onKey(e) {
   if (k === 'j' || e.key === 'ArrowDown') { e.preventDefault(); mqMove(1); }
   else if (k === 'k' || e.key === 'ArrowUp') { e.preventDefault(); mqMove(-1); }
   else if (k === 's') { e.preventDefault(); mqAction('sent'); }
-  else if (k === 'r') { e.preventDefault(); mqAction('retry'); }
+  else if (k === 'r') { const it = MQ.items[MQ.sel], c = it && OS.campaigns.find(x => x.id === it.campaign_id); if (c && c.mode !== 'manual') { e.preventDefault(); mqAction('retry'); } }
   else if (k === 'x') { e.preventDefault(); mqAction('skip'); }
   else if (k === 'f') { const a = document.querySelector('a.mqopen'); if (a) { e.preventDefault(); window.open(a.href, '_blank', 'noopener'); } }
 }
