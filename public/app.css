@@ -1704,3 +1704,6 @@ input[type=checkbox]:disabled,input[type=radio]:disabled{opacity:.55;cursor:defa
 .mqundo>svg{color:var(--ok);flex:none}
 .mqundo span{flex:1}
 .mqundo .linkbtn{font-weight:600;color:var(--accent-text)}
+.osel{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--surface-2);font-size:13px}
+.osel .help{flex:1}
+.oi-b .cb{display:inline-block;vertical-align:-3px;margin-right:8px}

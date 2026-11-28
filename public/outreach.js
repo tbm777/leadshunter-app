@@ -248,11 +248,16 @@ function leadsTab(c) {
     <div id="c-items">${itemsHTML(c)}</div></div>
     ${(c.counts.to_review || 0) ? `<div class="rvbar">${A.ic('check', 14)}<span><b class="num">${A.fmt(c.counts.to_review)}</b> test result${c.counts.to_review === 1 ? '' : 's'} waiting for your check</span><button class="btn sm" data-o="testreview">Review now</button></div>` : ''}`;
 }
+function selBar(c) {
+  const P = cp(c.id), n = P.sel ? P.sel.size : 0;
+  if (P.filter !== 'sent' || !(P.items || []).length) return '';
+  return `<div class="osel">${n ? `<b class="num">${A.fmt(n)} selected</b><button class="btn sm" data-o="unsendsel">${A.ic('retry', 13)}Mark not sent</button><button class="linkbtn muted" data-o="selnone">Clear</button>` : `<span class="help">Marked sent by mistake? Select leads, then Mark not sent. They go back to waiting, or their follow-up step is due again.</span><button class="linkbtn muted" data-o="selall">Select all shown</button>`}</div>`;
+}
 function itemsHTML(c) {
   const P = cp(c.id);
   if (!P.items) { if (!P.req || P.reqDone === P.req) loadItems(c.id); return `<div class="empty"><span class="spin"></span></div>`; }
   if (!P.items.length) return `<div class="empty"><b>Nothing here</b>No leads match this filter.</div>`;
-  return `<div class="oitems"><div class="oi oi-h"><div>Business</div><div>Result</div><div>Test run</div><div>When</div><div></div></div>${P.items.map(it => itemRow(it)).join('')}</div>
+  return `<div id="o-sel">${selBar(c)}</div><div class="oitems"><div class="oi oi-h"><div>Business</div><div>Result</div><div>Test run</div><div>When</div><div></div></div>${P.items.map(it => itemRow(it)).join('')}</div>
     ${P.more ? `<div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:center"><button class="btn ghost sm" data-o="moreitems">Load more</button></div>` : ''}`;
 }
 function itemRow(it, withCampaign = false) {
@@ -263,7 +268,7 @@ function itemRow(it, withCampaign = false) {
   const cc = OS.campaigns.find(x => x.id === it.campaign_id), total = 1 + ((cc && cc.steps) || []).length;
   const seq = total > 1 && SENT.concat('manual', 'sending').includes(it.status) ? (it.lead_status === 4 ? '<small class="seqp rep">Replied · sequence stopped</small>' : it.next_at ? `<small class="seqp">Step ${it.step} of ${total} next · ${A.esc(A.whenPT(it.next_at).replace(' PT', ''))}</small>` : it.step >= total && SENT.includes(it.status) ? `<small class="seqp done">All ${total} steps done</small>` : it.step > 1 ? `<small class="seqp">Step ${it.step} of ${total}</small>` : '') : '';
   return `<div class="oi oi-click" data-oid="${it.id}" data-olead="${it.lead_id}" data-camp="${it.campaign_id}" title="Show lead details and what was sent">
-    <div class="oi-b"><b>${cc && (cc.variants || []).length ? `<i class="vtag" title="Variant ${it.variant || 'A'} · sends as ${A.esc(itemSender(it, cc)?.label || '')}">${it.variant || 'A'}</i>` : ''}${A.esc(it.name)}</b><span>${A.esc(domain(it.website))}${withCampaign ? ` · ${A.esc(it.campaign)}` : ''}</span></div>
+    <div class="oi-b"><b>${cc && cp(cc.id).filter === 'sent' && SENT.includes(it.status) ? `<span class="cb ${cp(cc.id).sel?.has(it.id) ? 'on' : ''}" data-osel="${it.id}" role="checkbox" aria-checked="${!!cp(cc.id).sel?.has(it.id)}" aria-label="Select"></span>` : ''}${cc && (cc.variants || []).length ? `<i class="vtag" title="Variant ${it.variant || 'A'} · sends as ${A.esc(itemSender(it, cc)?.label || '')}">${it.variant || 'A'}</i>` : ''}${A.esc(it.name)}</b><span>${A.esc(domain(it.website))}${withCampaign ? ` · ${A.esc(it.campaign)}` : ''}</span></div>
     <div class="oi-r">${pill(it.status)}${reason ? `<small title="${A.esc(reason)}">${A.esc(reason)}</small>` : ''}${seq}</div>
     <div class="oi-t">${test}</div>
     <div class="oi-w num">${when ? A.esc(A.whenPT(when).replace(' PT', '')) : ''}</div>
@@ -276,7 +281,7 @@ function kebabMenu(it) {
   if (['manual', 'failed', 'queued'].includes(it.status)) acts.push(['sent', A.ic('check', 14) + 'Mark as sent']);
   if (['manual', 'failed', 'queued'].includes(it.status)) acts.push(['skip', A.ic('x', 14) + 'Skip']);
   if (['queued', 'manual', 'failed', 'skipped'].includes(it.status)) acts.push(['remove', A.ic('trash', 14) + 'Remove from campaign']);
-  if (it.status === 'sent_manual') acts.push(['unsend', A.ic('retry', 14) + 'Not sent? Back to Manual queue']);
+  if (SENT.includes(it.status)) acts.push(['unsend', A.ic('retry', 14) + 'Mark not sent']);
   if (SENT.concat('manual').includes(it.status) && it.lead_status !== 4) acts.push(['replied', A.ic('messages', 14) + 'Mark replied (stops follow-ups)']);
   acts.push(['dnc', A.ic('shield', 14) + 'Do not contact', 'danger']);
   return `<div class="menu" role="menu">${acts.map(([a, l, cls]) => `<button role="menuitem" class="${cls || ''}" data-oact="${a}">${l}</button>`).join('')}</div>`;
@@ -977,7 +982,7 @@ async function onClick(e) {
     return;
   }
   const ldu = t.closest('[data-ldunsend]');
-  if (ldu) { try { await A.api('POST', `/api/outreach/${+ldu.dataset.ldunsend}`, { action: 'unsend' }); A.toast('Back in the Manual queue'); MQ.loaded = false; A.sync(); loadOutreach(); setTimeout(() => { const L = A.ST.byId.get(+document.querySelector('#ld-out')?.dataset.lid); if (L) A.openLead(L.id); }, 700); } catch (err) { A.toast(err.message, 'alert'); } return; }
+  if (ldu) { try { await A.api('POST', `/api/outreach/${+ldu.dataset.ldunsend}`, { action: 'unsend' }); A.toast('Marked not sent. It’s waiting to be sent again.'); MQ.loaded = false; A.sync(); loadOutreach(); setTimeout(() => { const L = A.ST.byId.get(+document.querySelector('#ld-out')?.dataset.lid); if (L) A.openLead(L.id); }, 700); } catch (err) { A.toast(err.message, 'alert'); } return; }
   const ldr = t.closest('[data-ldreplied]');
   if (ldr) { try { await A.api('POST', `/api/outreach/${+ldr.dataset.ldreplied}`, { action: 'replied' }); A.toast('Marked replied. Follow-ups stopped.'); A.sync(); loadOutreach(); setTimeout(() => { const L = A.ST.byId.get(+document.querySelector('#ld-out')?.dataset.lid); if (L) A.openLead(L.id); }, 700); } catch (err) { A.toast(err.message, 'alert'); } return; }
   const vt = t.closest('[data-vtab]');
@@ -992,7 +997,7 @@ async function onClick(e) {
   const tab = t.closest('[data-ctab]');
   if (tab) { const c = curCampaign(); if (!c) return; await flushSave(); flushSteps(); cp(c.id).tab = tab.dataset.ctab; A.render(); return; }
   const flt = t.closest('[data-ofilter]');
-  if (flt) { const c = curCampaign(); const P = cp(c.id); P.filter = flt.dataset.ofilter; P.items = null; document.querySelectorAll('[data-ofilter]').forEach(b => b.classList.toggle('on', b === flt)); A.$('#c-items').innerHTML = itemsHTML(c); return; }
+  if (flt) { const c = curCampaign(); const P = cp(c.id); P.filter = flt.dataset.ofilter; P.items = null; P.sel = new Set(); document.querySelectorAll('[data-ofilter]').forEach(b => b.classList.toggle('on', b === flt)); A.$('#c-items').innerHTML = itemsHTML(c); return; }
   const pvm = t.closest('[data-pvmode]');
   if (pvm) { const c = curCampaign(); cp(c.id).previewMode = pvm.dataset.pvmode; document.querySelectorAll('[data-pvmode]').forEach(b => b.classList.toggle('on', b === pvm)); renderPreview(c); return; }
   const pvn = t.closest('[data-pvnav]');
@@ -1023,6 +1028,8 @@ async function onClick(e) {
   if (ntt) { await ntFlush({ tag: ntt.dataset.notetag }); const n = NT.notes.find(x => x.id === NT.sel); if (n) n.tag = ntt.dataset.notetag; document.querySelectorAll('[data-notetag]').forEach(x => x.classList.toggle('on', x === ntt)); document.querySelectorAll('.sheet .tape').forEach(t => t.style.setProperty('--tape', tagOf(ntt.dataset.notetag)[2])); A.$('#nt-list') && (A.$('#nt-list').innerHTML = ntList()); return; }
   const nmt = t.closest('[data-ntag]');
   if (nmt) { const el = A.$(ntLast === 'nt-subj' ? '#nt-subj' : '#nt-body'); const s0 = el.selectionStart ?? el.value.length, e0 = el.selectionEnd ?? s0; el.value = el.value.slice(0, s0) + nmt.dataset.ntag + el.value.slice(e0); el.focus(); el.setSelectionRange(s0 + nmt.dataset.ntag.length, s0 + nmt.dataset.ntag.length); ntQueueSave(); return; }
+  const osel = t.closest('[data-osel]');
+  if (osel) { const c = curCampaign(), P = cp(c.id), id = +osel.dataset.osel; P.sel ||= new Set(); P.sel.has(id) ? P.sel.delete(id) : P.sel.add(id); osel.classList.toggle('on', P.sel.has(id)); A.$('#o-sel').innerHTML = selBar(c); return; }
   const row = t.closest('.oi-click');
   if (row && !t.closest('a,button,.menu')) { openFor = +row.dataset.camp; A.openLead(+row.dataset.olead); return; }
   const oact = t.closest('[data-oact]');
@@ -1034,6 +1041,14 @@ async function onClick(e) {
     case 'newcampok': createCampaign(); break;
     case 'newsender': senderDrawer({}, c ? (s) => (A.$('#m-sender') ? variantOp(c, 'sender', s.id) : saveSetting(c, { sender_id: s.id }).then(() => A.render())) : null); break;
     case 'addvariant': await variantOp(c, 'add'); break;
+    case 'selall': { const P = cp(c.id); P.sel = new Set((P.items || []).filter(i => SENT.includes(i.status)).map(i => i.id)); A.$('#c-items').innerHTML = itemsHTML(c); break; }
+    case 'selnone': cp(c.id).sel = new Set(); A.$('#c-items').innerHTML = itemsHTML(c); break;
+    case 'unsendsel': {
+      const P = cp(c.id), ids = [...(P.sel || [])]; if (!ids.length) break;
+      try { const r = await A.api('POST', `/api/campaigns/${c.id}/unsend`, { ids }); P.sel = new Set(); A.toast(`${A.fmt(r.done)} marked not sent. They’re waiting to be sent again.`); await refreshCampaign(c.id, { items: false }); P.items = null; loadItems(c.id); A.sync(); loadOutreach(); MQ.loaded = false; }
+      catch (e) { A.toast(e.message, 'alert'); }
+      break;
+    }
     case 'rmvariant': await variantOp(c, 'remove'); break;
     case 'editsender': senderDrawer(OS.senders.find(s => s.id === +b.dataset.sid)); break;
     case 'savesender': saveSender(+b.dataset.sid || 0); break;
@@ -1203,7 +1218,7 @@ async function itemAct(oid, act) {
   try {
     if (act === 'remove') await A.api('POST', `/api/campaigns/${c.id}/remove`, { ids: [oid] });
     else await A.api('POST', `/api/outreach/${oid}`, { action: act });
-    A.toast({ unsend: 'Back in the Manual queue', retry: 'Queued again', sent: 'Marked as sent', skip: 'Skipped', remove: 'Removed from the campaign', dnc: 'Marked do not contact', replied: 'Marked replied. Follow-ups stopped.' }[act]);
+    A.toast({ unsend: 'Marked not sent. It’s waiting to be sent again.', retry: 'Queued again', sent: 'Marked as sent', skip: 'Skipped', remove: 'Removed from the campaign', dnc: 'Marked do not contact', replied: 'Marked replied. Follow-ups stopped.' }[act]);
     await refreshCampaign(c.id, { items: false }); loadItems(c.id); A.sync(); loadOutreach();
   } catch (e) { A.toast(e.message, 'alert'); }
 }
@@ -1306,7 +1321,7 @@ export async function leadOutreachInto(el, L) {
           <div class="ldo-msg"><h6>${sentOrWill}${(() => { const snd = OS.senders.find(x => x.id === it.sender_id), cc = OS.campaigns.find(x => x.id === it.campaign_id); return `${cc && (cc.variants || []).length ? ` · variant ${A.esc(it.variant || 'A')}` : ''}${snd ? ` · as ${A.esc(snd.first_name)} ${A.esc(snd.last_name)}` : ''}`; })()}</h6><b>${A.esc(personalize(it.subject, lead))}</b><p>${A.esc(personalize(it.message, lead))}</p></div>
           ${answers.length ? `<div class="ldo-ans"><h6>Other answers the robot gave</h6><ul>${answers.map(a => { const i = a.indexOf(': '); return `<li><span>${A.esc(i > 0 ? a.slice(0, i) : 'Field')}</span><b>${A.esc(i > 0 ? a.slice(i + 2) : a)}</b></li>`; }).join('')}</ul></div>` : ''}
           ${seqTimeline(it, L)}
-          <div class="row" style="justify-content:space-between">${SENT.concat('manual').includes(it.status) && L.status !== 4 && L.status !== 3 ? `<button class="btn sm" data-ldreplied="${it.id}">${A.ic('messages', 13)}Mark replied${it.steps && it.steps.length ? ' (stops follow-ups)' : ''}</button>` : '<span></span>'}<span class="row" style="gap:12px">${it.status === 'sent_manual' ? `<button class="linkbtn muted" data-ldunsend="${it.id}" title="Marked sent by mistake? It goes back to the Manual queue">Not sent? Back to queue</button>` : ''}<a class="linkbtn muted" href="#campaign/${it.campaign_id}">Open campaign</a></span></div>
+          <div class="row" style="justify-content:space-between">${SENT.concat('manual').includes(it.status) && L.status !== 4 && L.status !== 3 ? `<button class="btn sm" data-ldreplied="${it.id}">${A.ic('messages', 13)}Mark replied${it.steps && it.steps.length ? ' (stops follow-ups)' : ''}</button>` : '<span></span>'}<span class="row" style="gap:12px">${SENT.includes(it.status) ? `<button class="linkbtn muted" data-ldunsend="${it.id}" title="Marked sent by mistake? It goes back to waiting, or its follow-up step is due again">Mark not sent</button>` : ''}<a class="linkbtn muted" href="#campaign/${it.campaign_id}">Open campaign</a></span></div>
         </div></details>`;
     }).join('')}</div>`;
   } catch { el.innerHTML = ''; }

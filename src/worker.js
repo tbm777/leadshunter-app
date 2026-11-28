@@ -82,6 +82,7 @@ async function route(req, env, url, ctx) {
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/status$/)) && m === 'POST') return O.setCampaignStatus(env, +mm[1], await body(req));
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/leads$/)) && m === 'POST') return O.addLeads(env, +mm[1], await body(req));
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/remove$/)) && m === 'POST') return O.removeItems(env, +mm[1], await body(req));
+  if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/unsend$/)) && m === 'POST') return O.unsendItems(env, +mm[1], await body(req));
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/run$/)) && m === 'POST') return O.runCampaign(env, +mm[1], await body(req));
   if (p === '/api/industries' && m === 'POST') return saveIndustry(env, await body(req));
   if (p === '/api/industries/order' && m === 'PUT') return orderIndustries(env, await body(req));

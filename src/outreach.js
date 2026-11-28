@@ -415,23 +415,43 @@ async function stampVersion(env, o) {
   ]);
 }
 
-/** A form marked sent by hand that didn't really go out: back to the Manual queue exactly as it was. Robot sends can't be undone (they did go out). */
+/**
+ * Mark not sent: the last step that went out is taken back, as if it never happened.
+ * First message → waiting again (the robot's queue in an automatic campaign; the Manual queue in a manual one, or when the
+ * form has a known CAPTCHA). A follow-up → that step is due again now, and the campaign sends it the usual way.
+ */
 async function unsend(env, o) {
-  if (o.status !== 'sent_manual') throw new HttpError(409, o.status === 'sent' || o.status === 'submitted' ? 'The robot sent this one, so it can’t be undone.' : 'This one isn’t marked sent.');
-  const step = o.undo_step || o.step || 1;
-  const reason = o.undo_reason || (step > 1 ? 'followup' : 'manual');
+  if (!SENT.includes(o.status)) throw new HttpError(409, 'Only sent leads can be marked not sent.');
+  const c = await env.DB.prepare('SELECT id, mode FROM campaigns WHERE id = ?').bind(o.campaign_id).first();
+  // The step that went out: recorded for hand sends; otherwise one before a scheduled next step.
+  const step = o.undo_step || (o.next_at && o.step > 1 ? o.step - 1 : o.step || 1);
   const t = now();
-  await env.DB.batch([
-    env.DB.prepare(`UPDATE outreach SET status = 'manual', reason = ?, evidence = NULL, sent_at = undo_sent_at, step = ?, next_at = NULL, prev_status = ?,
-      msg_version = CASE WHEN ? = 1 THEN NULL ELSE msg_version END, undo_reason = NULL, undo_sent_at = NULL, undo_step = NULL, updated_at = ? WHERE id = ?`).bind(reason, step, step > 1 ? 'sent' : null, step, t, o.id),
-    // Take the mistaken send off the lead's timeline.
-    env.DB.prepare("DELETE FROM outreach_events WHERE id = (SELECT id FROM outreach_events WHERE outreach_id = ? AND step = ? AND (kind = 'sent_manual' OR kind LIKE 'call_%') ORDER BY at DESC LIMIT 1)").bind(o.id, step),
+  let upd;
+  if (step === 1) {
+    const cap = (await env.DB.prepare('SELECT form_status FROM leads WHERE id = ?').bind(o.lead_id).first())?.form_status === 1;
+    const toManual = c?.mode === 'manual' || cap;
+    upd = env.DB.prepare(`UPDATE outreach SET status = ?, reason = ?, evidence = NULL, answers = NULL, sent_at = NULL, step = 1, next_at = NULL, prev_status = NULL, msg_version = NULL,
+      job_id = NULL, undo_reason = NULL, undo_sent_at = NULL, undo_step = NULL, updated_at = ? WHERE id = ?`).bind(toManual ? 'manual' : 'queued', toManual ? (c?.mode === 'manual' ? 'manual' : 'captcha') : null, t, o.id);
+  } else {
+    upd = env.DB.prepare(`UPDATE outreach SET status = 'sent', reason = NULL, step = ?, next_at = ?, prev_status = NULL, sent_at = COALESCE(undo_sent_at, sent_at),
+      undo_reason = NULL, undo_sent_at = NULL, undo_step = NULL, updated_at = ? WHERE id = ?`).bind(step, t, t, o.id);
+  }
+  await env.DB.batch([upd,
+    env.DB.prepare("DELETE FROM outreach_events WHERE id = (SELECT id FROM outreach_events WHERE outreach_id = ? AND step = ? AND kind IN ('sent','submitted','sent_manual','call_talked','call_voicemail','call_noanswer') ORDER BY at DESC LIMIT 1)").bind(o.id, step),
   ]);
-  // Contacted → In campaign again, unless another campaign really reached them.
+  // Not contacted after all: the lead is In campaign again, unless another campaign really reached it.
   if (step === 1) {
     const other = await env.DB.prepare("SELECT 1 FROM outreach WHERE lead_id = ? AND id != ? AND status IN ('sent','submitted','sent_manual') LIMIT 1").bind(o.lead_id, o.id).first();
     if (!other) await setLeadStatus(env, [o.lead_id], 1, [0, 2]);
   }
+  if (c && c.mode !== 'manual') ctxTick(env, c.id);
+}
+/** Mark not sent for many campaign leads at once (max 500). */
+export async function unsendItems(env, id, b) {
+  const ids = [...new Set((b.ids || []).map(Number).filter(Number.isInteger))].slice(0, 500);
+  let done = 0, failed = 0;
+  for (const part of chunk(ids, 90)) for (const o of (await env.DB.prepare(`SELECT * FROM outreach WHERE campaign_id = ? AND id IN (${inList(part.length)})`).bind(id, ...part).all()).results) { try { await unsend(env, o); done++; } catch { failed++; } }
+  return json({ ok: true, done, failed });
 }
 /**
  * A lead's status changed in the Leads list or lead details: keep every campaign in step with it.
@@ -461,7 +481,7 @@ export async function coordinateLeadStatus(env, ids, status) {
 export async function undoManualSends(env, leadIds) {
   const moved = new Set();
   for (const part of chunk(leadIds, 90)) {
-    const rows = (await env.DB.prepare(`SELECT o.* FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE o.lead_id IN (${inList(part.length)}) AND o.status = 'sent_manual' AND c.status != 'archived'`).bind(...part).all()).results;
+    const rows = (await env.DB.prepare(`SELECT o.* FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE o.lead_id IN (${inList(part.length)}) AND o.status = 'sent_manual' AND c.status != 'archived'`).bind(...part).all()).results;   // hand sends only: a robot send really went out
     for (const o of rows) { await unsend(env, o); moved.add(o.lead_id); }
   }
   return moved;
