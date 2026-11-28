@@ -35,3 +35,6 @@ if (last) {
   }
   table('Latest search leads by form check (form | count)', (await q(`SELECT form_status, COUNT(*) n FROM leads WHERE search_id = ${last.id} AND deleted = 0 GROUP BY 1`)).map(r => ({ f: FORM[r.form_status], n: r.n })));
 }
+
+// Businesses the latest search dropped as outside the industry: which Google categories they had (names and counts only).
+if (last) table('Latest search: categories of businesses dropped as outside the industry (category | count)', await q(`SELECT COALESCE(category, '(none)') AS c, COUNT(*) AS n FROM excluded WHERE search_id = ${last.id} GROUP BY 1 ORDER BY n DESC LIMIT 25`));
