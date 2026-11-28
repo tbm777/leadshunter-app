@@ -37,3 +37,5 @@ export function unknownTags(text) {
   }
   return [...out];
 }
+/** True when the bracketed word is a merge tag (for highlighting in the editor). */
+export const isMergeTag = raw => KNOWN.has(String(raw || '').trim().toLowerCase().replace(/[_-]+/g, ' '));

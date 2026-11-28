@@ -1,6 +1,9 @@
 // LeadsHunter outreach pages: campaigns, manual queue, messages, sender profiles. Plugs into app.js through install().
 import { personalize, cleanCompanyName, MERGE_TAGS, unknownTags } from './shared/personalize.js';
+import './shared/taghl.js';
 import { checkMessage } from './shared/msgcheck.js';
+// A merge tag button: friendly label, inserts the bracketed tag at the cursor.
+const vchip = (t, attr) => `<button type="button" class="vchip" data-${attr}="[${t}]" title="Insert [${t}]"><span class="vchip-plus">+</span>${t.charAt(0) + t.slice(1).toLowerCase()}</button>`;
 import { render as renderFile, ASSETS } from './shared/templates/bat-marketing.js';
 import { SENDER_FALLBACKS, OTHER_FIELDS, engineProfile, localizeProfile } from './shared/fallbacks.js';
 
@@ -296,7 +299,7 @@ function messageTab(c) {
         <div class="field"><label for="m-subj">Subject</label><input class="input big" id="m-subj" data-msave value="${A.esc(c.subject)}" maxlength="200" placeholder="Quick question about [Company Name]"></div>
         <div class="field"><div class="row" style="justify-content:space-between"><label for="m-body">Message</label><span class="help num" id="m-count">${c.message.length} characters</span></div>
           <textarea class="input mbody" id="m-body" data-msave maxlength="5000" placeholder="Hi [Company Name] team,&#10;&#10;…&#10;&#10;Best,&#10;Your name&#10;Your company">${A.esc(c.message)}</textarea></div>
-        <div class="tagbar"><span class="help">Insert</span>${MERGE_TAGS.map(t => `<button class="chip" data-tag="[${t}]">[${t}]</button>`).join('')}</div>
+        <div class="tagbar"><span class="tagbar-l">Personalize</span>${MERGE_TAGS.map(t => vchip(t, 'tag')).join('')}</div>
         <div id="m-warn">${checkHTML(c.subject, c.message)}</div>
       </div></div>
     <div class="card pvcard"><div class="card-h"><div class="seg-c"><button class="${P.previewMode === 'text' ? 'on' : ''}" data-pvmode="text">Form text</button><button class="${P.previewMode === 'file' ? 'on' : ''}" data-pvmode="file">File</button></div>
@@ -390,7 +393,7 @@ function stepEditor(c, st) {
         <div class="field"><div class="row" style="justify-content:space-between"><label for="st-body">${ch.body}</label><button class="linkbtn muted" data-o="frombook">${A.ic('playbook', 13)} Use from Playbook</button></div>
           <textarea class="input mbody${st.channel === 'sms' ? ' sms' : ''}" id="st-body" maxlength="${st.channel === 'sms' ? 480 : 5000}" placeholder="${ch.ph}">${A.esc(st.message)}</textarea>
           ${st.channel === 'sms' ? `<span class="help num" id="st-count">${(st.message || '').length} / 160 characters (one text)</span>` : ''}</div>
-        <div class="tagbar"><span class="help">Insert</span>${MERGE_TAGS.map(t => `<button class="chip" data-tag="[${t}]">[${t}]</button>`).join('')}</div>
+        <div class="tagbar"><span class="tagbar-l">Personalize</span>${MERGE_TAGS.map(t => vchip(t, 'tag')).join('')}</div>
         ${showSubj ? `<div id="st-warn">${checkHTML(st.subject || c.subject, st.message)}</div>` : ''}
       </div></div>
     ${task ? `<div class="card pvcard"><div class="card-h"><h3>How it looks in your queue</h3></div><div class="card-b"><div class="callprev"><span class="pill" style="--c:var(--info)">${ch.label}</span><b>${A.esc(cleanCompanyName(lead.name))}</b><a class="callnum">${contact}</a>${st.channel === 'email' ? `<p><b>${A.esc(personalize(st.subject || c.subject, lead))}</b></p>` : ''}<p>${A.esc(personalize(st.message || 'Your text appears here.', lead))}</p><div class="row" style="gap:6px">${st.channel === 'call' ? '<span class="btn sm">Talked</span><span class="btn sm">Voicemail</span><span class="btn sm">No answer</span>' : `<span class="btn sm">${st.channel === 'email' ? 'Mark sent' : st.channel === 'sms' ? 'Mark texted' : 'Mark dropped'}</span>`}<span class="btn sm">They replied</span></div></div></div></div>`
@@ -732,7 +735,7 @@ function ntEditor() {
       <input class="sheet-subj" id="nt-subj" value="${A.esc(n.subject)}" placeholder="Quick question about [Company Name]" maxlength="200">
       <label class="sheet-lbl" for="nt-body">Message</label>
       <textarea class="sheet-body" id="nt-body" placeholder="Hi [Company Name] team,&#10;&#10;…">${A.esc(n.body)}</textarea>
-      <div class="sheet-tags">${MERGE_TAGS.map(t => `<button class="chip" data-ntag="[${t}]">[${t}]</button>`).join('')}<span class="help num" id="nt-count">${n.body.length} characters</span></div>
+      <div class="sheet-tags">${MERGE_TAGS.map(t => vchip(t, 'ntag')).join('')}<span class="help num" id="nt-count">${n.body.length} characters</span></div>
       ${warn.length ? `<div class="note" style="margin-top:8px">${A.ic('alert')}<div>${warn.map(w => `<b>${A.esc(w)}</b>`).join(', ')} ${warn.length === 1 ? "isn't a merge tag" : "aren't merge tags"} and would be sent exactly as written.</div></div>` : ''}
     </div>
     <div class="sticky" style="--tilt:${tilt(n.id + 3) + 2}deg"><span class="sticky-h hand">Notes</span><textarea id="nt-memo" class="hand" placeholder="The angle, who it's for, what worked…">${A.esc(n.memo || '')}</textarea></div>
