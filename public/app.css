@@ -1729,3 +1729,4 @@ input[type=checkbox]:disabled,input[type=radio]:disabled{opacity:.55;cursor:defa
 @media (max-width:700px){.mqp-from .mqp-grid{padding-left:14px}.mqw-more{margin-left:0;width:100%}}
 .mqw-b{overscroll-behavior:contain}
 .mqp-from[open]>summary .val,.mqp-from[open]>summary em{visibility:hidden}.mqp-from[open]>summary{padding-bottom:4px}
+.omore{display:flex;justify-content:center;padding:10px;border-top:1px solid var(--line)}

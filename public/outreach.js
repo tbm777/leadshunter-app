@@ -258,7 +258,7 @@ function itemsHTML(c) {
   if (!P.items) { if (!P.req || P.reqDone === P.req) loadItems(c.id); return `<div class="empty"><span class="spin"></span></div>`; }
   if (!P.items.length) return `<div class="empty"><b>Nothing here</b>No leads match this filter.</div>`;
   return `<div id="o-sel">${selBar(c)}</div><div class="oitems"><div class="oi oi-h"><div>Business</div><div>Result</div><div>Test run</div><div>When</div><div></div></div>${P.items.map(it => itemRow(it)).join('')}</div>
-    ${P.more ? `<div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:center"><button class="btn ghost sm" data-o="moreitems">Load more</button></div>` : ''}`;
+    ${P.more ? `<div class="omore" id="o-more"><button class="btn ghost sm" data-o="moreitems">Show more</button></div>` : ''}`;
 }
 function itemRow(it, withCampaign = false) {
   const reason = it.status === 'sent' ? it.evidence : it.status === 'submitted' ? reasonText(it.reason || 'sent-no-confirmation') : ['manual', 'failed', 'skipped'].includes(it.status) ? reasonText(it.reason) : '';
@@ -286,16 +286,24 @@ function kebabMenu(it) {
   acts.push(['dnc', A.ic('shield', 14) + 'Do not contact', 'danger']);
   return `<div class="menu" role="menu">${acts.map(([a, l, cls]) => `<button role="menuitem" class="${cls || ''}" data-oact="${a}">${l}</button>`).join('')}</div>`;
 }
+// The campaign's lead list loads 50 at a time; the next page comes in as you scroll near the end.
+let moreObs = null;
+function watchMore(id) {
+  moreObs?.disconnect();
+  const el = A.$('#o-more'); if (!el || !('IntersectionObserver' in window)) return;
+  moreObs = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) { const P = cp(id); if (P.more && P.reqDone === P.req) { moreObs.disconnect(); loadItems(id, true); } } }, { rootMargin: '400px' });
+  moreObs.observe(el);
+}
 async function loadItems(id, append = false) {
   const P = cp(id), tok = P.req = (P.req || 0) + 1;   // only the newest request's answer is used
   const f = FILTERS.find(x => x[0] === P.filter)[2];
   try {
-    const r = await A.api('GET', `/api/outreach/items?campaign=${id}${f ? '&status=' + f : ''}&limit=200&offset=${append ? (P.items || []).length : 0}`);
+    const r = await A.api('GET', `/api/outreach/items?campaign=${id}${f ? '&status=' + f : ''}&limit=50&offset=${append ? (P.items || []).length : 0}`);
     if (tok !== P.req) return;
     P.reqDone = tok;
     P.items = append ? [...(P.items || []), ...r.items] : r.items; P.more = r.more;
     const el = A.$('#c-items'); const c = OS.campaigns.find(x => x.id === id);
-    if (el && c) el.innerHTML = itemsHTML(c);
+    if (el && c) { el.innerHTML = itemsHTML(c); watchMore(id); }
     if (c && A.$('#c-banner')) A.$('#c-banner').innerHTML = bannerHTML(c);
     if (P.tab === 'message' && A.$('#pv')) renderPreview(c);
   } catch (e) { if (tok === P.req) A.toast(e.message, 'alert'); } finally { if (tok === P.req) P.reqDone = tok; }
@@ -534,7 +542,7 @@ function mountCampaign(arg) {
   const id = +arg, c = OS.campaigns.find(x => x.id === id); if (!c) return;
   // Show what's already loaded straight away and refresh quietly: coming back to a campaign shouldn't flash or reset.
   const P = cp(id); P.prevJob = c.job ? { id: c.job.id, status: c.job.status, done: c.job.done } : null;
-  loadItems(id);
+  { const P = cp(id); if (!(P.req && P.reqDone !== P.req)) loadItems(id); }   // the list may already be loading from the first render
   if (P.tab === 'message') renderPreview(c);
   refreshCampaign(id, { items: false }).catch(() => {});
 }
