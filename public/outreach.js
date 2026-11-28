@@ -666,26 +666,29 @@ function mqDetail() {
   const canFill = hasExt() && it.fill_token && snd && subj && msg && url && it.reason !== 'login-required';
   const copyRow = (k, v, big) => v ? `<div class="mqp-row${big ? ' big' : ''}"><span class="k">${k}</span><span class="val">${A.esc(v)}</span><button class="dcopy" data-copy="${A.esc(v)}" title="Copy ${k.toLowerCase()}">${A.ic('copy', 12)}<span>Copy</span></button></div>` : '';
   const hasCap = it.reason === 'captcha' || it.form_status === 1;
-  const why = it.reason === 'followup' ? `Follow-up, step ${it.step}. It opens with the follow-up message.${hasCap ? ' The site has a CAPTCHA to solve.' : ''}` : it.reason === 'manual' ? `Manual campaign: you send each form yourself.${hasCap ? ' This site also has a CAPTCHA to solve.' : ''}` : it.reason === 'captcha' ? 'This form has a CAPTCHA. Everything else is filled in for you.' : it.reason === 'interrupted' ? 'The robot stopped while sending this one. Check on the site whether it went through before sending again.' : reasonText(it.reason);
-  const step2 = it.reason === 'interrupted' ? 'Check it wasn’t sent, then send' : hasCap ? 'Solve the CAPTCHA, press send' : 'Check it, press send';
-  const g = mqGroup(it.reason), multi = c && (c.variants || []).length;
-  const chip = (html, cls = '') => `<span class="mqchip ${cls}">${html}</span>`;
-  return `<div class="mqw-h"><div class="mqw-id"><div class="mqav" aria-hidden="true">${A.esc((cleanCompanyName(it.name) || '?').charAt(0).toUpperCase())}</div><div><h2>${A.esc(cleanCompanyName(it.name))}</h2><p>${url ? `<a href="${A.esc(url)}" target="_blank" rel="noopener">${A.esc(domain(url))}${A.ic('ext', 11)}</a>` : 'No website'}${it.city ? ` · ${A.esc(it.city)}${it.region ? ', ' + A.esc(it.region) : ''}` : ''}</p></div></div>
+  // Only say something when the task isn't a plain "send this form" (a manual campaign's normal case needs no note).
+  const note = it.reason === 'interrupted' ? 'The robot stopped while sending this one. Check on the site whether it went through before sending again.'
+    : it.reason === 'followup' ? `Follow-up, step ${it.step}.${hasCap ? ' The site has a CAPTCHA.' : ''}`
+    : hasCap ? 'This site has a CAPTCHA: solve it, then press send.'
+    : !['manual', 'captcha'].includes(it.reason) ? reasonText(it.reason) : '';
+  const multi = c && (c.variants || []).length;
+  const meta = [it.city ? `${it.city}${it.region ? ', ' + it.region : ''}` : '', it.campaign, multi ? `Variant ${it.variant || 'A'}` : '', snd ? `as ${snd.first_name} ${snd.last_name}` : ''].filter(Boolean);
+  const from = snd ? [['First name', snd.first_name], ['Last name', snd.last_name], ['Email', snd.email], ['Phone', snd.phone], ['Company', snd.company], ['Website', snd.website]].filter(x => x[1]) : [];
+  return `<div class="mqw-h"><div class="mqw-id"><div><h2>${A.esc(cleanCompanyName(it.name))}</h2><p>${url ? `<a href="${A.esc(url)}" target="_blank" rel="noopener">${A.esc(domain(url))}${A.ic('ext', 11)}</a> · ` : ''}${A.esc(meta.join(' · '))}</p></div></div>
       <div class="mqw-nav"><button class="iconbtn sm" data-mqnav="-1" aria-label="Previous" ${pos <= 0 ? 'disabled' : ''}>${A.ic('back', 14)}</button><span class="num">${pos + 1} / ${list.length}</span><button class="iconbtn sm" data-mqnav="1" aria-label="Next" ${pos >= list.length - 1 ? 'disabled' : ''}>${A.ic('arrow', 14)}</button></div></div>
     <div class="mqw-b">
-      <div class="mqmeta">${chip(`<i style="background:${REASON_C[g]}"></i>${REASON_SHORT[it.reason] || 'Other'}`)}${chip(A.esc(it.campaign))}${hasCap && it.reason !== 'captcha' ? chip(`Has a CAPTCHA${it.captcha ? ` (${A.esc(it.captcha)})` : ''}`) : ''}${multi ? chip(`Variant ${A.esc(it.variant || 'A')}`) : ''}${snd ? chip(`${A.ic('senders', 12)}As ${A.esc(snd.first_name)} ${A.esc(snd.last_name)}`) : ''}</div>
-      <div class="mqaction ${it.reason === 'interrupted' ? 'warn' : ''}">
-        <p>${A.esc(why)}</p>
-        ${canFill ? `<a class="btn primary mqopen" href="${A.esc(fillUrl(it, c, snd, url, subj, msg))}" target="_blank" rel="noopener" data-mqopened>${A.ic('edit', 15)}Fill form<span class="kbd2">F</span></a>
-          <ol class="mqsteps"><li><i>1</i>Opens filled in</li><li><i>2</i>${step2}</li><li><i>3</i>Marked sent automatically</li></ol>`
-        : url ? `<a class="btn primary mqopen" href="${A.esc(url)}" target="_blank" rel="noopener" data-mqopened>${A.ic('ext', 15)}Open the form<span class="kbd2">F</span></a>${hasExt() ? '' : `<div class="extcta">${A.ic('edit', 16)}<div><b>Skip the copy-paste</b><span>With the form filler extension, forms open already filled in and are marked sent automatically.</span></div><button class="btn sm" data-o="extguide">Get it</button></div>`}` : ''}
-      </div>
-      <div class="mqpreview"><div class="mqp-h"><h6>What gets sent</h6>${canFill ? '<span>The extension fills these for you</span>' : '<span>Copy each field into the form</span>'}</div>
+      ${note ? `<div class="mqnote ${it.reason === 'interrupted' ? 'warn' : ''}">${A.ic('alert', 14)}<span>${A.esc(note)}</span></div>` : ''}
+      ${canFill ? `<a class="btn primary mqopen" href="${A.esc(fillUrl(it, c, snd, url, subj, msg))}" target="_blank" rel="noopener" data-mqopened>${A.ic('edit', 15)}Fill form<span class="kbd2">F</span></a><p class="mqhint">Opens the site filled in. Press send there and it’s marked sent here automatically.</p>`
+        : url ? `<a class="btn primary mqopen" href="${A.esc(url)}" target="_blank" rel="noopener" data-mqopened>${A.ic('ext', 15)}Open the form<span class="kbd2">F</span></a>${hasExt() ? '' : `<p class="mqhint">Copy the fields below into the form. <button class="linkbtn" data-o="extguide">Get the form filler</button> to skip the copy-paste.</p>`}` : ''}
+      <div class="mqpreview">
         ${copyRow('Subject', subj)}${copyRow('Message', msg, true)}
-        ${snd ? `<div class="mqp-from"><span class="k">From</span><div class="mqp-grid">${[['First name', snd.first_name], ['Last name', snd.last_name], ['Email', snd.email], ['Phone', snd.phone], ['Company', snd.company], ['Website', snd.website]].filter(x => x[1]).map(([k, v]) => `<button class="mqp-cell" data-copy="${A.esc(v)}" title="Copy ${k.toLowerCase()}"><small>${k}</small><b>${A.esc(v)}</b></button>`).join('')}</div></div>` : `<div class="note">${A.ic('alert')}<div>No sender profile on this campaign yet. Pick one in the campaign's settings.</div></div>`}
+        ${snd ? `<details class="mqp-from" ${canFill ? '' : 'open'}><summary><span class="k">From</span><span class="val">${A.esc(`${snd.first_name} ${snd.last_name}`)} · ${A.esc(snd.email)}${snd.phone ? ' · ' + A.esc(snd.phone) : ''}</span><em>${canFill ? 'Show fields' : 'Fields'}</em></summary>
+          <div class="mqp-grid">${from.map(([k, v]) => `<button class="mqp-cell" data-copy="${A.esc(v)}" title="Copy ${k.toLowerCase()}"><small>${k}</small><b>${A.esc(v)}</b></button>`).join('')}</div></details>`
+          : `<div class="mqnote warn">${A.ic('alert', 14)}<span>No sender profile on this campaign yet. Pick one in the campaign's settings.</span></div>`}
       </div>
     </div>
-    <div class="mqw-f"><button class="btn primary" data-mqact="sent">${A.ic('check', 14)}Mark as sent<span class="kbd2">S</span></button><button class="btn" data-mqact="retry" title="Send back to the robot">${A.ic('retry', 14)}Try robot<span class="kbd2">R</span></button><button class="btn" data-mqact="skip">Skip<span class="kbd2">X</span></button><button class="btn ghost" data-mqact="dnc" style="margin-left:auto;color:var(--bad)">${A.ic('shield', 14)}Do not contact</button></div>`;
+    <div class="mqw-f"><button class="btn primary" data-mqact="sent">${A.ic('check', 14)}Mark as sent<span class="kbd2">S</span></button><button class="btn" data-mqact="skip">Skip<span class="kbd2">X</span></button>
+      <span class="mqw-more"><button class="linkbtn muted" data-mqact="retry" title="Send back to the robot (R)">${A.ic('retry', 13)}Try robot</button><button class="linkbtn muted danger" data-mqact="dnc">${A.ic('shield', 13)}Do not contact</button></span></div>`;
 }
 function mqCall(it, c, lead, script, pos, list) {
   const tel = String(it.phone || '').replace(/[^\d+]/g, '');
