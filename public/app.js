@@ -1051,7 +1051,7 @@ function jobsHTML() {
       ${active ? `<div class="job-prog"><div class="seg" style="height:6px"><i style="width:${Math.max(2, Math.min(100, pct * 100))}%;background:var(--info)"></i></div><span class="num">${progressLine}</span></div>` : ''}
       <div class="jstats num">${stats}</div>
       ${j.status === 'failed' && j.error ? `<div class="job-err">${ic('alert', 15)}<span>${esc(j.error)}</span></div>` : ''}
-      ${!check && j.status === 'done' && j.limit && !j.limit_reached ? `<div class="job-note">${ic('alert', 15)}<span>Searched the whole area and found ${fmt(j.form && j.form !== 'any' ? j.qualified : j.new)} of the ${fmt(j.limit)} you wanted. Try a larger area, more locations or a nearby city.</span></div>` : ''}</div>
+      ${!check && j.status === 'done' && j.limit && !j.limit_reached ? `<div class="job-note">${(() => { const got = j.form && j.form !== 'any' ? j.qualified : j.new, pct = Math.min(100, Math.round(got / j.limit * 100)); return `<div class="jn-meter" role="img" aria-label="${fmt(got)} of ${fmt(j.limit)}"><i style="width:${pct}%"></i></div><div class="jn-text"><b>${fmt(got)} of ${fmt(j.limit)}</b> · that's every match in this area. For more, add nearby locations or loosen the filters.</div>`; })()}</div>` : ''}</div>
       <div class="row job-acts">${actions}</div></div>`;
   }).join('') + (ST.searches.length > 10 ? `<div class="card-h" style="border-top:1px solid var(--line);border-bottom:0;justify-content:center"><button class="btn ghost sm" data-act="allhist">${FS.allHist ? 'Show fewer' : `Show all ${ST.searches.length} searches`}</button></div>` : '');
 }

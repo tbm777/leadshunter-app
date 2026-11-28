@@ -808,8 +808,10 @@ select.fx-mini{min-width:120px;cursor:pointer}
 .dd-pop{border-radius:12px;box-shadow:0 16px 40px rgba(0,0,0,.16);animation:fxsIn .12s ease-out}
 .fxs-sort .fxs-btn{height:32px;min-width:150px;font-size:13px}
 .fxs-sort .fxs-pop{left:auto;right:0}
-.job-note{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--warn) 9%,transparent);font-size:12.5px;max-width:640px}
-.job-note svg{color:var(--warn);flex:none;margin-top:1px}
+.job-note{display:flex;gap:10px;align-items:center;font-size:12.5px;color:var(--muted);max-width:640px;margin-top:2px}
+.jn-meter{flex:none;width:72px;height:5px;border-radius:99px;background:color-mix(in srgb,var(--ink) 9%,transparent);overflow:hidden}
+.jn-meter i{display:block;height:100%;border-radius:inherit;background:var(--ok)}
+.jn-text b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
 
 /* ---------- usage ---------- */
 .ulayout{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
