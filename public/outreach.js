@@ -682,7 +682,7 @@ function mqDetail() {
         : url ? `<a class="btn primary mqopen" href="${A.esc(url)}" target="_blank" rel="noopener" data-mqopened>${A.ic('ext', 15)}Open the form<span class="kbd2">F</span></a>${hasExt() ? '' : `<p class="mqhint">Copy the fields below into the form. <button class="linkbtn" data-o="extguide">Get the form filler</button> to skip the copy-paste.</p>`}` : ''}
       <div class="mqpreview">
         ${copyRow('Subject', subj)}${copyRow('Message', msg, true)}
-        ${snd ? `<details class="mqp-from" ${canFill ? '' : 'open'}><summary><span class="k">From</span><span class="val">${A.esc(`${snd.first_name} ${snd.last_name}`)} · ${A.esc(snd.email)}${snd.phone ? ' · ' + A.esc(snd.phone) : ''}</span><em>${canFill ? 'Show fields' : 'Fields'}</em></summary>
+        ${snd ? `<details class="mqp-from" open><summary><span class="k">From</span><span class="val">${A.esc(`${snd.first_name} ${snd.last_name}`)} · ${A.esc(snd.email)}${snd.phone ? ' · ' + A.esc(snd.phone) : ''}</span><em>${canFill ? 'Show fields' : 'Fields'}</em></summary>
           <div class="mqp-grid">${from.map(([k, v]) => `<button class="mqp-cell" data-copy="${A.esc(v)}" title="Copy ${k.toLowerCase()}"><small>${k}</small><b>${A.esc(v)}</b></button>`).join('')}</div></details>`
           : `<div class="mqnote warn">${A.ic('alert', 14)}<span>No sender profile on this campaign yet. Pick one in the campaign's settings.</span></div>`}
       </div>
@@ -1412,12 +1412,12 @@ function rvRender() {
 }
 document.addEventListener('click', (e) => { const b = e.target.closest('[data-rv]'); if (b && RV.open) rvVerdict(b.dataset.rv); });
 
-/* Manual queue panes: always exactly fill the visible window below them, so the action buttons are never off-screen. */
+/* Manual queue panes fill the window below them once (on open and resize, never on scroll), and scroll inside. */
 function fitMq() {
-  const g = document.querySelector('.mqgrid'); if (!g || innerWidth <= 900) { if (g) g.style.removeProperty('--mqh'); return; }
-  const top = Math.max(76, g.getBoundingClientRect().top);
-  g.style.setProperty('--mqh', Math.max(420, innerHeight - top - 16) + 'px');
+  const g = document.querySelector('.mqgrid'); if (!g) return;
+  if (innerWidth <= 900) { g.style.removeProperty('--mqh'); return; }
+  const h = Math.max(420, Math.round(innerHeight - (g.getBoundingClientRect().top + scrollY) - 20)) + 'px';
+  if (g.style.getPropertyValue('--mqh') !== h) g.style.setProperty('--mqh', h);
 }
-addEventListener('scroll', fitMq, { passive: true });
 addEventListener('resize', fitMq);
-new MutationObserver(() => { if (document.querySelector('.mqgrid')) fitMq(); }).observe(document.documentElement, { childList: true, subtree: true });
+new MutationObserver(() => { const g = document.querySelector('.mqgrid'); if (g && !g.style.getPropertyValue('--mqh')) fitMq(); }).observe(document.documentElement, { childList: true, subtree: true });
