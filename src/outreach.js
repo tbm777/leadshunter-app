@@ -199,8 +199,10 @@ export async function saveCampaign(env, b, id) {
     if (v.mode === 'manual') await env.DB.batch([
       env.DB.prepare("UPDATE searches SET status = 'cancelled', finished_at = ? WHERE kind = 'outreach' AND campaign_id = ? AND status IN ('queued','running')").bind(t, id),
       env.DB.prepare("UPDATE outreach SET status = 'manual', reason = 'manual', updated_at = ? WHERE campaign_id = ? AND status = 'queued'").bind(t, id),
+      env.DB.prepare("UPDATE outreach SET reason = 'manual', updated_at = ? WHERE campaign_id = ? AND status = 'manual' AND reason = 'captcha' AND step = 1").bind(t, id),
     ]);
-    else await env.DB.prepare("UPDATE outreach SET status = 'queued', reason = NULL, updated_at = ? WHERE campaign_id = ? AND status = 'manual' AND reason = 'manual'").bind(t, id).run();
+    // Back to automatic: the robot takes them, except forms already known to have a CAPTCHA (they stay with you).
+    else await env.DB.prepare("UPDATE outreach SET status = CASE WHEN lead_id IN (SELECT id FROM leads WHERE form_status = 1) THEN 'manual' ELSE 'queued' END, reason = CASE WHEN lead_id IN (SELECT id FROM leads WHERE form_status = 1) THEN 'captcha' ELSE NULL END, updated_at = ? WHERE campaign_id = ? AND status = 'manual' AND reason = 'manual'").bind(t, id).run();
   }
   return getCampaign(env, id);
 }
@@ -322,7 +324,7 @@ export async function addLeads(env, id, b) {
     ...out.add.map(l => c.mode === 'manual'
       ? env.DB.prepare("INSERT OR IGNORE INTO outreach (campaign_id, lead_id, status, reason, form_url, created_at, updated_at) VALUES (?, ?, 'manual', 'manual', ?, ?, ?)").bind(id, l.id, l.form_url, t, t)
       : env.DB.prepare("INSERT OR IGNORE INTO outreach (campaign_id, lead_id, status, form_url, created_at, updated_at) VALUES (?, ?, 'queued', ?, ?, ?)").bind(id, l.id, l.form_url, t, t)),
-    ...out.manual.map(l => env.DB.prepare("INSERT OR IGNORE INTO outreach (campaign_id, lead_id, status, reason, form_url, created_at, updated_at) VALUES (?, ?, 'manual', 'captcha', ?, ?, ?)").bind(id, l.id, l.form_url, t, t)),
+    ...out.manual.map(l => env.DB.prepare("INSERT OR IGNORE INTO outreach (campaign_id, lead_id, status, reason, form_url, created_at, updated_at) VALUES (?, ?, 'manual', ?, ?, ?, ?)").bind(id, l.id, c.mode === 'manual' ? 'manual' : 'captcha', l.form_url, t, t)),
   ];
   for (const part of chunk(stmts, 400)) await env.DB.batch(part);
   await assignVariants(env, id);
@@ -425,7 +427,7 @@ export async function listItems(env, url) {
   // Campaign lists keep the order leads were added, so rows don't jump while a run updates them.
   const order = q.get('order') === 'sent' ? 'o.sent_at DESC, o.id DESC' : q.get('order') === 'recent' ? 'o.updated_at DESC, o.id DESC' : 'o.id';
   const limit = Math.min(500, +q.get('limit') || 200), offset = Math.max(0, +q.get('offset') || 0);
-  const sql = `SELECT o.id, o.campaign_id, o.lead_id, o.status, o.reason, o.evidence, o.form_url, o.test_status, o.test_reason, o.test_at, o.shot_at, o.review, o.answers, o.sent_at, o.updated_at, o.step, o.next_at, o.variant, o.sender_id, l.status AS lead_status,
+  const sql = `SELECT o.id, o.campaign_id, o.lead_id, o.status, o.reason, o.evidence, o.form_url, o.test_status, o.test_reason, o.test_at, o.shot_at, o.review, o.answers, o.sent_at, o.updated_at, o.step, o.next_at, o.variant, o.sender_id, l.status AS lead_status, l.form_status, l.captcha,
       l.name, l.website, l.city, l.region, l.postal, l.country, l.phone, l.email, l.category, l.industry_id, c.name AS campaign
     FROM outreach o JOIN leads l ON l.id = o.lead_id JOIN campaigns c ON c.id = o.campaign_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${order} LIMIT ? OFFSET ?`;
