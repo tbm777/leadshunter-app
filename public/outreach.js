@@ -87,6 +87,7 @@ document.addEventListener('click', (e) => {
   const x = e.target.closest('[data-alertx]'); if (!x) return;
   try { const l = JSON.parse(sessionStorage.getItem('lh-alerts-x') || '[]'); l.push(x.dataset.alertx); sessionStorage.setItem('lh-alerts-x', JSON.stringify(l)); } catch { /* ignore */ }
   x.closest('.alert')?.remove();
+  if (A && A.renderNav) { const v = A.currentView(); A.renderNav(A.NAV_ACTIVE[v] || v); }
 });
 function limitsBar() {
   const L = OS.limits; if (!L) return '';
@@ -1311,7 +1312,9 @@ export function install(ctx) {
   document.addEventListener('visibilitychange', () => { if (!document.hidden && A.currentView() === 'manual' && MQ.loaded && !MQ.fresh) { MQ.fresh = true; loadManual().then(() => { MQ.fresh = false; }); loadOutreach(); } });
   window.addEventListener('beforeunload', () => { if (pendingSave) navigator.sendBeacon && flushSave(); });
 }
-export const outreachNav = () => [['campaigns', 'Campaigns', 'campaigns', 0, (OS.alerts || []).length ? (OS.alerts.some(a => a.level === 'bad') ? 'bad' : 'warn') : ''], ['manual', 'Manual queue', 'manual', OS.manual], ['playbook', 'Playbook', 'playbook'], ['senders', 'Sender profiles', 'senders']];
+// Campaigns dot: only for problems with a campaign you haven't dismissed (a full Manual queue already has its own count).
+const navDot = () => { const al = (OS.alerts || []).filter(a => a.key !== 'manual' && !dismissedAlert(a.key)); return al.some(a => a.level === 'bad') ? 'bad' : al.length ? 'warn' : ''; };
+export const outreachNav = () => [['campaigns', 'Campaigns', 'campaigns', 0, navDot()], ['manual', 'Manual queue', 'manual', OS.manual], ['playbook', 'Playbook', 'playbook'], ['senders', 'Sender profiles', 'senders']];
 
 
 /* ------------------------------------------------------------------ review test results (the accuracy answer key) */
