@@ -2,7 +2,7 @@
 :root{
   --bg:#F4F5F7; --surface:#FFFFFF; --surface-2:#F9FAFB; --ink:#14161B; --muted:#5F6674; --faint:#8B919D; --line:#E3E5EA;
   --rail:#111318; --rail-ink:#C9CDD5; --rail-dim:#7D838F; --rail-hi:#1D2028;
-  --accent:#EE6420; --accent-ink:#FFFFFF; --accent-soft:#FDEEE5; --accent-text:#C24E12;
+  --accent:#EE6420; --accent-ink:#FFFFFF; --accent-soft:#FDEEE5; --accent-text:#C24E12; --var:#7C3AED;
   --ok:#1C8F58; --info:#2F66D8; --warn:#B57A00; --bad:#CF3F37; --manual:#7A4FE0; --idle:#9AA0AB;
   --shadow:0 1px 2px rgba(20,22,27,.05),0 4px 16px rgba(20,22,27,.04);
   --f-ui:"Geist",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -11,7 +11,7 @@
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#0D0F13; --surface:#15181E; --surface-2:#1A1D24; --ink:#ECEEF2; --muted:#A0A6B1; --faint:#737A86; --line:#262A33;
   --rail:#08090C; --rail-ink:#C9CDD5; --rail-dim:#6E7480; --rail-hi:#171A21;
-  --accent:#FF7A33; --accent-ink:#1A0D05; --accent-soft:#2B1B11; --accent-text:#FF9A5E;
+  --accent:#FF7A33; --accent-ink:#1A0D05; --accent-soft:#2B1B11; --accent-text:#FF9A5E; --var:#B39BFF;
   --ok:#3CC283; --info:#6A95F5; --warn:#E3A92B; --bad:#F06A61; --manual:#A584F7; --idle:#6E7480;
   --shadow:0 1px 2px rgba(0,0,0,.3); color-scheme:dark}}
 :root[data-theme="dark"]{
@@ -1626,14 +1626,32 @@ input[type=checkbox]:disabled,input[type=radio]:disabled{opacity:.55;cursor:defa
 .ind-adv-body{display:flex;flex-direction:column;gap:8px;margin-top:12px}
 
 /* Merge tag buttons and highlighted tags inside message boxes */
-.vchip{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px 0 7px;border-radius:99px;border:1px solid color-mix(in srgb,var(--info) 22%,transparent);background:color-mix(in srgb,var(--info) 7%,transparent);color:var(--info);font:500 12px/1 var(--f-ui,inherit);cursor:pointer;transition:background .12s,border-color .12s,transform .08s}
-.vchip:hover{background:color-mix(in srgb,var(--info) 13%,transparent);border-color:color-mix(in srgb,var(--info) 40%,transparent)}
+.vchip{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px 0 7px;border-radius:99px;border:1px solid color-mix(in srgb,var(--var) 22%,transparent);background:color-mix(in srgb,var(--var) 7%,transparent);color:var(--var);font:500 12px/1 var(--f-ui,inherit);cursor:pointer;transition:background .12s,border-color .12s,transform .08s}
+.vchip:hover{background:color-mix(in srgb,var(--var) 13%,transparent);border-color:color-mix(in srgb,var(--var) 40%,transparent)}
 .vchip:active{transform:scale(.97)}
-.vchip:focus-visible{outline:2px solid var(--info);outline-offset:2px}
-.vchip-plus{display:inline-grid;place-items:center;width:15px;height:15px;border-radius:50%;background:color-mix(in srgb,var(--info) 16%,transparent);font-size:12px;font-weight:600;line-height:1}
+.vchip:focus-visible{outline:2px solid var(--var);outline-offset:2px}
+.vchip-plus{display:inline-grid;place-items:center;width:15px;height:15px;border-radius:50%;background:color-mix(in srgb,var(--var) 16%,transparent);font-size:12px;font-weight:600;line-height:1}
 .hl-wrap{position:relative;display:block}
 .hl-back{position:absolute;inset:0;overflow:hidden;white-space:pre-wrap;overflow-wrap:break-word;word-wrap:break-word;color:transparent;border-style:solid;border-color:transparent;pointer-events:none;margin:0}
 .hl-wrap .hl-ta{position:relative;background:transparent!important;display:block;width:100%}
-.hl-back mark{color:transparent;border-radius:4px;background:color-mix(in srgb,var(--info) 16%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--info) 28%,transparent)}
+.hl-back mark{color:transparent;border-radius:4px;background:color-mix(in srgb,var(--var) 16%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--var) 28%,transparent)}
 .hl-back mark.hl-bad{background:none;box-shadow:none;text-decoration:underline wavy var(--bad);text-decoration-thickness:1.5px;text-underline-offset:3px;text-decoration-skip-ink:none}
 .hl-wrap:has(textarea.input) .hl-back{background:var(--surface)}
+
+/* Message variants */
+.vtabs{display:flex;gap:8px;padding:12px 20px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
+.vtabs::-webkit-scrollbar{display:none}
+.vtab{flex:none;display:flex;align-items:center;gap:10px;min-width:150px;padding:8px 12px 8px 8px;border-radius:10px;border:1px solid var(--line);background:var(--surface);text-align:left;cursor:pointer;transition:border-color .12s,background .12s,box-shadow .12s}
+.vtab:hover{border-color:color-mix(in srgb,var(--ink) 22%,var(--line))}
+.vtab>i{font-style:normal;flex:none;display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:var(--surface-2);border:1px solid var(--line);font-weight:650;font-size:13px;color:var(--muted)}
+.vtab span{display:flex;flex-direction:column;min-width:0}
+.vtab b{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vtab small{font-size:11.5px;color:var(--faint);white-space:nowrap;font-variant-numeric:tabular-nums}
+.vtab.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 5%,var(--surface));box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 12%,transparent)}
+.vtab.on>i{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.vtab.add{border-style:dashed;color:var(--muted);min-width:0}
+.vtab.add svg{flex:none;margin-left:6px}
+.vtab.add:hover{color:var(--ink);border-style:solid}
+.vtag{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 4px;margin-right:6px;border-radius:5px;background:var(--surface-2);border:1px solid var(--line);font:650 10.5px/1 var(--f-ui);color:var(--muted);font-style:normal;vertical-align:1px}
+.mqvar{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+.varhead{flex-wrap:nowrap;align-items:flex-start}.varhead>div:first-child{flex:1;min-width:0}

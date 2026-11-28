@@ -276,25 +276,36 @@
       .x{margin-left:auto;border:0;background:none;font-size:16px;cursor:pointer;color:#8b919d}
       p{margin:0 0 10px;color:#5f6674}.r{display:flex;gap:6px;flex-wrap:wrap}
       button.b{border:1px solid #e3e5ea;background:#fff;border-radius:8px;padding:6px 10px;font:inherit;font-weight:550;cursor:pointer}
-      button.pr{background:#EE6420;border-color:#EE6420;color:#fff}.ok{color:#1C8F58;font-weight:600}.bad{color:#CF3F37}</style>
-      <div class="p"><div class="h"><i>LH</i>LeadsHunter<button class="x" data-a="close" aria-label="Close">×</button></div>${html}</div>`;
+      button.pr{background:#EE6420;border-color:#EE6420;color:#fff}.ok{color:#1C8F58;font-weight:600}.bad{color:#CF3F37}
+      .who{display:flex;align-items:center;gap:8px;margin:0 0 10px;padding:8px 10px;border-radius:8px;background:#f6f7f9;border:1px solid #eceef2;font-size:12.5px;color:#14161b}
+      .who b{font-weight:600}.who em{font-style:normal;color:#8b919d;display:block;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .who i{flex:none;width:24px;height:24px;border-radius:7px;background:#14161b;color:#fff;display:grid;place-items:center;font-style:normal;font-weight:650;font-size:12px}</style>
+      <div class="p"><div class="h"><i>LH</i>LeadsHunter<button class="x" data-a="close" aria-label="Close">×</button></div>${who(CUR)}${html}</div>`;
     panel.shadowRoot.querySelectorAll('[data-a]').forEach(b => b.addEventListener('click', () => actions[b.dataset.a] && actions[b.dataset.a]()));
   }
   let CUR = null;
+  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // Who this form goes out as: with message variants, different leads are sent from different sender profiles.
+  function who(P) {
+    if (!P || !(P.firstName || P.email)) return '';
+    const name = [P.firstName, P.lastName].filter(Boolean).join(' ');
+    return `<div class="who">${P.variant ? `<i title="Message variant">${esc(P.variant)}</i>` : ''}<div><b>As ${esc(name || P.email)}</b><em>${esc([P.email, P.campaign].filter(Boolean).join(' · '))}</em></div></div>`;
+  }
   const actions = {
     close: () => { panel && panel.remove(); panel = null; },
     refill: () => run(CUR, true),
     captcha: () => { const c = document.querySelector(CAPTCHA); if (c) { c.scrollIntoView({ behavior: 'smooth', block: 'center' }); c.style.outline = '3px solid #7A4FE0'; c.style.outlineOffset = '4px'; } },
     sent: () => report(CUR, 'Marked sent from the extension'),
+    done: () => send({ type: 'closeTab' }),
   };
   async function report(P, evidence) {
     const r = await send({ type: 'markSent', api: P.api, oid: P.oid, token: P.token, evidence });
-    if (r && r.ok) { await send({ type: 'clearPending' }); showPanel(`<p class="ok">✓ Marked as sent in LeadsHunter.</p><p>${evidence ? evidence.replace(/</g, '&lt;') : ''}</p>`); }
+    if (r && r.ok) { await send({ type: 'clearPending' }); showPanel(`<p class="ok">✓ Marked as sent in LeadsHunter.</p>${evidence ? `<p>${esc(evidence)}</p>` : ''}<div class="r"><button class="b pr" data-a="done">Close tab, back to the queue</button></div>`); }
     else showPanel(`<p class="bad">${(r && r.error) || 'Could not update LeadsHunter.'}</p><div class="r"><button class="b" data-a="sent">Try again</button></div>`);
   }
   function watchForSuccess(P) {
     const before = (document.body.innerText.match(new RegExp(SUCCESS.source, 'gi')) || []).length;
-    const onSubmit = () => send({ type: 'setPending', pending: { api: P.api, oid: P.oid, token: P.token, before } });
+    const onSubmit = () => send({ type: 'setPending', pending: { api: P.api, oid: P.oid, token: P.token, before, firstName: P.firstName, lastName: P.lastName, email: P.email, variant: P.variant, campaign: P.campaign } });
     document.addEventListener('submit', onSubmit, true);
     document.addEventListener('click', (e) => { if (e.target.closest('button,[type=submit],[role=button]')) onSubmit(); }, true);
     const iv = setInterval(async () => {

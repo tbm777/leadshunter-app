@@ -85,7 +85,10 @@ function record(M, r, stat, totalMs) {
 export async function runOutreach({ api, JOB, log, isCancelled }) {
   const data = await api('GET', `/api/runner/jobs/${JOB}/outreach`);
   const dryRun = data.mode === 'test';
-  const profile = profileFrom(data.sender, data.campaign);
+  // Each lead goes out as the sender profile of its message variant (follow-ups keep the same profile).
+  const senders = data.senders || {};
+  const senderOf = item => senders[item.sender_id] || data.sender;
+  const profiles = {}; const profileOf = item => (profiles[item.sender_id || 0] ||= profileFrom(senderOf(item), data.campaign));
   const items = [...data.items];
   const M = new Metrics('outreach');
   log(`${dryRun ? 'Testing' : 'Sending'} ${items.length} form${items.length === 1 ? '' : 's'}.`);
@@ -115,7 +118,7 @@ export async function runOutreach({ api, JOB, log, isCancelled }) {
       // Each lead gets the text for the step it's on (follow-ups have their own message).
       const stepText = item.text || (item.step > 1 ? (data.campaign.steps || {})[item.step] : null);   // A/B version or follow-up text
       // No address in the profile: use this business's own city, state and ZIP.
-      const local = localizeProfile(profile, data.sender, item.lead);
+      const local = localizeProfile(profileOf(item), senderOf(item), item.lead);
       const prof = stepText ? { ...local, subject: stepText.subject || local.subject, message: stepText.message || local.message } : local;
       try { r = await withTimeout(attempt(ctx, item, prof, dryRun, stat), ITEM_TIMEOUT); }
       catch { r = { status: 'failed', reason: 'site-too-slow' }; }

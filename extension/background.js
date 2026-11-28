@@ -8,6 +8,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     if (msg.type === 'getPayload') { const r = await S.get(key(tab, 'p')); return reply(r[key(tab, 'p')] || null); }
     if (msg.type === 'setPending') { await S.set({ [key(tab, 'pending')]: { ...msg.pending, until: Date.now() + 5 * 60e3 } }); return reply({ ok: true }); }
     if (msg.type === 'getPending') { const r = await S.get(key(tab, 'pending')); const p = r[key(tab, 'pending')]; return reply(p && p.until > Date.now() ? p : null); }
+    if (msg.type === 'closeTab') { if (tab != null) chrome.tabs.remove(tab); return reply({ ok: true }); }
     if (msg.type === 'clearPending') { await S.remove([key(tab, 'pending'), key(tab, 'p')]); return reply({ ok: true }); }
     if (msg.type === 'markSent') {
       try {

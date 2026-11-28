@@ -78,6 +78,7 @@ async function route(req, env, url, ctx) {
   if (p === '/api/campaigns' && m === 'POST') return O.saveCampaign(env, await body(req));
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)$/))) { if (m === 'GET') return O.getCampaign(env, +mm[1]); if (m === 'PUT') return O.saveCampaign(env, await body(req), +mm[1]); if (m === 'DELETE') return O.deleteCampaign(env, +mm[1], await body(req)); }
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/steps$/)) && m === 'PUT') return O.saveSteps(env, +mm[1], await body(req));
+  if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/variants$/)) && m === 'PUT') return O.saveVariants(env, +mm[1], await body(req));
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/status$/)) && m === 'POST') return O.setCampaignStatus(env, +mm[1], await body(req));
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/leads$/)) && m === 'POST') return O.addLeads(env, +mm[1], await body(req));
   if ((mm = p.match(/^\/api\/campaigns\/(\d+)\/remove$/)) && m === 'POST') return O.removeItems(env, +mm[1], await body(req));
