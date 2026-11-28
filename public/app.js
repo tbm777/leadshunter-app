@@ -506,7 +506,7 @@ function renderSel() {
   const cb = $('#cb-all'); if (cb) cb.className = 'cb ' + (allIn ? 'on' : n ? 'part' : '');
   const inMyList = L$.F.src.size === 1 && String([...L$.F.src][0])[0] === 'l';
   $('#lf-selbar').innerHTML = n ? `<div class="selbar"><b class="num">${fmt(n)} selected</b>${!allIn && m > n ? `<button class="linkbtn" data-act="selall">Select all ${fmt(m)}</button>` : ''}<button class="linkbtn muted" data-act="clearsel">Clear</button>
-    <div class="selacts"><button class="btn sm" data-act="addcamp">${ic('campaigns', 14)}Add to campaign</button><button class="btn sm" data-act="addlist">${ic('leads', 14)}Add to list</button>${inMyList ? `<button class="btn sm ghost" data-act="rmlist">${ic('x', 14)}Remove from list</button>` : ''}
+    <div class="selacts"><button class="btn sm primary" data-act="addcamp">${ic('campaigns', 14)}Add to campaign</button><button class="btn sm" data-act="addlist">${ic('leads', 14)}Add to list</button>${inMyList ? `<button class="btn sm ghost" data-act="rmlist">${ic('x', 14)}Remove from list</button>` : ''}
       <div class="kebab selmore"><button class="iconbtn sm" data-act="selmore" aria-label="More actions" aria-haspopup="menu" title="More">⋯</button>${L$.selMore ? `<div class="menu" role="menu"><button role="menuitem" data-act="export">${ic('download', 14)}Export</button><button role="menuitem" data-act="checkmodal">${ic('globe', 14)}Check websites</button><button role="menuitem" class="danger" data-act="bdnc">${ic('shield', 14)}Do not contact</button><button role="menuitem" class="danger" data-act="bdelask">${ic('trash', 14)}Delete leads</button></div>` : ''}</div></div></div>` : '';
 }
 function renderRows() {
