@@ -21,6 +21,10 @@ export function zoomFor(spacing) {
 
 /** Points covering a circle on a square lattice. Returns [lat, lon, spacingKm]. */
 export function pointsForCircle(lat, lon, rKm) {
+  // A town (up to ~8 km across in radius, about 450,000 people) is covered by one wider search centred on it, reaching
+  // 3 km past its edge: one search returns up to ~20 businesses, and a full one is split by the runner, so small towns
+  // no longer cost five tiny searches that mostly return the same few businesses.
+  if (rKm <= 8) { const S = (rKm + 3) / 0.75; return [[lat, lon, S]]; }
   const S = spacingKm(rKm);
   const n = Math.ceil(rKm / S);
   const dLat = S / KM_PER_DEG;
