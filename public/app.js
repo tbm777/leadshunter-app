@@ -945,8 +945,10 @@ function startProblem() {
 }
 function sumHTML() {
   const { n, pts } = estimate();
-  const avg = pts * 13, f = FS.limit && avg ? Math.min(1, FS.limit / avg) : 1;
-  const maps = Math.round(n * f * 2 / 4), biz = Math.min(avg, FS.limit || avg);
+  // Measured on real runs (whole of Texas, 592 searches in 16 min): about 1.3 new businesses pass the filters per map
+  // search, half of them with a form, and each search costs about 1.55 s of wall time with 4 running at once.
+  const perSearch = 1.3 * (FS.depth === 2 && FS.form !== 'any' ? 0.5 : 1), f = FS.limit && n ? Math.min(1, FS.limit / (n * perSearch)) : 1;
+  const maps = Math.round(n * f * 1.55), biz = Math.round(n * f * 1.3);
   const site = FS.depth >= 1 || FS.emails ? Math.round(biz * (FS.depth === 2 ? 1.8 : 1) * (FS.emails ? 1.3 : 1) / 20) : 0;
   const hi = Math.round(pts * 18), est = FS.limit ? Math.min(hi, FS.limit) : hi;
   const name = FS.nameEdited ? FS.name : autoName();
