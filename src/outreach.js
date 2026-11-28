@@ -886,7 +886,8 @@ export async function healthAlerts(env) {
     const since = Math.max(c.last_sent || 0, c.last_job || 0, c.updated_at || 0);
     if (t - since > 60 * 60000) out.push({ level: 'warn', key: 'stall-' + c.id, text: `“${c.name}” is in its sending hours with ${c.queued} leads waiting, but nothing has gone out for over an hour.`, href: `#campaign/${c.id}` });
   }
-  const manual = (await env.DB.prepare("SELECT COUNT(*) AS n FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE o.status = 'manual' AND c.status != 'archived'").first()).n;
+  // Same count as the Manual queue: only launched campaigns put work there (drafts and paused ones wait).
+  const manual = (await env.DB.prepare("SELECT COUNT(*) AS n FROM outreach o JOIN campaigns c ON c.id = o.campaign_id WHERE o.status = 'manual' AND c.status = 'active'").first()).n;
   if (manual >= 25) out.push({ level: 'warn', key: 'manual', text: `${manual} forms are waiting in your Manual queue.`, href: '#manual' });
   const paused = (await env.DB.prepare("SELECT id, name, v FROM campaigns c JOIN meta m ON m.k = 'autopause:' || c.id WHERE c.status = 'paused'").all()).results;
   for (const p of paused) { let why = ''; try { why = JSON.parse(p.v).why; } catch { /* plain */ } out.push({ level: 'bad', key: 'autopause-' + p.id, text: `“${p.name}” was paused automatically: ${why}`, href: `#campaign/${p.id}` }); }
